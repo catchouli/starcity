@@ -13,6 +13,7 @@ mod roads;
 mod shader_test;
 mod sim;
 mod terrain;
+mod trains;
 mod ui;
 
 #[cfg(not(target_arch = "wasm32"))]

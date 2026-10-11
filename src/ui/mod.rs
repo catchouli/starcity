@@ -12,6 +12,7 @@ pub enum Tool {
     RemoveRoad,
     Rail,
     Signal,
+    Train,
     RemoveRail,
     Bulldoze,
 }
@@ -24,6 +25,7 @@ impl Tool {
             Tool::RemoveRoad => "Remove road",
             Tool::Rail => "Build railway",
             Tool::Signal => "Path signal",
+            Tool::Train => "Place train",
             Tool::RemoveRail => "Remove railway",
             Tool::Bulldoze => "Bulldoze",
         }
@@ -38,6 +40,7 @@ impl Tool {
             Tool::Signal => {
                 "Click track to place a path signal facing you; click again to turn it round, right-click to remove"
             }
+            Tool::Train => "Click plain track to place a train heading away from you. Space pauses trains.",
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
         }
@@ -53,6 +56,7 @@ impl Tool {
             }
             Tool::Rail => icon_rail(p, r),
             Tool::Signal => icon_signal(p, r),
+            Tool::Train => icon_train(p, r),
             Tool::RemoveRail => {
                 icon_rail(p, r);
                 icon_cross(p, r);
@@ -123,7 +127,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad]),
-        ("Rail", &[Tool::Rail, Tool::Signal, Tool::RemoveRail]),
+        ("Rail", &[Tool::Rail, Tool::Signal, Tool::Train, Tool::RemoveRail]),
     ];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -251,6 +255,30 @@ fn icon_bulldozer(p: &Painter, r: Rect) {
     );
     p.rect_filled(Rect::from_min_max(at(0.12, 0.62), at(0.22, 0.7)), 0.0, dark);
     p.rect_filled(Rect::from_min_max(at(0.2, 0.72), at(0.95, 1.0)), 2.0, dark);
+}
+
+fn icon_train(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    let green = Color32::from_rgb(0x23, 0x69, 0x3c);
+    p.rect_filled(Rect::from_min_max(at(0.05, 0.35), at(0.7, 0.75)), 0.0, green);
+    p.rect_filled(
+        Rect::from_min_max(at(0.55, 0.15), at(0.95, 0.75)),
+        0.0,
+        Color32::from_rgb(0x19, 0x4b, 0x2d),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.62, 0.22), at(0.88, 0.42)),
+        0.0,
+        Color32::from_rgb(0x90, 0xc8, 0xf0),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.12, 0.12), at(0.24, 0.35)),
+        0.0,
+        Color32::from_gray(40),
+    );
+    for x in [0.2, 0.45, 0.78] {
+        p.circle_filled(at(x, 0.82), r.width() * 0.1, Color32::from_gray(30));
+    }
 }
 
 fn icon_island(p: &Painter, r: Rect) {

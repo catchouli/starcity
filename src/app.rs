@@ -7,6 +7,7 @@ use crate::render::{BoxInstance, CloudState, Highlight, HighlightKind, RenderSet
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
+use crate::trains::{SpawnError, Trains};
 use crate::ui::{self, Tool, UiState, win95};
 use crate::{rails, roads};
 use eframe::egui;
@@ -51,7 +52,13 @@ pub struct StarcityApp {
     roads: Layer,
     rails: Layer,
     signals: rails::Signals,
-    signals_changed: bool,
+    trains: Trains,
+    /// Signals or trains changed, so the prop boxes need rebuilding.
+    props_changed: bool,
+    trains_moving: bool,
+    paused: bool,
+    /// A short-lived status bar message and when it expires.
+    message: Option<(String, f64)>,
     /// The road or track being dragged out, shown as a preview.
     plan: Plan,
     /// Which network `plan` is for.
@@ -109,7 +116,11 @@ impl StarcityApp {
             roads: Layer::new(1, 1),
             rails: Layer::new(1, 1),
             signals: rails::Signals::default(),
-            signals_changed: false,
+            trains: Trains::new(1),
+            props_changed: false,
+            trains_moving: false,
+            paused: false,
+            message: None,
             plan: Plan::default(),
             plan_network: Network::Road,
             infra_dirty: None,
@@ -180,7 +191,12 @@ impl StarcityApp {
             ] {
                 self.signals.click(&self.rails, t, forward);
             }
-            self.signals_changed = true;
+            for (t, forward) in [((c - 6, c + 14), true), ((c - 10, c + 17), false)] {
+                if let Err(e) = self.trains.spawn(&self.rails, t, forward, 3) {
+                    eprintln!("demo train at {t:?}: {e:?}");
+                }
+            }
+            self.props_changed = true;
             // A road being dragged, to show the preview.
             self.drag_start = Some((c - 10, c + 4));
             self.last_hover_tile = Some((c - 4, c + 10));
@@ -206,7 +222,8 @@ impl StarcityApp {
         self.roads = Layer::new(self.world.size_x, self.world.size_z);
         self.rails = Layer::new(self.world.size_x, self.world.size_z);
         self.signals = rails::Signals::default();
-        self.signals_changed = true;
+        self.trains = Trains::new(self.params.seed as u64);
+        self.props_changed = true;
         self.plan = Plan::default();
         self.infra_dirty = None;
         self.drag_start = None;
@@ -295,15 +312,32 @@ impl StarcityApp {
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
         let tool = self.ui.tool;
+        if let (Tool::Train, Some(t), true) = (tool, self.hover_tile, response.clicked_by(primary)) {
+            // Trains set off away from the camera, like signals face it.
+            let piece = self.rails.get(t.0, t.1);
+            let forward = piece == 0 || {
+                let ((fx, fz), (tx, tz)) = rails::piece_ends(piece);
+                let view = self.camera.forward();
+                (tx - fx) * view.x + (tz - fz) * view.z >= 0.0
+            };
+            let now = ctx.input(|i| i.time);
+            match self.trains.spawn(&self.rails, t, forward, 3) {
+                Ok(_) => self.props_changed = true,
+                Err(SpawnError::NoTrack) => self.show_message("Trains go on track", now),
+                Err(SpawnError::Junction) => self.show_message("Place trains on plain track, not junctions", now),
+                Err(SpawnError::TooShort) => self.show_message("Not enough track behind here for a train", now),
+                Err(SpawnError::Occupied) => self.show_message("There's already a train there", now),
+            }
+        }
         if let (Tool::Signal, Some(t)) = (tool, self.hover_tile) {
             if response.clicked_by(primary) {
                 // A new signal faces the camera: trains it controls travel away from the viewer.
                 let ((fx, fz), (tx, tz)) = rails::piece_ends(self.rails.get(t.0, t.1));
                 let view = self.camera.forward();
                 let forward = (tx - fx) * view.x + (tz - fz) * view.z >= 0.0;
-                self.signals_changed |= self.signals.click(&self.rails, t, forward);
+                self.props_changed |= self.signals.click(&self.rails, t, forward);
             } else if response.clicked_by(egui::PointerButton::Secondary) {
-                self.signals_changed |= self.signals.remove(t);
+                self.props_changed |= self.signals.remove(t);
             }
         }
         if !matches!(
@@ -393,26 +427,38 @@ impl StarcityApp {
     }
 
     fn clear(&mut self, a: (i32, i32), b: (i32, i32), what: Clear) -> Changes {
-        self.sim
-            .clear(&mut self.world, &mut self.roads, &mut self.rails, a, b, what)
+        let changes = self
+            .sim
+            .clear(&mut self.world, &mut self.roads, &mut self.rails, a, b, what);
+        // Trains go with the track under them.
+        let tiles: std::collections::HashSet<_> = changes.infra.iter().copied().collect();
+        if what != Clear::Roads && self.trains.remove_on_tiles(&tiles) {
+            self.props_changed = true;
+        }
+        changes
     }
 
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
         self.remesh_tiles(rs, &changes.terrain);
         self.mark_infra(&changes.infra);
-        self.update_signals(rs);
+        self.update_props(rs);
     }
 
-    /// Rebuilds the signal props if signals (or the track under them) changed.
-    fn update_signals(&mut self, rs: &RenderState) {
+    /// Rebuilds the prop boxes if signals, trains or the track under them changed.
+    fn update_props(&mut self, rs: &RenderState) {
         if self.signals.prune(&self.rails) {
-            self.signals_changed = true;
+            self.props_changed = true;
         }
-        if std::mem::take(&mut self.signals_changed) {
-            let boxes = signal_boxes(&self.world, &self.signals);
-            self.renderer.set_boxes(&rs.device, &boxes);
+        if std::mem::take(&mut self.props_changed) {
+            let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
+            boxes.extend(train_boxes(&self.world, &self.trains));
+            self.renderer.set_boxes(&rs.device, &rs.queue, &boxes);
             self.scene_dirty = true;
         }
+    }
+
+    fn show_message(&mut self, text: &str, now: f64) {
+        self.message = Some((text.to_string(), now + 3.0));
     }
 
     /// Marks tiles whose infrastructure texels need re-uploading.
@@ -487,6 +533,9 @@ impl StarcityApp {
             }
             if i.key_pressed(Key::G) {
                 self.ui.grid = !self.ui.grid;
+            }
+            if i.key_pressed(Key::Space) {
+                self.paused = !self.paused;
             }
             if i.key_pressed(Key::Home) {
                 self.ui.go_home = true;
@@ -715,6 +764,12 @@ impl StarcityApp {
                 Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
                 Some(Blocked::Signal) => "There's a signal in the way: remove it first".to_string(),
             }
+        } else if let Some((text, _)) = self.message.as_ref().filter(|(_, until)| *until > ui.input(|i| i.time)) {
+            text.clone()
+        } else if self.paused && !self.trains.list.is_empty() {
+            "Paused (Space to resume)".to_string()
+        } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {
+            "Click plain track to place a train".to_string()
         } else if let (Tool::Signal, Some(t)) = (self.ui.tool, self.hover_tile) {
             match self.signals.click_effect(&self.rails, t) {
                 rails::SignalClick::Place => "Click to place a signal facing you".to_string(),
@@ -779,6 +834,11 @@ impl eframe::App for StarcityApp {
                 self.last_cloud_render = now;
                 self.scene_dirty = true;
             }
+        }
+        let frame_dt = ((now - self.last_time) as f32).min(0.1);
+        self.trains_moving = !self.paused && self.trains.update(frame_dt, &self.rails, &self.signals);
+        if self.trains_moving {
+            self.props_changed = true;
         }
         let changed = self.sim.advance(&mut self.world, (now - self.last_time) as f32);
         self.last_time = now;
@@ -845,7 +905,7 @@ impl eframe::App for StarcityApp {
         // Keep frames coming only while something is moving (including egui's
         // smoothed scrolling, which spreads one wheel tick over several frames).
         let keys_held = self.physical_keys.any_down() || ctx.input(|i| !i.keys_down.is_empty());
-        if keys_held || scene_changed || self.scene_dirty {
+        if keys_held || scene_changed || self.scene_dirty || self.trains_moving {
             ctx.request_repaint();
         } else if clouds_visible {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLOUD_FRAME_SECONDS));
@@ -866,7 +926,7 @@ fn is_arrow(key: egui::Key) -> bool {
 
 /// Props for the signals: a post beside the track on the right of the way
 /// it faces, a head, and a lamp facing oncoming trains.
-fn signal_boxes(world: &World, signals: &rails::Signals) -> Vec<BoxInstance> {
+fn signal_boxes(world: &World, signals: &rails::Signals, trains: &Trains) -> Vec<BoxInstance> {
     let mut boxes = Vec::new();
     for (&(x, z), sig) in &signals.by_tile {
         let ((fx, fz), (tx, tz)) = rails::piece_ends(sig.piece);
@@ -895,9 +955,79 @@ fn signal_boxes(world: &World, signals: &rails::Signals) -> Vec<BoxInstance> {
                 center: [lamp.x, ground + 1.04, lamp.y],
                 half: [0.012, 0.065, 0.065],
                 yaw,
-                color: [60, 235, 90, 255],
+                // Red while a train holds the block, green when it's free.
+                color: if trains.is_owned((x, z), sig.piece) {
+                    [240, 50, 40, 255]
+                } else {
+                    [60, 235, 90, 255]
+                },
             },
         ]);
+    }
+    boxes
+}
+
+/// Props for the trains: each car is a body on an undercarriage; the
+/// locomotive has a cab and chimney, carriages have a roof. Wrecks go dark.
+fn train_boxes(world: &World, trains: &Trains) -> Vec<BoxInstance> {
+    let mut boxes = Vec::new();
+    for train in &trains.list {
+        let wreck = train.crashed.is_some();
+        let paint = |c: [u8; 3]| if wreck { [55, 50, 46, 0] } else { [c[0], c[1], c[2], 0] };
+        for (i, (front, back)) in train.car_ends().into_iter().enumerate() {
+            let centre = (front + back) / 2.0;
+            let along = (front - back).normalize_or_zero();
+            let yaw = (-along.y).atan2(along.x);
+            let ground = (world.height_at(front.x, front.y) + world.height_at(back.x, back.y)) / 2.0;
+            let at = |offset: f32, y: f32| {
+                let p = centre + along * offset;
+                [p.x, ground + y, p.y]
+            };
+            let half_len = crate::trains::CAR_LENGTH / 2.0;
+            boxes.push(BoxInstance {
+                center: at(0.0, 0.07),
+                half: [half_len - 0.05, 0.04, 0.11],
+                yaw,
+                color: paint([30, 30, 32]),
+            });
+            if i == 0 {
+                boxes.extend([
+                    BoxInstance {
+                        center: at(0.05, 0.22),
+                        half: [half_len - 0.08, 0.11, 0.13],
+                        yaw,
+                        color: paint([35, 105, 60]),
+                    },
+                    BoxInstance {
+                        center: at(-0.24, 0.42),
+                        half: [0.13, 0.1, 0.14],
+                        yaw,
+                        color: paint([25, 75, 45]),
+                    },
+                    BoxInstance {
+                        center: at(0.25, 0.4),
+                        half: [0.04, 0.07, 0.04],
+                        yaw,
+                        color: paint([30, 30, 32]),
+                    },
+                ]);
+            } else {
+                boxes.extend([
+                    BoxInstance {
+                        center: at(0.0, 0.25),
+                        half: [half_len - 0.03, 0.14, 0.14],
+                        yaw,
+                        color: paint([135, 40, 38]),
+                    },
+                    BoxInstance {
+                        center: at(0.0, 0.41),
+                        half: [half_len - 0.03, 0.02, 0.15],
+                        yaw,
+                        color: paint([110, 110, 115]),
+                    },
+                ]);
+            }
+        }
     }
     boxes
 }

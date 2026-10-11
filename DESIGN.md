@@ -219,7 +219,8 @@ Terrain generation was never really started: it only produced random noise for o
 - Settlement seeding and naming, basic outward growth along roads.
 
 **M6 — Trains & stations**
-- Stations, trains with block-reservation signalling, passengers between towns.
+- Trains ✅: placed with the train tool; follow the track graph (edge midpoints, at most 45° per step); accelerate and brake to stop points; reverse at dead ends; reserve paths through path signals and wait when blocked; crash head-on on unsignalled track; wrecks are cleared after a few seconds. Space pauses. They wander (random at junctions) until stations and orders exist.
+- Next: stations, train orders (go to A, load, go to B), passengers between towns.
 
 **M7 — Industries & economy**
 - Industry spawning, cargo chains, growth feedback.

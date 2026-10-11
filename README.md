@@ -40,6 +40,8 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | Esc | Back to the pointer tool |
 | Home / island button | Centre the view on the island |
 | Signal tool | Click track to place a signal facing you, click again to turn it round, right-click to remove |
+| Train tool | Click plain track to place a train heading away from you |
+| Space | Pause / resume trains |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
 
 ## Development
@@ -58,7 +60,9 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/ui/`: Win95-style theme, windows, menu bar, toolbar and status bar
 - `src/picking.rs`: mouse ray to terrain tile
 - `src/sim.rs`: fixed-tick simulation (bulldozing, grass regrowth)
-- `src/roads.rs`: road pieces and drag planning
+- `src/network.rs`: shared road/rail layers, edges and build plans
+- `src/roads.rs`, `src/rails.rs`: road and track pieces, drag planning, signals
+- `src/trains.rs`: train movement, path-signal reservations and crashes
 - `src/clouds.rs`: tiling voxel cloud field
 - `loader.mjs`: download progress for the loading dialog in `index.html`
 - `tools/process_textures.sh`: downscales source textures into `assets/`

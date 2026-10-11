@@ -309,16 +309,27 @@ impl SceneRenderer {
         );
     }
 
-    /// Replaces the set of instanced boxes.
-    pub fn set_boxes(&mut self, device: &wgpu::Device, boxes: &[BoxInstance]) {
-        self.boxes = (!boxes.is_empty()).then(|| {
-            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    /// Replaces the set of instanced boxes. Reuses the buffer when it's big
+    /// enough, since trains update this every frame.
+    pub fn set_boxes(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, boxes: &[BoxInstance]) {
+        let bytes: &[u8] = bytemuck::cast_slice(boxes);
+        let fits = self
+            .boxes
+            .as_ref()
+            .is_some_and(|(buf, _)| buf.size() >= bytes.len() as u64);
+        if !fits && !boxes.is_empty() {
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("boxes"),
-                contents: bytemuck::cast_slice(boxes),
-                usage: wgpu::BufferUsages::VERTEX,
+                size: (bytes.len() as u64).next_power_of_two(),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-            (buf, boxes.len() as u32)
-        });
+            self.boxes = Some((buf, 0));
+        }
+        if let Some((buf, n)) = &mut self.boxes {
+            queue.write_buffer(buf, 0, bytes);
+            *n = boxes.len() as u32;
+        }
     }
 
     /// Replaces the cloud field's chunk meshes.
@@ -531,7 +542,7 @@ impl SceneRenderer {
                 pass.set_pipeline(&self.pipelines.ocean_floor);
                 pass.draw(0..6, 0..4);
             }
-            if let Some((buf, n)) = &self.boxes {
+            if let Some((buf, n)) = self.boxes.as_ref().filter(|(_, n)| *n > 0) {
                 pass.set_pipeline(&self.pipelines.boxes);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..36, 0..*n);

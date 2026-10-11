@@ -1,6 +1,7 @@
 //! Native-only development hooks, driven by environment variables:
 //!
 //! - `STARCITY_SCREENSHOT=out.png`: render a few frames, save a screenshot, exit.
+//!   `STARCITY_SHOT_FRAME=300` waits that many frames first (default 10).
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
 //! - `STARCITY_ZOOM=30`: initial zoom (visible height in tiles at the focus).
@@ -11,6 +12,7 @@ use eframe::egui;
 pub struct DevTools {
     screenshot_to: Option<String>,
     frames: u32,
+    shot_frame: u32,
     requested: bool,
 }
 
@@ -19,6 +21,10 @@ impl DevTools {
         DevTools {
             screenshot_to: std::env::var("STARCITY_SCREENSHOT").ok(),
             frames: 0,
+            shot_frame: std::env::var("STARCITY_SHOT_FRAME")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
             requested: false,
         }
     }
@@ -43,7 +49,7 @@ impl DevTools {
         self.frames += 1;
         ctx.request_repaint();
         // Give the UI a few frames to lay out before capturing.
-        if self.frames == 10 && !self.requested {
+        if self.frames >= self.shot_frame && !self.requested {
             self.requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
