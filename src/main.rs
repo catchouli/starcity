@@ -2,6 +2,7 @@ mod app;
 mod camera;
 mod render;
 mod terrain;
+mod ui;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {

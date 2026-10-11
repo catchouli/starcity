@@ -108,7 +108,18 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - Individual cars driving on roads, people commuting between towns.
 - Start abstract (cargo and passenger counts moving between stations) and add visible agents once the core loop works.
 
-## 8. Tech stack
+## 8. UI
+
+- **Windows 95 look**: grey (#c0c0c0) surfaces, 2px bevelled borders (light top-left, dark bottom-right; pressed buttons invert), navy title bars with white text, square corners, no transparency, and a pixel-style sans font.
+- **Toolbar along the top**, like a Win95 app: a menu bar, then a row of bevelled icon buttons grouped into sections. Picking a tool makes it the active cursor tool; Esc or right-click returns to the pointer.
+- First tool sections:
+  - **Roads**: draw road. Drag from a start tile; the road follows a straight line along an axis, or a 45° diagonal, depending on the drag direction. Release to build. Plus a remove-road tool.
+  - **Rail**: draw track (same straight or 45° dragging), place signal, remove.
+  - Later: terraform (raise, lower, level, dig), stations, demolish.
+- Dialogs and info panels (town info, train orders) are Win95 windows inside the game view.
+- The debug window (F3) stays separate from the game UI.
+
+## 9. Tech stack
 
 | Concern | Choice | Notes |
 |---|---|---|
@@ -124,13 +135,17 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 
 **Why not Bevy?** It's a real option (ECS, UI, asset pipeline), but it brings large wasm binaries and long compile times. The core of this game is custom voxel meshing and a custom simulation, so plain `wgpu` keeps things lean and fast on the web. Revisit if the UI/ECS work gets heavy.
 
-### 8.1 Web performance notes
+### 9.1 Web performance notes
 
 - **Meshing:** greedy meshing (merge coplanar faces) for full cubes, plus dedicated geometry for slope shapes. Only re-mesh dirty chunks.
 - **Threads:** wasm threads need `SharedArrayBuffer`, which requires COOP/COEP headers. GitHub Pages can't set those. The workaround is `coi-serviceworker`. Plan to stay single-threaded at first and keep per-frame work bounded, e.g. a meshing budget per frame.
-- Keep wasm size down: `opt-level = "z"` or `"s"`, LTO, and `wasm-opt`.
+- Keep wasm size down: LTO, `wasm-opt`, size-optimised dependencies, and only the eframe features we use. The current bundle is ~6.9 MB (3.2 MB gzipped). Most of it is the WebGL2 fallback (wgpu-core plus naga translating WGSL to GLSL). Going WebGPU-only would shrink it a lot but exclude older browsers.
+- **Render on demand**: the 3D view is only re-rendered when the camera or world changes, so an idle game costs almost nothing. When the simulation runs, it should still only re-render chunks or objects that changed.
+- **Compact vertices**: 8 bytes (u16 x, y, z, material and flags). Normals are derived in the fragment shader, and one quad index buffer is shared by all chunks.
+- **Greedy meshing** of flat tops and water. Use F1 (wireframe) to see the merged quads.
+- **Meshing cost**: a 256² map meshes in ~11 ms natively and ~22 ms in wasm. Columns skip their buried solid core, and edits only re-mesh the affected chunks.
 
-### 8.2 Camera (carried over from tyke)
+### 9.2 Camera (carried over from tyke)
 
 tyke's best piece is its camera. It should be ported as-is:
 
@@ -138,57 +153,63 @@ tyke's best piece is its camera. It should be ported as-is:
 - A **mixed perspective/orthographic projection**: a dolly zoom tweens the FOV toward 0 while keeping the screen width at the focal point constant, then snaps to true ortho (toggled with `R`).
 - WASD pans relative to the camera's yaw, Q/E rotate, the scroll wheel zooms (changes distance), and left-drag orbits.
 
-### 8.3 Assets
+### 9.3 Assets
 
 - Source materials (4K PBR sets from ambientCG) live outside the repo in `~/assets/`. Only small processed versions are committed, in `assets/`.
 - The game is viewed zoomed out, one tile at a time, so per-block textures are downscaled heavily (e.g. 4K → 128–256px). Normal and roughness maps are optional for now.
 - Whenever an asset is added, `CREDITS.md` gets a line with its source URL, author and license.
 
-## 9. Relationship to `tyke`
+## 10. Relationship to `tyke`
 
 `tyke/` (Haskell, 2016: SDL2 + LambdaCube + imgui + reactive-banana) is kept here only as a reference and will be removed. What it contains:
 
 - `Game/Terrain/Data.hs`: a chunk is `dimensions + Vector Bool`, indexed `x + dx*(y + dy*z)`.
 - `Game/Terrain/Rendering.hs`: a naive per-block mesher that emits a face wherever the neighbour is air. It uses a two-tile texture atlas (side/top) from `grass_block.png`.
-- `Game/Simulation/Camera/MixedCamera.hs`: the camera described in §8.2.
+- `Game/Simulation/Camera/MixedCamera.hs`: the camera described in §9.2.
 - `pipelines/blocks.lc`: a simple textured, Lambert-lit shader (light dir (−0.5, 1, 1), 0.1 ambient).
 
 Terrain generation was never really started: it only produced random noise for one 10×1×10 chunk. So the Rust "port" is really a rewrite that keeps tyke's data layout, mesher idea, shader and camera.
 
-## 10. Roadmap
+## 11. Roadmap
 
-**M0 — Skeleton**
+**M0 — Skeleton** ✅
 - Cargo workspace, `wgpu` + `winit` window, clear-colour frame running both natively and in the browser.
 - GitHub Actions: build wasm, deploy to GitHub Pages.
 
-**M1 — Voxel engine (tyke port)**
+**M1 — Voxel engine (tyke port)** ✅
 - Chunk storage, face-culled mesher (then greedy), textured, lit blocks.
 - Port the mixed ortho/perspective camera.
 - egui debug overlay (FPS, camera info).
 
-**M2 — Terrain generation**
+**M2 — Terrain generation** ✅ (except the settlement-site overlay)
 - Corner heightmap → slope shapes → voxels.
 - Slope geometry in the mesher.
 - Live-tunable generation parameters and seed in egui. Iterate until the hills look right.
 - Overlay showing the flatness score and candidate settlement sites.
 
-**M3 — Terraforming**
-- Tile picking (mouse ray → tile/corner).
-- Raise, lower, level, dig and fill, with incremental re-meshing.
+**M3 — Win95 UI, roads & rail drawing**
+- Win95 egui theme and top toolbar (§8).
+- Tile picking (mouse ray → tile/corner) and a hover highlight.
+- Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles.
+- Rail tool: drag to draw track, and place signals.
+- Incremental re-meshing of edited chunks.
 
-**M4 — Roads & settlements**
-- Auto-connecting roads, settlement seeding and naming, basic outward growth.
+**M4 — Terraforming**
+- Raise, lower, level, dig and fill.
 
-**M5 — Rail & stations**
-- Track placement, stations, trains moving passengers between towns.
+**M5 — Settlements**
+- Settlement seeding and naming, basic outward growth along roads.
 
-**M6 — Industries & economy**
+**M6 — Trains & stations**
+- Stations, trains with block-reservation signalling, passengers between towns.
+
+**M7 — Industries & economy**
 - Industry spawning, cargo chains, growth feedback.
 
 **Later**
 - Visible cars and people, merging conurbations, save/load, bridges, rivers.
 
-## 11. Open questions
+## 12. Open questions
 
 1. ~~Height step~~: half a tile (§3.2).
 2. ~~Rail semantics~~: single bidirectional track per tile with block-reservation signals (§4.2–4.3).
@@ -196,3 +217,4 @@ Terrain generation was never really started: it only produced random noise for o
 4. Map size target: 256², 512², 1024² tiles? This affects chunk count and memory on the web.
 5. Visual style: textured blocks like tyke/Minecraft, or flat-shaded low-poly?
 6. Name: "Starcity" is just the directory name for now.
+7. Diagonal roads and rail: a 45° drag could make a staircase of ordinary tiles (zig-zag), or use dedicated diagonal pieces (TTD-style half-tile track). Staircase is simpler and suits auto-connecting roads; true diagonals look nicer for rail.

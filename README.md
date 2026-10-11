@@ -1,5 +1,7 @@
 # Starcity
 
+**▶ Play in your browser: https://catchouli.github.io/starcity/**
+
 A transport tycoon / city-growth game on voxel terrain, in Rust, playable in the browser.
 See [DESIGN.md](DESIGN.md) for the plan and [CREDITS.md](CREDITS.md) for asset licenses.
 
@@ -32,6 +34,7 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 | F1 | Wireframe (shows the greedy-meshed quads) |
 | G | Tile grid |
 | F3 | Debug window (stats, render settings, terrain generator) |
+| Esc | Back to the pointer tool |
 
 ## Layout
 
@@ -39,4 +42,5 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 - `src/render.rs`, `src/terrain.wgsl`: wgpu renderer (WebGPU, WebGL2 fallback)
 - `src/camera.rs`: orbit camera with perspective↔ortho dolly zoom
 - `src/app.rs`: eframe app, input and debug UI
+- `src/ui/`: Win95-style theme, menu bar, toolbar and status bar
 - `tools/process_textures.sh`: downscales source textures into `assets/`

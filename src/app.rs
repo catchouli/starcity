@@ -2,6 +2,7 @@ use crate::camera::Camera;
 use crate::render::{RenderSettings, SceneRenderer};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{World, mesh};
+use crate::ui::{self, Tool, UiState, win95};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use glam::Vec3;
@@ -20,7 +21,7 @@ pub struct StarcityApp {
     mesh_ms: f32,
     frame_ms: f32,
     scene_renders: u64,
-    show_debug: bool,
+    ui: UiState,
 }
 
 impl StarcityApp {
@@ -29,6 +30,7 @@ impl StarcityApp {
             .wgpu_render_state
             .as_ref()
             .expect("starcity requires the wgpu renderer");
+        win95::apply(&cc.egui_ctx);
         let params = GenParams::default();
         let mut app = StarcityApp {
             world: World::new(1, 1, 1, 0),
@@ -41,7 +43,14 @@ impl StarcityApp {
             mesh_ms: 0.0,
             frame_ms: 0.0,
             scene_renders: 0,
-            show_debug: true,
+            ui: UiState {
+                tool: Tool::Pointer,
+                wireframe: false,
+                grid: true,
+                ortho: false,
+                show_debug: false,
+                show_about: false,
+            },
             params,
         };
         app.regenerate(rs);
@@ -74,18 +83,19 @@ impl StarcityApp {
         use egui::Key;
         ctx.input(|i| {
             if i.key_pressed(Key::F1) {
-                self.settings.wireframe = !self.settings.wireframe;
-                self.scene_dirty = true;
+                self.ui.wireframe = !self.ui.wireframe;
             }
             if i.key_pressed(Key::F3) {
-                self.show_debug = !self.show_debug;
+                self.ui.show_debug = !self.ui.show_debug;
             }
             if i.key_pressed(Key::R) {
-                self.camera.want_ortho = !self.camera.want_ortho;
+                self.ui.ortho = !self.ui.ortho;
             }
             if i.key_pressed(Key::G) {
-                self.settings.grid = !self.settings.grid;
-                self.scene_dirty = true;
+                self.ui.grid = !self.ui.grid;
+            }
+            if i.key_pressed(Key::Escape) {
+                self.ui.tool = Tool::Pointer;
             }
 
             let axis = |neg: &[Key], pos: &[Key]| {
@@ -113,9 +123,10 @@ impl StarcityApp {
             self.camera.orbit(-delta.x * 0.006, -delta.y * 0.006);
             self.scene_dirty = true;
         }
-        if response.dragged_by(egui::PointerButton::Primary)
-            || response.dragged_by(egui::PointerButton::Middle)
-        {
+        // Left-drag pans only with the pointer tool; other tools will use it to build.
+        let pan_button = response.dragged_by(egui::PointerButton::Middle)
+            || (self.ui.tool == Tool::Pointer && response.dragged_by(egui::PointerButton::Primary));
+        if pan_button {
             let units_per_point = self.camera.screen_width / response.rect.width();
             let foreshorten = (-self.camera.pitch).sin().max(0.2);
             self.camera.pan(
@@ -150,7 +161,7 @@ impl StarcityApp {
 
     fn debug_window(&mut self, ctx: &egui::Context, rs: &RenderState) {
         let mut regen = false;
-        let mut open = self.show_debug;
+        let mut open = self.ui.show_debug;
         egui::Window::new("Debug").open(&mut open).default_width(260.0).show(ctx, |ui| {
             let info = rs.adapter.get_info();
             let s = self.renderer.stats;
@@ -175,12 +186,10 @@ impl StarcityApp {
 
             ui.collapsing("Rendering", |ui| {
                 let before = self.settings.clone();
-                ui.checkbox(&mut self.settings.wireframe, "Wireframe (F1)");
                 ui.add_enabled(
                     self.settings.wireframe,
                     egui::Checkbox::new(&mut self.settings.wireframe_only, "Wireframe only"),
                 );
-                ui.checkbox(&mut self.settings.grid, "Tile grid (G)");
                 egui::ComboBox::from_label("MSAA")
                     .selected_text(format!("{}x", self.settings.msaa))
                     .show_ui(ui, |ui| {
@@ -229,10 +238,48 @@ impl StarcityApp {
             });
 
             ui.separator();
-            ui.small("WASD/arrows or left-drag: pan · Q/E or right-drag: rotate\nscroll: zoom · R: ortho/perspective · F1: wireframe · G: grid · F3: this window");
+            ui.small("WASD/arrows or left-drag: pan · Q/E or right-drag: rotate\nscroll: zoom · R: ortho/perspective · F1: wireframe · G: grid\nEsc: pointer tool · F3: this window");
         });
-        self.show_debug = open;
+        self.ui.show_debug = open;
         if regen {
+            self.regenerate(rs);
+        }
+    }
+}
+
+impl StarcityApp {
+    /// Menu bar, toolbar and status bar around the 3D view.
+    fn game_ui(&mut self, ui: &mut egui::Ui, rs: &RenderState) {
+        let panel = egui::Frame::NONE
+            .fill(win95::FACE)
+            .inner_margin(egui::Margin::symmetric(4, 2));
+        let actions = egui::Panel::top("menu_bar")
+            .frame(panel)
+            .show(ui, |ui| ui::menu_bar(ui, &mut self.ui))
+            .inner;
+        egui::Panel::top("toolbar")
+            .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
+            .show(ui, |ui| ui::toolbar(ui, &mut self.ui));
+        let c = &self.camera;
+        let status = format!(
+            "({:.0}, {:.0})  zoom {:.0}",
+            c.focus.x, c.focus.z, c.screen_width
+        );
+        egui::Panel::bottom("status_bar")
+            .frame(panel)
+            .show(ui, |ui| ui::status_bar(ui, &self.ui, &status));
+
+        // The menus and keyboard edit `self.ui`; apply those to the renderer and camera.
+        if self.settings.wireframe != self.ui.wireframe || self.settings.grid != self.ui.grid {
+            self.settings.wireframe = self.ui.wireframe;
+            self.settings.grid = self.ui.grid;
+            self.scene_dirty = true;
+        }
+        self.camera.want_ortho = self.ui.ortho;
+
+        if actions.new_map {
+            self.params.seed =
+                (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
             self.regenerate(rs);
         }
     }
@@ -251,9 +298,11 @@ impl eframe::App for StarcityApp {
         }
         self.settle_focus(dt);
 
-        if self.show_debug {
+        self.game_ui(ui, &rs);
+        if self.ui.show_debug {
             self.debug_window(&ctx, &rs);
         }
+        ui::about_window(&ctx, &mut self.ui.show_about);
 
         let mut scene_changed = false;
         egui::CentralPanel::default()
