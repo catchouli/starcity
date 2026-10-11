@@ -13,8 +13,10 @@
 
 use crate::network::Layer;
 use crate::rails::{Signals, piece_ends};
+use crate::stations::{StationId, Stations};
 use glam::Vec2;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 pub const CAR_LENGTH: f32 = 0.8;
 pub const CAR_GAP: f32 = 0.08;
@@ -25,6 +27,8 @@ const BRAKING: f32 = 3.0;
 const WRECK_SECONDS: f32 = 3.0;
 /// Longest path a signal reservation will search.
 const MAX_BLOCK_SEGMENTS: usize = 64;
+/// Time spent at each station.
+pub const LOADING_SECONDS: f32 = 3.0;
 
 type PieceKey = ((i32, i32), u8);
 
@@ -143,6 +147,23 @@ pub struct Train {
     pub crashed: Option<f32>,
     /// Waiting for a path through the block ahead.
     pub waiting: bool,
+    /// Stations to visit in turn. With none, the train wanders.
+    pub orders: Vec<StationId>,
+    /// Index into `orders` of the next stop.
+    pub order: usize,
+    /// Seconds left loading at a station.
+    pub loading: Option<f32>,
+    /// Told to stop by the player.
+    pub stopped: bool,
+    /// Distance to the target station from each segment, and the target and
+    /// track version it was computed for.
+    routing: Option<Routing>,
+}
+
+struct Routing {
+    target: StationId,
+    version: u64,
+    dist: HashMap<Seg, f32>,
 }
 
 impl Train {
@@ -178,6 +199,85 @@ impl Train {
     pub fn tiles(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.route.iter().map(|e| e.seg.tile)
     }
+
+    /// The station the train is heading for, if it has orders.
+    pub fn target(&self) -> Option<StationId> {
+        (!self.orders.is_empty()).then(|| self.orders[self.order % self.orders.len()])
+    }
+
+    /// What the train is doing, for the UI.
+    pub fn status(&self, stations: &Stations) -> String {
+        let name = |id: StationId| stations.get(id).map_or("?".to_string(), |s| s.name.clone());
+        if self.crashed.is_some() {
+            "Crashed!".into()
+        } else if let (Some(_), Some(id)) = (self.loading, self.target()) {
+            format!("Loading at {}", name(id))
+        } else if self.stopped {
+            "Stopped".into()
+        } else if self.waiting {
+            "Waiting at signal".into()
+        } else if let Some(id) = self.target() {
+            format!("Heading for {}", name(id))
+        } else {
+            "No orders: wandering".into()
+        }
+    }
+
+    /// How promising a segment is for reaching the target: 0 inside the
+    /// target station, otherwise the distance from its end, or infinity.
+    fn rank(&self, stations: &Stations, seg: Seg) -> f32 {
+        let (Some(target), Some(routing)) = (self.target(), &self.routing) else {
+            return f32::INFINITY;
+        };
+        if stations.at(seg.tile) == Some(target) {
+            return 0.0;
+        }
+        routing.dist.get(&seg).map_or(f32::INFINITY, |d| d + seg.len())
+    }
+}
+
+/// Shortest distance from the end of each segment to the start of a segment
+/// in `station`, by Dijkstra backwards from the station's track.
+fn distances(rails: &Layer, stations: &Stations, station: StationId) -> HashMap<Seg, f32> {
+    // Integer costs (millitiles) so the heap can order them.
+    let cost = |s: Seg| (s.len() * 1000.0) as u32;
+    let previous = |t: Seg| -> Vec<Seg> {
+        next_segments(rails, t.reversed())
+            .into_iter()
+            .map(Seg::reversed)
+            .collect()
+    };
+    let mut best: HashMap<Seg, u32> = HashMap::new();
+    let mut heap = BinaryHeap::new();
+    let Some(station) = stations.get(station) else {
+        return HashMap::new();
+    };
+    for &tile in &station.tiles {
+        let piece = rails.get(tile.0, tile.1);
+        for forward in [true, false] {
+            let t = Seg { tile, piece, forward };
+            for p in previous(t) {
+                if best.get(&p).is_none_or(|&d| d > 0) {
+                    best.insert(p, 0);
+                    heap.push(Reverse((0, p.tile, p.piece, p.forward)));
+                }
+            }
+        }
+    }
+    while let Some(Reverse((d, tile, piece, forward))) = heap.pop() {
+        let s = Seg { tile, piece, forward };
+        if best.get(&s).is_some_and(|&b| b < d) {
+            continue;
+        }
+        for p in previous(s) {
+            let nd = d + cost(s);
+            if best.get(&p).is_none_or(|&b| nd < b) {
+                best.insert(p, nd);
+                heap.push(Reverse((nd, p.tile, p.piece, p.forward)));
+            }
+        }
+    }
+    best.into_iter().map(|(s, d)| (s, d as f32 / 1000.0)).collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,6 +360,11 @@ impl Trains {
             speed: 0.0,
             crashed: None,
             waiting: false,
+            orders: Vec::new(),
+            order: 0,
+            loading: None,
+            stopped: false,
+            routing: None,
         });
         Ok(id)
     }
@@ -278,7 +383,8 @@ impl Trains {
         !doomed.is_empty()
     }
 
-    fn remove(&mut self, id: u32) {
+    /// Removes a train (e.g. sold by the player).
+    pub fn remove(&mut self, id: u32) {
         self.list.retain(|t| t.id != id);
         self.owner.retain(|_, owner| *owner != id);
     }
@@ -292,11 +398,12 @@ impl Trains {
 
     /// Advances every train by `dt` seconds. Returns whether anything moved
     /// or changed (so the scene needs redrawing).
-    pub fn update(&mut self, dt: f32, rails: &Layer, signals: &Signals) -> bool {
+    pub fn update(&mut self, dt: f32, rails: &Layer, signals: &Signals, stations: &Stations, version: u64) -> bool {
         let mut changed = false;
         let ids: Vec<u32> = self.list.iter().map(|t| t.id).collect();
         for id in ids {
-            changed |= self.update_train(id, dt, rails, signals);
+            self.refresh_routing(id, rails, stations, version);
+            changed |= self.update_train(id, dt, rails, signals, stations);
         }
         // Clear away wrecks whose time is up.
         let done: Vec<u32> = self
@@ -312,13 +419,71 @@ impl Trains {
         changed
     }
 
-    fn train(&mut self, id: u32) -> &mut Train {
+    pub fn train(&mut self, id: u32) -> &mut Train {
         self.list.iter_mut().find(|t| t.id == id).unwrap()
     }
 
-    fn update_train(&mut self, id: u32, dt: f32, rails: &Layer, signals: &Signals) -> bool {
+    pub fn get(&self, id: u32) -> Option<&Train> {
+        self.list.iter().find(|t| t.id == id)
+    }
+
+    /// Replaces a train's orders and which one it's heading for next.
+    pub fn set_orders(&mut self, id: u32, orders: Vec<StationId>, current: usize) {
+        let t = self.train(id);
+        t.order = if orders.is_empty() { 0 } else { current % orders.len() };
+        t.orders = orders;
+        t.routing = None;
+    }
+
+    /// Drops a removed station from every train's orders.
+    pub fn forget_station(&mut self, station: StationId) {
+        for t in &mut self.list {
+            t.orders.retain(|&s| s != station);
+            t.routing = None;
+        }
+    }
+
+    /// Recomputes a train's route distances if its target or the track changed.
+    fn refresh_routing(&mut self, id: u32, rails: &Layer, stations: &Stations, version: u64) {
+        let t = self.train(id);
+        let Some(target) = t.target() else {
+            t.routing = None;
+            return;
+        };
+        if t.routing
+            .as_ref()
+            .is_some_and(|r| r.target == target && r.version == version)
+        {
+            return;
+        }
+        t.routing = Some(Routing {
+            target,
+            version,
+            dist: distances(rails, stations, target),
+        });
+    }
+
+    /// Sorts options best first for reaching the train's target (ties keep
+    /// their shuffled order).
+    fn by_rank(&self, id: u32, stations: &Stations, options: &mut [Seg]) {
+        let t = self.list.iter().find(|t| t.id == id).unwrap();
+        options.sort_by(|&a, &b| t.rank(stations, a).total_cmp(&t.rank(stations, b)));
+    }
+
+    fn update_train(&mut self, id: u32, dt: f32, rails: &Layer, signals: &Signals, stations: &Stations) -> bool {
         if let Some(left) = &mut self.train(id).crashed {
             *left -= dt;
+            return true;
+        }
+        if let Some(left) = &mut self.train(id).loading {
+            *left -= dt;
+            if *left > 0.0 {
+                return false;
+            }
+            let t = self.train(id);
+            t.loading = None;
+            t.order += 1;
+            t.routing = None;
             return true;
         }
 
@@ -335,7 +500,7 @@ impl Trains {
             if ahead >= lookahead {
                 break;
             }
-            match self.extend(id, rails, signals) {
+            match self.extend(id, rails, signals, stations) {
                 Extend::Ok => {}
                 Extend::Blocked => {
                     blocked = true;
@@ -348,11 +513,19 @@ impl Trains {
             }
         }
 
+        let station_stop = self.station_stop(id, stations);
         let t = self.train(id);
-        let stop_at = (blocked || dead_end).then(|| {
-            t.route.iter().skip(t.head + 1).map(|e| e.seg.len()).sum::<f32>() + t.route[t.head].seg.len() - t.head_pos
-        });
+        let to_end =
+            t.route.iter().skip(t.head + 1).map(|e| e.seg.len()).sum::<f32>() + t.route[t.head].seg.len() - t.head_pos;
+        let mut stop_at = (blocked || dead_end).then_some(to_end);
+        if let Some(d) = station_stop {
+            stop_at = Some(stop_at.map_or(d, |s: f32| s.min(d)));
+        }
+        if t.stopped {
+            stop_at = Some(0.0);
+        }
         t.waiting = blocked;
+        let arriving = station_stop.is_some_and(|d| d < 1e-3) && t.speed < 0.05;
 
         // Speed: accelerate to cruising speed, or brake to stop at the stop point.
         let target = stop_at.map_or(MAX_SPEED, |d| (2.0 * BRAKING * d.max(0.0)).sqrt().min(MAX_SPEED));
@@ -366,7 +539,11 @@ impl Trains {
             step = step.min(d.max(0.0));
         }
         if step <= 0.0 {
-            if dead_end && stop_at.is_some_and(|d| d < 1e-3) {
+            if arriving {
+                self.arrive(id, rails, stations);
+                return true;
+            }
+            if dead_end && !self.train(id).stopped && stop_at.is_some_and(|d| d < 1e-3) {
                 self.reverse(id);
                 return true;
             }
@@ -399,7 +576,7 @@ impl Trains {
 
     /// Tries to add the next segment (or, at a signal, a whole reserved path)
     /// to the route ahead.
-    fn extend(&mut self, id: u32, rails: &Layer, signals: &Signals) -> Extend {
+    fn extend(&mut self, id: u32, rails: &Layer, signals: &Signals, stations: &Stations) -> Extend {
         let last = self.train(id).route.back().unwrap().seg;
         let mut options: Vec<Seg> = next_segments(rails, last)
             .into_iter()
@@ -409,6 +586,7 @@ impl Trains {
             return Extend::DeadEnd;
         }
         self.shuffle(&mut options);
+        self.by_rank(id, stations, &mut options);
         let needs_reservation = options.iter().any(|&s| signal_on(signals, s) == Some(true));
         if !needs_reservation {
             self.train(id).route.push_back(Entry {
@@ -419,7 +597,7 @@ impl Trains {
         }
         // Path signal: find a free path through the block ahead and reserve it all.
         for start in options {
-            if let Some(path) = self.find_path(id, rails, signals, start) {
+            if let Some(path) = self.find_path(id, rails, signals, stations, start) {
                 for s in &path {
                     self.owner.insert(s.key(), id);
                 }
@@ -433,7 +611,16 @@ impl Trains {
 
     /// A free path from `start` to the end of its block: up to (not including)
     /// the next signal facing the same way, or a dead end.
-    fn find_path(&mut self, id: u32, rails: &Layer, signals: &Signals, start: Seg) -> Option<Vec<Seg>> {
+    fn find_path(
+        &mut self,
+        id: u32,
+        rails: &Layer,
+        signals: &Signals,
+        stations: &Stations,
+        start: Seg,
+    ) -> Option<Vec<Seg>> {
+        let target = self.list.iter().find(|t| t.id == id).unwrap().target();
+        let in_target = |s: Seg| target.is_some() && stations.at(s.tile) == target;
         let free = |owner: &HashMap<PieceKey, u32>, s: Seg| owner.get(&s.key()).is_none_or(|&o| o == id);
         if !free(&self.owner, start) {
             return None;
@@ -447,8 +634,12 @@ impl Trains {
                 .into_iter()
                 .filter(|&s| signal_on(signals, s) != Some(false) && !visited.contains(&s.key()))
                 .collect();
-            // The block ends where the next signal begins, or at a dead end.
+            // The block ends where the next signal begins, or at a dead end. A
+            // train bound for a station only reserves as far as its platform end.
             if options.is_empty() || options.iter().any(|&s| signal_on(signals, s) == Some(true)) {
+                return Some(path);
+            }
+            if in_target(last) && options.iter().all(|&s| !in_target(s)) {
                 return Some(path);
             }
             if path.len() >= MAX_BLOCK_SEGMENTS {
@@ -456,6 +647,9 @@ impl Trains {
             }
             options.retain(|&s| free(&self.owner, s));
             self.shuffle(&mut options);
+            // Options are popped from the back, so put the best last.
+            self.by_rank(id, stations, &mut options);
+            options.reverse();
             stack.push(options);
             // Take the next untried option, backtracking when a branch runs out.
             loop {
@@ -481,6 +675,70 @@ impl Trains {
         for i in (1..v.len()).rev() {
             let j = (self.next_random() % (i as u64 + 1)) as usize;
             v.swap(i, j);
+        }
+    }
+
+    /// Distance from the head to where it should stop for its target station:
+    /// the far end of the platform, if that's within the known route ahead.
+    fn station_stop(&mut self, id: u32, stations: &Stations) -> Option<f32> {
+        let t = self.list.iter().find(|t| t.id == id).unwrap();
+        let target = t.target()?;
+        let in_target = |i: usize| stations.at(t.route[i].seg.tile) == Some(target);
+        let mut d = t.route[t.head].seg.len() - t.head_pos;
+        let mut seen = false;
+        for i in t.head..t.route.len() {
+            if i > t.head {
+                d += t.route[i].seg.len();
+            }
+            if in_target(i) {
+                seen = true;
+                if i + 1 == t.route.len() || !in_target(i + 1) {
+                    return Some(d);
+                }
+            } else if seen {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Stopped at the target platform: start loading. Releases anything
+    /// reserved beyond the station, and turns round now if the next stop is
+    /// only reachable that way.
+    fn arrive(&mut self, id: u32, rails: &Layer, stations: &Stations) {
+        let t = self.train(id);
+        t.loading = Some(LOADING_SECONDS);
+        t.speed = 0.0;
+        let ahead: Vec<Entry> = t.route.drain(t.head + 1..).collect();
+        for e in ahead.into_iter().filter(|e| e.claimed) {
+            if self.owner.get(&e.seg.key()) == Some(&id) {
+                self.owner.remove(&e.seg.key());
+            }
+        }
+        // Peek at the next order: can we get there going forward, or only behind us?
+        let t = self.train(id);
+        let next_target = (t.orders.len() > 1).then(|| t.orders[(t.order + 1) % t.orders.len()]);
+        if let Some(next) = next_target {
+            let dist = distances(rails, stations, next);
+            let t = self.list.iter().find(|t| t.id == id).unwrap();
+            let best = |s: Seg| {
+                next_segments(rails, s)
+                    .into_iter()
+                    .map(|o| {
+                        if stations.at(o.tile) == Some(next) {
+                            0.0
+                        } else {
+                            dist.get(&o).map_or(f32::INFINITY, |d| d + o.len())
+                        }
+                    })
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let ahead = best(t.route[t.head].seg);
+            let behind = best(t.route[0].seg.reversed());
+            if ahead.is_infinite() && behind.is_finite() {
+                self.reverse(id);
+                self.train(id).loading = Some(LOADING_SECONDS);
+            }
         }
     }
 
@@ -561,7 +819,7 @@ mod tests {
 
     fn run(trains: &mut Trains, rails: &Layer, signals: &Signals, seconds: f32) {
         for _ in 0..(seconds * 60.0) as usize {
-            trains.update(1.0 / 60.0, rails, signals);
+            trains.update(1.0 / 60.0, rails, signals, &Stations::default(), 0);
         }
     }
 
@@ -642,7 +900,7 @@ mod tests {
         trains.spawn(&r, (18, 2), false, 2).unwrap();
         let mut someone_waited = false;
         for _ in 0..20 * 60 {
-            trains.update(1.0 / 60.0, &r, &signals);
+            trains.update(1.0 / 60.0, &r, &signals, &Stations::default(), 0);
             someone_waited |= trains.list.iter().any(|t| t.waiting);
         }
         assert!(trains.list.iter().all(|t| t.crashed.is_none()), "no crash");
@@ -658,5 +916,43 @@ mod tests {
         let r = line(10);
         trains.spawn(&r, (5, 2), true, 2).unwrap();
         assert_eq!(trains.spawn(&r, (5, 2), true, 2).unwrap_err(), SpawnError::Occupied);
+    }
+
+    #[test]
+    fn train_shuttles_between_two_stations() {
+        use crate::terrain::{Block, Material, World};
+        let mut w = World::new(32, 8, 4, 0);
+        for x in 0..32 {
+            for z in 0..8 {
+                w.set(x, 0, z, Block::full(Material::Grass));
+            }
+        }
+        let mut r = line(24);
+        let mut stations = Stations::default();
+        let none = Layer::new(32, 8);
+        let sigs = Signals::default();
+        let a = stations.plan(&w, &r, &none, &sigs, (2, 2), (5, 2));
+        stations.build(&a, &mut r);
+        let b = stations.plan(&w, &r, &none, &sigs, (18, 2), (21, 2));
+        stations.build(&b, &mut r);
+        let (sa, sb) = (stations.at((3, 2)).unwrap(), stations.at((19, 2)).unwrap());
+
+        let mut trains = Trains::new(5);
+        let id = trains.spawn(&r, (10, 2), true, 2).unwrap();
+        trains.train(id).orders = vec![sb, sa];
+        let mut loaded_at = Vec::new();
+        for _ in 0..60 * 60 {
+            trains.update(1.0 / 60.0, &r, &sigs, &stations, 1);
+            let t = trains.get(id).unwrap();
+            if t.loading.is_some() {
+                let station = stations.at(t.route[t.head].seg.tile);
+                if loaded_at.last() != Some(&station) {
+                    loaded_at.push(station);
+                }
+            }
+        }
+        assert!(loaded_at.len() >= 3, "visited stations in turn: {loaded_at:?}");
+        assert_eq!(&loaded_at[..3], &[Some(sb), Some(sa), Some(sb)]);
+        assert!(trains.get(id).unwrap().crashed.is_none());
     }
 }

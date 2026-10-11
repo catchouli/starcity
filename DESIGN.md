@@ -92,12 +92,12 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Placing** ✅: with the signal tool, click plain track (not a junction) to place a signal facing the camera; click it again to turn it round; right-click to remove it. Building track that would change a signal's tile is blocked, and removing track takes its signals with it.
 - Signals are drawn as small 3D props (post, head, lamp) with the instanced box renderer, which trains will use too.
 
-### 4.4 Stations & routes
+### 4.4 Stations & orders
 
-- Players place **stations** next to towns or industries. Each station serves the settlements and industries within a catchment radius, and trains load and unload there.
-- Stations are multi-tile platforms on track.
-- **Train routes/orders:** each train gets a programmable list of stops (go to A, load, go to B, unload…). Start with simple ordered stop lists and add conditions later.
-- Tunnels can follow any dug-out path, since the terrain is real voxels. Bridges come later.
+- **Stations** ✅: the station tool drags a straight run of platform tiles along an axis. Platforms lay their own track or reuse matching straight track, and need flat ground with no roads, junctions or signals. New platforms touching a station join it. They're drawn as platforms either side of the track plus a small station building, with a floating Win95 tooltip-style name label. Removing the track removes the platforms, and empty stations disappear (and drop out of train orders). Click a station with the pointer to rename it. Later, stations will serve the towns and industries within a catchment radius, and take their names from the nearest town.
+- **Orders** ✅: each train has a list of stations to visit in turn. Click a train with the pointer to open its window: status, orders (add, reorder, delete), stop/go, find and remove.
+- **Routing** ✅: a train computes a shortest-distance map to its next station over the track graph (reverse Dijkstra), rebuilt when its target or the track changes. Its choices at junctions, both on open track and when reserving paths through signals, follow that map. It brakes so its head stops at the far end of the platform, loads for a few seconds, then heads for the next order. A path reservation for a station-bound train ends at the platform end. If the next stop is only reachable behind it, the train turns round at the station (so terminus stations work). A train with no orders wanders.
+- Later: loading and unloading actual passengers and cargo, conditional orders, timetables.
 
 ## 5. Settlements
 
@@ -220,7 +220,8 @@ Terrain generation was never really started: it only produced random noise for o
 
 **M6 — Trains & stations**
 - Trains ✅: placed with the train tool; follow the track graph (edge midpoints, at most 45° per step); accelerate and brake to stop points; reverse at dead ends; reserve paths through path signals and wait when blocked; crash head-on on unsignalled track; wrecks are cleared after a few seconds. Space pauses. They wander (random at junctions) until stations and orders exist.
-- Next: stations, train orders (go to A, load, go to B), passengers between towns.
+- Stations, orders and routing ✅ (§4.4).
+- Next: passengers and towns to give them somewhere to go.
 
 **M7 — Industries & economy**
 - Industry spawning, cargo chains, growth feedback.

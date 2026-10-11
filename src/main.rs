@@ -12,6 +12,7 @@ mod roads;
 #[cfg(test)]
 mod shader_test;
 mod sim;
+mod stations;
 mod terrain;
 mod trains;
 mod ui;

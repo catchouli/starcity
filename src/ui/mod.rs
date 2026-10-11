@@ -13,6 +13,7 @@ pub enum Tool {
     Rail,
     Signal,
     Train,
+    Station,
     RemoveRail,
     Bulldoze,
 }
@@ -26,6 +27,7 @@ impl Tool {
             Tool::Rail => "Build railway",
             Tool::Signal => "Path signal",
             Tool::Train => "Place train",
+            Tool::Station => "Build station",
             Tool::RemoveRail => "Remove railway",
             Tool::Bulldoze => "Bulldoze",
         }
@@ -33,7 +35,7 @@ impl Tool {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Tool::Pointer => "Drag to pan, right-drag to rotate, scroll to zoom",
+            Tool::Pointer => "Drag to pan, right-drag to rotate, scroll to zoom. Click a train or station to open it.",
             Tool::Road => "Drag along an axis or at 45° to draw road. Red means it can't be built there.",
             Tool::RemoveRoad => "Click or drag a rectangle to remove road",
             Tool::Rail => "Drag along an axis or at 45° to lay track. Red means it can't be built there.",
@@ -41,6 +43,9 @@ impl Tool {
                 "Click track to place a path signal facing you; click again to turn it round, right-click to remove"
             }
             Tool::Train => "Click plain track to place a train heading away from you. Space pauses trains.",
+            Tool::Station => {
+                "Drag along straight track or flat ground to build platforms. Click trains to give them orders."
+            }
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
         }
@@ -57,6 +62,7 @@ impl Tool {
             Tool::Rail => icon_rail(p, r),
             Tool::Signal => icon_signal(p, r),
             Tool::Train => icon_train(p, r),
+            Tool::Station => icon_station(p, r),
             Tool::RemoveRail => {
                 icon_rail(p, r);
                 icon_cross(p, r);
@@ -127,7 +133,10 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad]),
-        ("Rail", &[Tool::Rail, Tool::Signal, Tool::Train, Tool::RemoveRail]),
+        (
+            "Rail",
+            &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
+        ),
     ];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -255,6 +264,36 @@ fn icon_bulldozer(p: &Painter, r: Rect) {
     );
     p.rect_filled(Rect::from_min_max(at(0.12, 0.62), at(0.22, 0.7)), 0.0, dark);
     p.rect_filled(Rect::from_min_max(at(0.2, 0.72), at(0.95, 1.0)), 2.0, dark);
+}
+
+fn icon_station(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    // Building with a red roof, on a platform beside the track.
+    p.rect_filled(
+        Rect::from_min_max(at(0.15, 0.3), at(0.85, 0.65)),
+        0.0,
+        Color32::from_rgb(0xde, 0xcd, 0xa5),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.05, 0.18), at(0.95, 0.32)),
+        0.0,
+        Color32::from_rgb(0x96, 0x3e, 0x32),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.42, 0.42), at(0.58, 0.65)),
+        0.0,
+        Color32::from_rgb(0x5a, 0x3c, 0x28),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.65), at(1.0, 0.78)),
+        0.0,
+        Color32::from_gray(0xb0),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.84), at(1.0, 0.9)),
+        0.0,
+        Color32::from_gray(0x50),
+    );
 }
 
 fn icon_train(p: &Painter, r: Rect) {

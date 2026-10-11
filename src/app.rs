@@ -5,6 +5,7 @@ use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
 use crate::render::{BoxInstance, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
 use crate::sim::{self, Changes, Clear, Sim};
+use crate::stations::{StationId, Stations};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::trains::{SpawnError, Trains};
@@ -53,6 +54,14 @@ pub struct StarcityApp {
     rails: Layer,
     signals: rails::Signals,
     trains: Trains,
+    stations: Stations,
+    /// Bumped whenever track changes, so trains re-plan their routes.
+    track_version: u64,
+    selected_train: Option<u32>,
+    selected_station: Option<StationId>,
+    /// View-projection and 3D view rectangle from the last frame, for picking
+    /// trains and placing labels.
+    last_view: Option<(Mat4, egui::Rect)>,
     /// Signals or trains changed, so the prop boxes need rebuilding.
     props_changed: bool,
     trains_moving: bool,
@@ -117,6 +126,11 @@ impl StarcityApp {
             rails: Layer::new(1, 1),
             signals: rails::Signals::default(),
             trains: Trains::new(1),
+            stations: Stations::default(),
+            track_version: 0,
+            selected_train: None,
+            selected_station: None,
+            last_view: None,
             props_changed: false,
             trains_moving: false,
             paused: false,
@@ -191,9 +205,27 @@ impl StarcityApp {
             ] {
                 self.signals.click(&self.rails, t, forward);
             }
+            // Two stations on the long line, and a train running between them.
+            let mut station_ids = Vec::new();
+            for (a, b) in [((c - 12, c + 14), (c - 10, c + 14)), ((c - 1, c + 14), (c + 1, c + 14))] {
+                let plan = self
+                    .stations
+                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                if let Some(why) = plan.blocked {
+                    eprintln!("demo station {a:?} blocked: {why:?}");
+                }
+                self.stations.build(&plan, &mut self.rails);
+                station_ids.extend(self.stations.at(a));
+            }
             for (t, forward) in [((c - 6, c + 14), true), ((c - 10, c + 17), false)] {
-                if let Err(e) = self.trains.spawn(&self.rails, t, forward, 3) {
-                    eprintln!("demo train at {t:?}: {e:?}");
+                match self.trains.spawn(&self.rails, t, forward, 3) {
+                    Ok(id) if t.1 == c + 14 => {
+                        self.trains
+                            .set_orders(id, station_ids.iter().rev().copied().collect(), 0);
+                        self.selected_train = Some(id);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("demo train at {t:?}: {e:?}"),
                 }
             }
             self.props_changed = true;
@@ -223,6 +255,9 @@ impl StarcityApp {
         self.rails = Layer::new(self.world.size_x, self.world.size_z);
         self.signals = rails::Signals::default();
         self.trains = Trains::new(self.params.seed as u64);
+        self.stations = Stations::default();
+        self.selected_train = None;
+        self.selected_station = None;
         self.props_changed = true;
         self.plan = Plan::default();
         self.infra_dirty = None;
@@ -312,6 +347,9 @@ impl StarcityApp {
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
         let tool = self.ui.tool;
+        if tool == Tool::Pointer && response.clicked_by(primary) {
+            self.select_at(ctx, rect, view_proj);
+        }
         if let (Tool::Train, Some(t), true) = (tool, self.hover_tile, response.clicked_by(primary)) {
             // Trains set off away from the camera, like signals face it.
             let piece = self.rails.get(t.0, t.1);
@@ -342,7 +380,7 @@ impl StarcityApp {
         }
         if !matches!(
             tool,
-            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail
+            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail | Tool::Station
         ) {
             self.drag_start = None;
         } else if response.drag_started_by(primary) {
@@ -363,6 +401,23 @@ impl StarcityApp {
                 rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b),
                 Network::Rail,
             ),
+            (Tool::Station, Some(a), Some(b)) => {
+                let sp = self
+                    .stations
+                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let pieces = sp
+                    .tiles
+                    .iter()
+                    .map(|&t| crate::network::Piece::add(t, sp.piece))
+                    .collect();
+                (
+                    Plan {
+                        pieces,
+                        blocked: sp.blocked,
+                    },
+                    Network::Rail,
+                )
+            }
             _ => (Plan::default(), self.plan_network),
         };
         if plan != self.plan || network != self.plan_network {
@@ -388,7 +443,7 @@ impl StarcityApp {
                 })
             }
             // While dragging a road or track, the preview shows where it goes.
-            Tool::Road | Tool::Rail if self.drag_start.is_some() => None,
+            Tool::Road | Tool::Rail | Tool::Station if self.drag_start.is_some() => None,
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -400,6 +455,29 @@ impl StarcityApp {
             self.scene_dirty = true;
         }
         changes
+    }
+
+    /// Pointer click: selects the train under the cursor, or else the station.
+    fn select_at(&mut self, ctx: &egui::Context, rect: egui::Rect, view_proj: Mat4) {
+        let Some(pos) = ctx.pointer_latest_pos() else { return };
+        let mut best: Option<(f32, u32)> = None;
+        for train in &self.trains.list {
+            for (front, back) in train.car_ends() {
+                let c = (front + back) / 2.0;
+                let p = Vec3::new(c.x, self.world.height_at(c.x, c.y) + 0.25, c.y);
+                if let Some(screen) = project(view_proj, rect, p) {
+                    let d = screen.distance(pos);
+                    if d < 28.0 && best.is_none_or(|(bd, _)| d < bd) {
+                        best = Some((d, train.id));
+                    }
+                }
+            }
+        }
+        self.selected_train = best.map(|(_, id)| id);
+        self.selected_station = match best {
+            Some(_) => None,
+            None => self.hover_tile.and_then(|t| self.stations.at(t)),
+        };
     }
 
     /// Applies the active tool to a dragged-out span of tiles.
@@ -422,6 +500,20 @@ impl StarcityApp {
                     ..Default::default()
                 }
             }
+            Tool::Station => {
+                let plan = self
+                    .stations
+                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                if plan.blocked.is_none() {
+                    // Platforms on existing track change routing without changing the track.
+                    self.track_version += 1;
+                    self.props_changed = true;
+                }
+                Changes {
+                    infra: self.stations.build(&plan, &mut self.rails),
+                    ..Default::default()
+                }
+            }
             _ => Changes::default(),
         }
     }
@@ -439,6 +531,9 @@ impl StarcityApp {
     }
 
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
+        if !changes.infra.is_empty() {
+            self.track_version += 1;
+        }
         self.remesh_tiles(rs, &changes.terrain);
         self.mark_infra(&changes.infra);
         self.update_props(rs);
@@ -449,11 +544,219 @@ impl StarcityApp {
         if self.signals.prune(&self.rails) {
             self.props_changed = true;
         }
+        let platforms = self.stations.tile_count();
+        for gone in self.stations.prune(&self.rails) {
+            self.trains.forget_station(gone);
+            if self.selected_station == Some(gone) {
+                self.selected_station = None;
+            }
+        }
+        if self.stations.tile_count() != platforms {
+            self.props_changed = true;
+            self.track_version += 1;
+        }
         if std::mem::take(&mut self.props_changed) {
             let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
+            boxes.extend(station_boxes(&self.world, &self.rails, &self.stations));
             boxes.extend(train_boxes(&self.world, &self.trains));
             self.renderer.set_boxes(&rs.device, &rs.queue, &boxes);
             self.scene_dirty = true;
+        }
+    }
+
+    /// Win95 tooltip-style name labels floating above stations.
+    fn station_labels(&self, ui: &egui::Ui, view_proj: Mat4, rect: egui::Rect) {
+        if self.camera.view_height > 150.0 {
+            return;
+        }
+        let painter = ui.painter_at(rect);
+        let font = egui::FontId::proportional(12.0);
+        for station in self.stations.list.values() {
+            let (x, z) = station.centre();
+            let p = Vec3::new(x, self.world.height_at(x, z) + 1.6, z);
+            let Some(at) = project(view_proj, rect, p) else {
+                continue;
+            };
+            let galley = painter.layout_no_wrap(station.name.clone(), font.clone(), egui::Color32::BLACK);
+            let r = egui::Rect::from_center_size(at, galley.size() + egui::vec2(8.0, 4.0));
+            painter.rect_filled(r, 0.0, egui::Color32::from_rgb(255, 255, 225));
+            painter.rect_stroke(
+                r,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::BLACK),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(r.min + egui::vec2(4.0, 2.0), galley, egui::Color32::BLACK);
+        }
+    }
+
+    /// The selected train's window: status, orders, stop/go and remove.
+    fn train_window(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_train else { return };
+        let Some(train) = self.trains.get(id) else {
+            self.selected_train = None;
+            return;
+        };
+        enum Action {
+            Up(usize),
+            Down(usize),
+            Delete(usize),
+            Add(StationId),
+            ToggleStop,
+            Remove,
+            Find,
+        }
+        let status = train.status(&self.stations);
+        let orders = train.orders.clone();
+        let current = if orders.is_empty() {
+            0
+        } else {
+            train.order % orders.len()
+        };
+        let stopped = train.stopped;
+        let name = |sid: StationId| self.stations.get(sid).map_or("?".to_string(), |s| s.name.clone());
+        let mut action = None;
+        let mut open = true;
+        ui::win95::window(
+            ctx,
+            &format!("Train {}", id + 1),
+            &mut open,
+            egui::pos2(420.0, 110.0),
+            |ui| {
+                ui.set_width(240.0);
+                ui.label(status);
+                ui.separator();
+                ui.label("Orders:");
+                if orders.is_empty() {
+                    ui.weak("None yet. Add stations below, and the train will visit them in turn.");
+                }
+                for (i, &sid) in orders.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let marker = if i == current { "▶" } else { "   " };
+                        ui.label(format!("{marker} {}. {}", i + 1, name(sid)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("x").on_hover_text("Delete").clicked() {
+                                action = Some(Action::Delete(i));
+                            }
+                            if ui.small_button("⏷").on_hover_text("Move down").clicked() {
+                                action = Some(Action::Down(i));
+                            }
+                            if ui.small_button("⏶").on_hover_text("Move up").clicked() {
+                                action = Some(Action::Up(i));
+                            }
+                        });
+                    });
+                }
+                egui::ComboBox::from_id_salt(("add stop", id))
+                    .selected_text("Add stop…")
+                    .show_ui(ui, |ui| {
+                        if self.stations.list.is_empty() {
+                            ui.weak("No stations yet");
+                        }
+                        for station in self.stations.list.values() {
+                            if ui.selectable_label(false, &station.name).clicked() {
+                                action = Some(Action::Add(station.id));
+                            }
+                        }
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button(if stopped { "Go" } else { "Stop" }).clicked() {
+                        action = Some(Action::ToggleStop);
+                    }
+                    if ui
+                        .button("Find")
+                        .on_hover_text("Centre the view on this train")
+                        .clicked()
+                    {
+                        action = Some(Action::Find);
+                    }
+                    if ui.button("Remove train").clicked() {
+                        action = Some(Action::Remove);
+                    }
+                });
+            },
+        );
+        if !open {
+            self.selected_train = None;
+        }
+        let mut new_orders = orders.clone();
+        let mut new_current = current;
+        match action {
+            Some(Action::Up(i)) if i > 0 => {
+                new_orders.swap(i, i - 1);
+                new_current = if current == i {
+                    i - 1
+                } else if current == i - 1 {
+                    i
+                } else {
+                    current
+                };
+            }
+            Some(Action::Down(i)) if i + 1 < orders.len() => {
+                new_orders.swap(i, i + 1);
+                new_current = if current == i {
+                    i + 1
+                } else if current == i + 1 {
+                    i
+                } else {
+                    current
+                };
+            }
+            Some(Action::Delete(i)) => {
+                new_orders.remove(i);
+                if i < current {
+                    new_current -= 1;
+                }
+            }
+            Some(Action::Add(sid)) => new_orders.push(sid),
+            Some(Action::ToggleStop) => {
+                let t = self.trains.train(id);
+                t.stopped = !t.stopped;
+                return;
+            }
+            Some(Action::Remove) => {
+                self.trains.remove(id);
+                self.selected_train = None;
+                self.props_changed = true;
+                return;
+            }
+            Some(Action::Find) => {
+                let head = self.trains.train(id).point_behind(0.0);
+                self.camera.focus.x = head.x;
+                self.camera.focus.z = head.y;
+                self.scene_dirty = true;
+                return;
+            }
+            _ => return,
+        }
+        self.trains.set_orders(id, new_orders, new_current);
+    }
+
+    /// The selected station's window: rename it.
+    fn station_window(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_station else { return };
+        let calling = self.trains.list.iter().filter(|t| t.orders.contains(&id)).count();
+        let Some(station) = self.stations.list.get_mut(&id) else {
+            self.selected_station = None;
+            return;
+        };
+        let mut open = true;
+        ui::win95::window(ctx, "Station", &mut open, egui::pos2(420.0, 110.0), |ui| {
+            ui.set_width(220.0);
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut station.name);
+            });
+            ui.label(format!("{} platform tiles", station.tiles.len()));
+            ui.label(match calling {
+                0 => "No trains call here yet".to_string(),
+                1 => "1 train calls here".to_string(),
+                n => format!("{n} trains call here"),
+            });
+        });
+        if !open {
+            self.selected_station = None;
         }
     }
 
@@ -836,7 +1139,10 @@ impl eframe::App for StarcityApp {
             }
         }
         let frame_dt = ((now - self.last_time) as f32).min(0.1);
-        self.trains_moving = !self.paused && self.trains.update(frame_dt, &self.rails, &self.signals);
+        self.trains_moving = !self.paused
+            && self
+                .trains
+                .update(frame_dt, &self.rails, &self.signals, &self.stations, self.track_version);
         if self.trains_moving {
             self.props_changed = true;
         }
@@ -849,6 +1155,8 @@ impl eframe::App for StarcityApp {
             self.debug_window(&ctx, &rs);
         }
         ui::about_window(&ctx, &mut self.ui.show_about);
+        self.train_window(&ctx);
+        self.station_window(&ctx);
 
         let mut scene_changed = false;
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -900,6 +1208,9 @@ impl eframe::App for StarcityApp {
                 let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                 ui.painter().image(id, rect, uv, egui::Color32::WHITE);
             }
+            let view_proj = self.view_proj(size);
+            self.last_view = Some((view_proj, rect));
+            self.station_labels(ui, view_proj, rect);
         });
 
         // Keep frames coming only while something is moving (including egui's
@@ -1024,6 +1335,65 @@ fn train_boxes(world: &World, trains: &Trains) -> Vec<BoxInstance> {
                         half: [half_len - 0.03, 0.02, 0.15],
                         yaw,
                         color: paint([110, 110, 115]),
+                    },
+                ]);
+            }
+        }
+    }
+    boxes
+}
+
+/// Where a world point lands in the 3D view, if it's in front of the camera.
+fn project(view_proj: Mat4, rect: egui::Rect, p: Vec3) -> Option<egui::Pos2> {
+    let clip = view_proj * p.extend(1.0);
+    if clip.w <= 0.0 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    Some(egui::pos2(
+        rect.min.x + (ndc.x + 1.0) / 2.0 * rect.width(),
+        rect.min.y + (1.0 - ndc.y) / 2.0 * rect.height(),
+    ))
+}
+
+/// Props for stations: platforms either side of the track, and a little
+/// station building beside the first platform tile.
+fn station_boxes(world: &World, rails_layer: &Layer, stations: &Stations) -> Vec<BoxInstance> {
+    let mut boxes = Vec::new();
+    for station in stations.list.values() {
+        for (i, &(x, z)) in station.tiles.iter().enumerate() {
+            let along = if rails_layer.get(x, z) == rails::Y {
+                Vec2::new(0.0, 1.0)
+            } else {
+                Vec2::new(1.0, 0.0)
+            };
+            let side = Vec2::new(-along.y, along.x);
+            let yaw = (-along.y).atan2(along.x);
+            let centre = Vec2::new(x as f32 + 0.5, z as f32 + 0.5);
+            let ground = world.height_at(centre.x, centre.y);
+            for s in [-1.0, 1.0] {
+                let p = centre + side * (0.4 * s);
+                boxes.push(BoxInstance {
+                    center: [p.x, ground + 0.07, p.y],
+                    half: [0.5, 0.07, 0.09],
+                    yaw,
+                    color: [178, 172, 160, 0],
+                });
+            }
+            if i == 0 {
+                let p = centre + side * 0.82;
+                boxes.extend([
+                    BoxInstance {
+                        center: [p.x, ground + 0.3, p.y],
+                        half: [0.42, 0.24, 0.2],
+                        yaw,
+                        color: [222, 205, 165, 0],
+                    },
+                    BoxInstance {
+                        center: [p.x, ground + 0.58, p.y],
+                        half: [0.48, 0.05, 0.26],
+                        yaw,
+                        color: [150, 62, 50, 0],
                     },
                 ]);
             }
