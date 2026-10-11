@@ -22,7 +22,8 @@ It's written in **Rust**. It compiles to **WebAssembly** and runs fast in the br
 
 - The world is a 3D grid of blocks. The horizontal **tile** (x, z) is the unit everything is built on: one road, one track piece, one building footprint.
 - The world is stored in **chunks** (e.g. 32×32 columns × N height) so meshing, saving and editing all work chunk by chunk.
-- Water: a global sea level to start with. Rivers and lakes come later.
+- **The map is an island**: open sea all round the border. Generation sinks the terrain below sea level in a band near the edges, using a noise-wobbled distance so the coastline is irregular, with beaches where the land meets the water. The sea ring is navigable, so later **boats** can sail round the coast between ports (ports work like stations).
+- **Water**: a global sea level for now. Every tile whose surface is below it shows water, so a pit dug inland below sea level fills instantly, even if it doesn't connect to the sea. Planned: a per-tile water level filled by **flood fill from the sea** (and from generated lakes). Each terrain edit re-runs a local fill, so a channel dug from the coast floods while a sealed pit stays dry (until we add rain). Rivers come later.
 
 ### 3.2 Slopes (the big difference from tyke/Minecraft)
 
@@ -45,8 +46,9 @@ Proposed pipeline:
 2. **Flattening:** a second low-frequency "flatness" noise, which is the other half of getting broad flat areas. Where it's high, squash heights towards a plateau or terrace level.
 3. **Quantise** to integer corner heights.
 4. **Slope constraint pass:** clamp so adjacent corners differ by at most 1. This removes impassable cliffs and gives the TTD look.
-5. **Classify:** compute a per-tile "flatness" score and use it to choose settlement sites (large flat regions, spaced apart). Industries are placed with type-specific rules (e.g. quarries in hills, power stations near water or flat land).
-6. **Fill voxels:** below the surface use stone, dirt, then a grass top layer. Maybe ore layers later for mines.
+5. **Coast:** blend down to a seabed below sea level near the map edges (§3.1).
+6. **Classify:** compute a per-tile "flatness" score and use it to choose settlement sites (large flat regions, spaced apart). Industries are placed with type-specific rules (e.g. quarries in hills, power stations near water or flat land).
+7. **Fill voxels:** below the surface use stone, dirt, then a grass top layer. Maybe ore layers later for mines.
 
 All generation is **seeded and deterministic**. A debug panel (egui) exposes the seed and noise parameters so terrain can be tuned live.
 

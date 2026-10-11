@@ -520,6 +520,7 @@ impl StarcityApp {
                     ui.add(egui::Slider::new(&mut p.valley_exponent, 0.5..=3.0).text("valley flattening"));
                     ui.add(egui::Slider::new(&mut p.flatness, 0.0..=1.0).text("plateaus"));
                     ui.add(egui::Slider::new(&mut p.terrace_step, 2.0..=12.0).text("terrace step"));
+                    ui.add(egui::Slider::new(&mut p.sea_border, 0.0..=0.3).text("sea border"));
                     regen = *p != before;
                     if ui.button("Reset").clicked() {
                         *p = GenParams {

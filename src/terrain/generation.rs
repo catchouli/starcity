@@ -4,10 +4,13 @@
 //! 2. A power curve flattens the lowlands into wide valleys.
 //! 3. A second noise field marks "flat" regions where heights are softly terraced
 //!    into plateaus, which gives settlements somewhere to go.
-//! 4. Heights are quantised to whole blocks, then clamped so that neighbouring
+//! 4. Near the map edges, terrain sinks below sea level (with a noisy
+//!    distance, so the coastline is irregular): the map is an island with
+//!    open sea all round its border.
+//! 5. Heights are quantised to whole blocks, then clamped so that neighbouring
 //!    corners (including diagonals) differ by at most one block. That means every
 //!    tile is either flat or a single-step slope, as in TTD.
-//! 5. Each tile's four corner heights become a column of full blocks topped by
+//! 6. Each tile's four corner heights become a column of full blocks topped by
 //!    one shaped block.
 
 use super::{Block, Material, Shape, World};
@@ -35,6 +38,8 @@ pub struct GenParams {
     pub flatness: f32,
     /// Height between terrace levels, in blocks.
     pub terrace_step: f32,
+    /// Width of the sea border, as a fraction of the map size. 0 disables it.
+    pub sea_border: f32,
 }
 
 impl Default for GenParams {
@@ -51,6 +56,7 @@ impl Default for GenParams {
             valley_exponent: 1.5,
             flatness: 0.5,
             terrace_step: 5.0,
+            sea_border: 0.1,
         }
     }
 }
@@ -62,6 +68,14 @@ pub fn generate_heights(p: &GenParams) -> Vec<u16> {
     let warp_x = Perlin::new(p.seed.wrapping_add(1));
     let warp_z = Perlin::new(p.seed.wrapping_add(2));
     let flat = Perlin::new(p.seed.wrapping_add(3));
+    let coast = Perlin::new(p.seed.wrapping_add(4));
+    // Sea border: always open sea within `open` tiles of the edge, then a
+    // transition of `blend` tiles up to the full terrain. The noisy wobble is
+    // smaller than `open`, so the outermost ring is always water.
+    let wobble = p.size as f32 * p.sea_border * 0.5;
+    let open = wobble + 4.0;
+    let blend = p.size as f32 * p.sea_border;
+    let seabed = p.sea_level.saturating_sub(4) as f32;
 
     let amp_total: f64 = (0..p.octaves).map(|o| (p.persistence as f64).powi(o as i32)).sum();
     let mut heights = vec![0u16; n * n];
@@ -94,6 +108,13 @@ pub fn generate_heights(p: &GenParams) -> Vec<u16> {
                 let t = h / p.terrace_step;
                 let terraced = (t.floor() + smoothstep(0.4, 0.6, t.fract())) * p.terrace_step;
                 h += (terraced - h) * mask;
+            }
+
+            if p.sea_border > 0.0 {
+                let to_edge = x.min(z).min(n - 1 - x).min(n - 1 - z) as f32;
+                let w = coast.get([px * 3.0, pz * 3.0]) as f32 * wobble;
+                let land = smoothstep(open, open + blend, to_edge + w);
+                h = seabed + (h - seabed) * land;
             }
 
             heights[z * n + x] = h.round().clamp(0.0, p.max_height as f32) as u16;
@@ -223,6 +244,21 @@ mod tests {
                     assert!((a - h[(z + dz) * n + x + dx] as i32).abs() <= 1);
                 }
                 assert!((h[z * n + x + 1] as i32 - h[(z + 1) * n + x] as i32).abs() <= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn map_border_is_open_sea() {
+        let p = GenParams {
+            size: 128,
+            ..Default::default()
+        };
+        let w = generate(&p);
+        for i in 0..128 {
+            for (x, z) in [(i, 0), (i, 127), (0, i), (127, i)] {
+                let (base, _) = w.surface(x, z).unwrap_or((0, Shape(0)));
+                assert!(base < p.sea_level, "edge tile ({x}, {z}) is above water");
             }
         }
     }
