@@ -1,0 +1,664 @@
+//! 3D scene rendering with plain wgpu into an offscreen texture that egui displays.
+
+use crate::terrain::BLOCK_HEIGHT;
+use crate::terrain::mesh::{ChunkMesh, Vertex};
+use eframe::egui;
+use eframe::egui_wgpu::RenderState;
+use eframe::wgpu;
+use glam::{Mat4, Vec3, Vec4};
+use wgpu::util::DeviceExt;
+
+const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const SKY: wgpu::Color = wgpu::Color {
+    r: 0.55,
+    g: 0.70,
+    b: 0.85,
+    a: 1.0,
+};
+
+/// Texture array layers, matching the `L_*` constants in the shader.
+const TEXTURES: [&[u8]; 4] = [
+    include_bytes!("../assets/textures/grass.png"),
+    include_bytes!("../assets/textures/dirt.png"),
+    include_bytes!("../assets/textures/rock.png"),
+    include_bytes!("../assets/textures/gravel.png"),
+];
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Globals {
+    pub view_proj: [[f32; 4]; 4],
+    /// Eye position with w = 1 (perspective), or direction towards the eye with w = 0 (ortho).
+    pub camera_pos: [f32; 4],
+    pub sun_dir: [f32; 4],
+    /// Block height, grid strength, texture repeats per tile, wireframe.
+    pub params: [f32; 4],
+    /// Wireframe only.
+    pub options: [f32; 4],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderSettings {
+    pub msaa: u32,
+    /// Fraction of native resolution to render the 3D view at.
+    pub render_scale: f32,
+    pub grid: bool,
+    pub wireframe: bool,
+    pub wireframe_only: bool,
+    pub texture_repeat: f32,
+}
+
+impl Default for RenderSettings {
+    fn default() -> Self {
+        RenderSettings {
+            // MSAA is cheap on desktop GPUs but not on phones; keep the web lean by default.
+            msaa: if cfg!(target_arch = "wasm32") { 1 } else { 4 },
+            render_scale: 1.0,
+            grid: true,
+            wireframe: false,
+            wireframe_only: false,
+            texture_repeat: 0.25,
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct RenderStats {
+    pub chunks_drawn: u32,
+    pub chunks_total: u32,
+    pub quads_drawn: u32,
+    pub quads_total: u32,
+}
+
+struct GpuChunk {
+    terrain: Option<(wgpu::Buffer, u32)>,
+    water: Option<(wgpu::Buffer, u32)>,
+    min: Vec3,
+    max: Vec3,
+}
+
+struct Target {
+    size: [u32; 2],
+    samples: u32,
+    color: wgpu::TextureView,
+    msaa: Option<wgpu::TextureView>,
+    depth: wgpu::TextureView,
+    egui_id: egui::TextureId,
+}
+
+pub struct SceneRenderer {
+    shader: wgpu::ShaderModule,
+    layout: wgpu::PipelineLayout,
+    terrain_pipeline: wgpu::RenderPipeline,
+    water_pipeline: wgpu::RenderPipeline,
+    pipeline_samples: u32,
+    globals: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    quad_indices: wgpu::Buffer,
+    quad_capacity: u32,
+    chunks: Vec<GpuChunk>,
+    target: Option<Target>,
+    pub stats: RenderStats,
+}
+
+impl SceneRenderer {
+    pub fn new(rs: &RenderState) -> SceneRenderer {
+        let device = &rs.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("terrain.wgsl").into()),
+        });
+
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("globals"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain"),
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
+        });
+
+        let globals = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("globals"),
+            size: std::mem::size_of::<Globals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let textures = load_texture_array(device, &rs.queue);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globals"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&textures),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        let (terrain_pipeline, water_pipeline) = create_pipelines(device, &layout, &shader, 1);
+        let (quad_indices, quad_capacity) = create_quad_indices(device, 1024);
+
+        SceneRenderer {
+            shader,
+            layout,
+            terrain_pipeline,
+            water_pipeline,
+            pipeline_samples: 1,
+            globals,
+            bind_group,
+            quad_indices,
+            quad_capacity,
+            chunks: Vec::new(),
+            target: None,
+            stats: RenderStats::default(),
+        }
+    }
+
+    /// Replaces all chunk meshes.
+    pub fn upload_chunks(&mut self, device: &wgpu::Device, meshes: &[ChunkMesh]) {
+        let max_quads = meshes
+            .iter()
+            .map(|m| (m.terrain.len().max(m.water.len()) / 4) as u32)
+            .max()
+            .unwrap_or(0);
+        if max_quads > self.quad_capacity {
+            (self.quad_indices, self.quad_capacity) =
+                create_quad_indices(device, max_quads.next_power_of_two());
+        }
+        let upload = |verts: &[Vertex]| {
+            (!verts.is_empty()).then(|| {
+                let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("chunk"),
+                    contents: bytemuck::cast_slice(verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                (buf, (verts.len() / 4) as u32)
+            })
+        };
+        self.chunks = meshes
+            .iter()
+            .map(|m| GpuChunk {
+                terrain: upload(&m.terrain),
+                water: upload(&m.water),
+                min: Vec3::new(
+                    m.min[0] as f32,
+                    m.min[1] as f32 * BLOCK_HEIGHT - 0.1,
+                    m.min[2] as f32,
+                ),
+                max: Vec3::new(
+                    m.max[0] as f32,
+                    m.max[1] as f32 * BLOCK_HEIGHT,
+                    m.max[2] as f32,
+                ),
+            })
+            .collect();
+        self.stats.chunks_total = self.chunks.len() as u32;
+        self.stats.quads_total = self
+            .chunks
+            .iter()
+            .map(|c| quads(&c.terrain) + quads(&c.water))
+            .sum();
+    }
+
+    /// Renders the scene at `size` pixels into the offscreen target.
+    pub fn render(
+        &mut self,
+        rs: &RenderState,
+        size: [u32; 2],
+        settings: &RenderSettings,
+        view_proj: Mat4,
+        camera_pos: Vec4,
+    ) {
+        let device = &rs.device;
+        let samples = supported_samples(rs, settings.msaa);
+        if self.pipeline_samples != samples {
+            (self.terrain_pipeline, self.water_pipeline) =
+                create_pipelines(device, &self.layout, &self.shader, samples);
+            self.pipeline_samples = samples;
+        }
+        self.ensure_target(rs, size, samples);
+        let target = self.target.as_ref().unwrap();
+
+        let sun = Vec3::new(-0.45, 1.0, 0.35).normalize();
+        let globals = Globals {
+            view_proj: view_proj.to_cols_array_2d(),
+            camera_pos: camera_pos.into(),
+            sun_dir: [sun.x, sun.y, sun.z, 0.0],
+            params: [
+                BLOCK_HEIGHT,
+                if settings.grid { 0.5 } else { 0.0 },
+                settings.texture_repeat,
+                if settings.wireframe { 1.0 } else { 0.0 },
+            ],
+            options: [
+                if settings.wireframe_only { 1.0 } else { 0.0 },
+                0.0,
+                0.0,
+                0.0,
+            ],
+        };
+        rs.queue
+            .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+
+        let planes = frustum_planes(view_proj);
+        let visible: Vec<&GpuChunk> = self
+            .chunks
+            .iter()
+            .filter(|c| aabb_visible(&planes, c.min, c.max))
+            .collect();
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("scene"),
+        });
+        {
+            let (view, resolve) = match &target.msaa {
+                Some(msaa) => (msaa, Some(&target.color)),
+                None => (&target.color, None),
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: resolve,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(SKY),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_index_buffer(self.quad_indices.slice(..), wgpu::IndexFormat::Uint32);
+
+            let mut drawn = 0;
+            pass.set_pipeline(&self.terrain_pipeline);
+            for c in &visible {
+                if let Some((buf, n)) = &c.terrain {
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw_indexed(0..n * 6, 0, 0..1);
+                    drawn += n;
+                }
+            }
+            pass.set_pipeline(&self.water_pipeline);
+            for c in &visible {
+                if let Some((buf, n)) = &c.water {
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw_indexed(0..n * 6, 0, 0..1);
+                    drawn += n;
+                }
+            }
+            self.stats.quads_drawn = drawn;
+            self.stats.chunks_drawn = visible.len() as u32;
+        }
+        rs.queue.submit([encoder.finish()]);
+    }
+
+    /// The egui texture holding the last rendered frame.
+    pub fn texture_id(&self) -> Option<egui::TextureId> {
+        self.target.as_ref().map(|t| t.egui_id)
+    }
+
+    fn ensure_target(&mut self, rs: &RenderState, size: [u32; 2], samples: u32) {
+        if let Some(t) = &self.target {
+            if t.size == size && t.samples == samples {
+                return;
+            }
+        }
+        let device = &rs.device;
+        let make = |label, format, samples, usage| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: size[0],
+                        height: size[1],
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let color = make(
+            "scene color",
+            COLOR_FORMAT,
+            1,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let msaa = (samples > 1).then(|| {
+            make(
+                "scene msaa",
+                COLOR_FORMAT,
+                samples,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            )
+        });
+        let depth = make(
+            "scene depth",
+            DEPTH_FORMAT,
+            samples,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+
+        let mut egui_renderer = rs.renderer.write();
+        let egui_id = match &self.target {
+            Some(old) => {
+                egui_renderer.update_egui_texture_from_wgpu_texture(
+                    device,
+                    &color,
+                    wgpu::FilterMode::Linear,
+                    old.egui_id,
+                );
+                old.egui_id
+            }
+            None => egui_renderer.register_native_texture(device, &color, wgpu::FilterMode::Linear),
+        };
+        self.target = Some(Target {
+            size,
+            samples,
+            color,
+            msaa,
+            depth,
+            egui_id,
+        });
+    }
+}
+
+fn quads(b: &Option<(wgpu::Buffer, u32)>) -> u32 {
+    b.as_ref().map_or(0, |(_, n)| *n)
+}
+
+fn supported_samples(rs: &RenderState, wanted: u32) -> u32 {
+    if wanted <= 1 {
+        return 1;
+    }
+    let color = rs.adapter.get_texture_format_features(COLOR_FORMAT).flags;
+    let depth = rs.adapter.get_texture_format_features(DEPTH_FORMAT).flags;
+    if color.sample_count_supported(wanted) && depth.sample_count_supported(wanted) {
+        wanted
+    } else {
+        1
+    }
+}
+
+fn create_pipelines(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    samples: u32,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let attributes = [wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Uint16x4,
+        offset: 0,
+        shader_location: 0,
+    }];
+    let buffers = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &attributes,
+    })];
+    let make = |label, fs, blend, depth_write| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(depth_write),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: samples,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some(fs),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    (
+        make("terrain", "fs_terrain", None, true),
+        make(
+            "water",
+            "fs_water",
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+            false,
+        ),
+    )
+}
+
+/// One index buffer shared by every chunk: quad q uses vertices 4q..4q+3.
+fn create_quad_indices(device: &wgpu::Device, quads: u32) -> (wgpu::Buffer, u32) {
+    let indices: Vec<u32> = (0..quads)
+        .flat_map(|q| [0, 1, 2, 0, 2, 3].map(|i| q * 4 + i))
+        .collect();
+    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("quad indices"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    (buf, quads)
+}
+
+fn load_texture_array(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
+    let images: Vec<(u32, Vec<u8>)> = TEXTURES.iter().map(|png| decode_png(png)).collect();
+    let size = images[0].0;
+    let mip_count = size.ilog2() + 1;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("terrain textures"),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: images.len() as u32,
+        },
+        mip_level_count: mip_count,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (layer, (s, rgba)) in images.into_iter().enumerate() {
+        assert_eq!(s, size, "all terrain textures must be the same size");
+        let mut level = rgba;
+        let mut dim = size;
+        for mip in 0..mip_count {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &level,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dim * 4),
+                    rows_per_image: Some(dim),
+                },
+                wgpu::Extent3d {
+                    width: dim,
+                    height: dim,
+                    depth_or_array_layers: 1,
+                },
+            );
+            if dim > 1 {
+                level = downsample_srgb(&level, dim);
+                dim /= 2;
+            }
+        }
+    }
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    })
+}
+
+/// Decodes a square PNG to RGBA8. Returns (size, pixels).
+fn decode_png(bytes: &[u8]) -> (u32, Vec<u8>) {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().expect("valid png");
+    let mut buf = vec![0; reader.output_buffer_size().expect("png size")];
+    let info = reader.next_frame(&mut buf).expect("png frame");
+    let px = (info.width * info.height) as usize;
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf[..px * 4].to_vec(),
+        png::ColorType::Rgb => buf[..px * 3]
+            .chunks_exact(3)
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect(),
+        other => panic!("unsupported png colour type {other:?}"),
+    };
+    assert_eq!(info.width, info.height);
+    (info.width, rgba)
+}
+
+/// 2x2 box filter in linear space, so mips don't darken.
+fn downsample_srgb(src: &[u8], dim: u32) -> Vec<u8> {
+    let to_linear: Vec<f32> = (0..256).map(|i| srgb_to_linear(i as f32 / 255.0)).collect();
+    let half = dim / 2;
+    let mut out = vec![0u8; (half * half * 4) as usize];
+    for y in 0..half {
+        for x in 0..half {
+            for c in 0..4 {
+                let at = |sx: u32, sy: u32| src[((sy * dim + sx) * 4 + c) as usize];
+                let samples = [
+                    at(2 * x, 2 * y),
+                    at(2 * x + 1, 2 * y),
+                    at(2 * x, 2 * y + 1),
+                    at(2 * x + 1, 2 * y + 1),
+                ];
+                let v = if c == 3 {
+                    samples.iter().map(|&s| s as f32).sum::<f32>() / 4.0
+                } else {
+                    linear_to_srgb(
+                        samples.iter().map(|&s| to_linear[s as usize]).sum::<f32>() / 4.0,
+                    ) * 255.0
+                };
+                out[((y * half + x) * 4 + c) as usize] = v.round() as u8;
+            }
+        }
+    }
+    out
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+fn frustum_planes(m: Mat4) -> [Vec4; 5] {
+    let (r0, r1, r2, r3) = (m.row(0), m.row(1), m.row(2), m.row(3));
+    // Left, right, bottom, top, far. (Near is skipped; nothing sits behind the eye.)
+    [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r3 - r2]
+}
+
+fn aabb_visible(planes: &[Vec4; 5], min: Vec3, max: Vec3) -> bool {
+    planes.iter().all(|p| {
+        let v = Vec3::new(
+            if p.x >= 0.0 { max.x } else { min.x },
+            if p.y >= 0.0 { max.y } else { min.y },
+            if p.z >= 0.0 { max.z } else { min.z },
+        );
+        p.truncate().dot(v) + p.w >= 0.0
+    })
+}
