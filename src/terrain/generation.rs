@@ -75,7 +75,7 @@ pub fn generate_heights(p: &GenParams) -> Vec<u16> {
     let wobble = p.size as f32 * p.sea_border * 0.5;
     let open = wobble + 4.0;
     let blend = p.size as f32 * p.sea_border;
-    let seabed = p.sea_level.saturating_sub(4) as f32;
+    let seabed = seabed(p) as f32;
 
     let amp_total: f64 = (0..p.octaves).map(|o| (p.persistence as f64).powi(o as i32)).sum();
     let mut heights = vec![0u16; n * n];
@@ -168,6 +168,11 @@ pub(crate) fn limit_slopes(h: &mut [u16], n: usize) {
     }
 }
 
+/// Height of the sea floor around the island, in blocks.
+pub fn seabed(p: &GenParams) -> u16 {
+    p.sea_level.saturating_sub(4)
+}
+
 pub fn generate(p: &GenParams) -> World {
     let heights = generate_heights(p);
     let n = p.size + 1;
@@ -186,7 +191,7 @@ pub fn generate(p: &GenParams) -> World {
             }
 
             let surface = if base <= p.sea_level {
-                Material::Gravel
+                Material::Sand
             } else if base >= rock_line {
                 Material::Rock
             } else {

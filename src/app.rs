@@ -95,6 +95,7 @@ impl StarcityApp {
                 #[cfg(target_arch = "wasm32")]
                 show_debug: false,
                 show_about: false,
+                go_home: false,
             },
             physical_keys: PhysicalKeys::default(),
             sim: Sim::new(&World::new(1, 1, 1, 0), 0),
@@ -197,6 +198,14 @@ impl StarcityApp {
         self.drag_start = None;
         self.renderer
             .resize_infra(&rs.device, self.world.size_x as u32, self.world.size_z as u32);
+        let block = crate::terrain::BLOCK_HEIGHT;
+        let size = self.world.size_x as f32;
+        self.renderer.ocean = [
+            size,
+            self.world.sea_level as f32 * block,
+            generation::seabed(&self.params) as f32 * block,
+            size * 3.0,
+        ];
         let cloud_field = clouds::generate(self.world.size_x, self.params.seed);
         self.renderer
             .upload_clouds(&rs.device, cloud_field.size_x, &clouds::mesh(&cloud_field));
@@ -229,6 +238,14 @@ impl StarcityApp {
         self.scene_dirty = true;
     }
 
+    /// Points the camera back at the middle of the island.
+    fn centre_on_island(&mut self) {
+        let c = self.world.size_x as f32 / 2.0;
+        self.camera.focus.x = c;
+        self.camera.focus.z = c;
+        self.scene_dirty = true;
+    }
+
     /// Clouds fade away as you zoom in, so they never fill the screen.
     fn cloud_opacity(&self) -> f32 {
         let t = ((self.camera.view_height - 20.0) / 25.0).clamp(0.0, 1.0);
@@ -237,7 +254,8 @@ impl StarcityApp {
 
     fn view_proj(&self, size: [u32; 2]) -> Mat4 {
         let aspect = size[0] as f32 / size[1] as f32;
-        let radius = self.world.size_x as f32 * 1.5 + self.world.height as f32;
+        // Covers the map plus the endless ocean out to where it has faded into the sky.
+        let radius = self.world.size_x as f32 * 3.0 + self.world.height as f32;
         self.camera.view_proj(aspect, radius)
     }
 
@@ -429,6 +447,9 @@ impl StarcityApp {
             if i.key_pressed(Key::G) {
                 self.ui.grid = !self.ui.grid;
             }
+            if i.key_pressed(Key::Home) {
+                self.ui.go_home = true;
+            }
             if i.key_pressed(Key::Escape) {
                 self.ui.tool = Tool::Pointer;
             }
@@ -507,11 +528,18 @@ impl StarcityApp {
 
     /// Keeps the focus inside the map and resting on the ground.
     fn settle_focus(&mut self, dt: f32) {
+        // The view can wander out over the sea, up to a map's width past the edge.
         let size = self.world.size_x as f32;
         let f = &mut self.camera.focus;
-        f.x = f.x.clamp(0.0, size);
-        f.z = f.z.clamp(0.0, size);
-        let ground = self.world.surface_height(f.x as i32, f.z as i32);
+        f.x = f.x.clamp(-size, 2.0 * size);
+        f.z = f.z.clamp(-size, 2.0 * size);
+        let (x, z) = (f.x.floor() as i32, f.z.floor() as i32);
+        let sea = self.world.sea_level as f32 * crate::terrain::BLOCK_HEIGHT;
+        let ground = if self.world.in_bounds(x, z) {
+            self.world.surface_height(x, z).max(sea)
+        } else {
+            sea
+        };
         let diff = ground - f.y;
         if diff.abs() > 0.01 {
             f.y += diff * (dt * 10.0).min(1.0);
@@ -670,6 +698,9 @@ impl StarcityApp {
             self.scene_dirty = true;
         }
 
+        if std::mem::take(&mut self.ui.go_home) {
+            self.centre_on_island();
+        }
         if actions.new_map {
             self.params.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
             self.regenerate(rs);

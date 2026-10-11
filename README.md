@@ -38,6 +38,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | C | Clouds on/off |
 | F3 | Debug window (stats, render settings, terrain generator) |
 | Esc | Back to the pointer tool |
+| Home / island button | Centre the view on the island |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
 
 ## Development

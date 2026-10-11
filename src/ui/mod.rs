@@ -69,6 +69,8 @@ pub struct UiState {
     pub clouds: bool,
     pub show_debug: bool,
     pub show_about: bool,
+    /// Set for one frame when the player asks to centre the view on the island.
+    pub go_home: bool,
 }
 
 #[derive(Default)]
@@ -97,6 +99,11 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
             ui.checkbox(&mut s.ortho, "Orthographic\tR");
             ui.checkbox(&mut s.clouds, "Clouds\tC");
             ui.separator();
+            if ui.button("Centre on island\tHome").clicked() {
+                s.go_home = true;
+                ui.close();
+            }
+            ui.separator();
             ui.checkbox(&mut s.show_debug, "Debug window\tF3");
         });
         ui.menu_button("Help", |ui| {
@@ -118,6 +125,12 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
     ];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
+        let home = win95::tool_button(ui, SIZE, false, icon_island);
+        if home.clicked() {
+            s.go_home = true;
+        }
+        home.on_hover_text("Centre on island (Home)");
+        win95::separator(ui, SIZE);
         for (i, (label, tools)) in groups.iter().enumerate() {
             if i > 0 {
                 win95::separator(ui, SIZE);
@@ -236,6 +249,22 @@ fn icon_bulldozer(p: &Painter, r: Rect) {
     );
     p.rect_filled(Rect::from_min_max(at(0.12, 0.62), at(0.22, 0.7)), 0.0, dark);
     p.rect_filled(Rect::from_min_max(at(0.2, 0.72), at(0.95, 1.0)), 2.0, dark);
+}
+
+fn icon_island(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(r, 0.0, Color32::from_rgb(0x30, 0x70, 0xb0));
+    p.circle_filled(at(0.5, 0.62), r.width() * 0.36, Color32::from_rgb(0xd8, 0xc0, 0x80));
+    p.circle_filled(at(0.5, 0.6), r.width() * 0.28, Color32::from_rgb(0x3a, 0x8c, 0x2f));
+    // A palm tree.
+    p.line_segment(
+        [at(0.55, 0.62), at(0.5, 0.18)],
+        Stroke::new(2.0, Color32::from_rgb(0x6b, 0x45, 0x23)),
+    );
+    let leaf = Stroke::new(2.0, Color32::from_rgb(0x20, 0x60, 0x20));
+    for (x, y) in [(0.25, 0.25), (0.75, 0.22), (0.35, 0.05), (0.68, 0.06)] {
+        p.line_segment([at(0.5, 0.18), at(x, y)], leaf);
+    }
 }
 
 fn icon_cross(p: &Painter, r: Rect) {

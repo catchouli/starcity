@@ -23,12 +23,14 @@ pub enum Material {
     Grass = 1,
     Dirt = 2,
     Rock = 3,
+    #[allow(dead_code)] // Not generated any more (beaches are sand); kept for quarries.
     Gravel = 4,
     // Clouds come in four tones, from light to rain-cloud grey.
     Cloud0 = 5,
     Cloud1 = 6,
     Cloud2 = 7,
     Cloud3 = 8,
+    Sand = 9,
 }
 
 impl Material {

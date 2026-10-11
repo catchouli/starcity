@@ -15,6 +15,7 @@ MATERIALS=(
   "dirt:Ground108"
   "rock:Ground110"
   "gravel:Ground111"
+  "sand:Ground054"
 )
 
 for entry in "${MATERIALS[@]}"; do

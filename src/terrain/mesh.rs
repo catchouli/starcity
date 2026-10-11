@@ -173,28 +173,11 @@ pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
             }
 
             // Water
-            let (base, shape) = world.surface(xi, zi).unwrap_or((0, Shape(0)));
+            // Water surface over anything below sea level. (No side faces at the
+            // map edge: the endless ocean continues beyond it.)
+            let base = world.surface(xi, zi).map_or(0, |(base, _)| base);
             if base < sea {
                 water[(z - z0) * CHUNK_SIZE + (x - x0)] = Some((sea, WATER));
-                // At the map edge, close the water off with a side face.
-                for ((dx, dz), a, bc) in SIDES {
-                    let (nx, nz) = (xi + dx, zi + dz);
-                    if nx >= 0 && nz >= 0 && (nx as usize) < world.size_x && (nz as usize) < world.size_z {
-                        continue;
-                    }
-                    let ha = (base + shape.corner(a.0, a.1)).min(sea);
-                    let hb = (base + shape.corner(bc.0, bc.1)).min(sea);
-                    Builder::quad(
-                        &mut b.water,
-                        [
-                            (xu + a.0, ha, zu + a.1, false),
-                            (xu + bc.0, hb, zu + bc.1, false),
-                            (xu + bc.0, sea, zu + bc.1, true),
-                            (xu + a.0, sea, zu + a.1, true),
-                        ],
-                        WATER,
-                    );
-                }
             }
         }
     }

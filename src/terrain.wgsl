@@ -20,6 +20,9 @@ struct Globals {
     clouds: vec4<f32>,
     // Cursor in render-target pixels (xy), fade radius in pixels, 1 if over the view.
     cursor: vec4<f32>,
+    // Endless ocean around the map: map size (tiles), sea surface y, seabed y,
+    // how far the ocean extends past the map (tiles).
+    ocean: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -36,6 +39,10 @@ const L_GRASS: i32 = 0;
 const L_DIRT: i32 = 1;
 const L_ROCK: i32 = 2;
 const L_GRAVEL: i32 = 3;
+const L_SAND: i32 = 4;
+
+// Must match the renderer's clear colour, so distant ocean fades into the sky.
+const SKY: vec3<f32> = vec3<f32>(0.55, 0.70, 0.85);
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -256,6 +263,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         case 1u: { layer = select(L_DIRT, L_GRASS, is_top); }
         case 2u: { layer = L_DIRT; }
         case 4u: { layer = L_GRAVEL; }
+        case 9u: { layer = L_SAND; }
         default: {}
     }
     let base = textureSample(textures, tex_sampler, uv, layer).rgb;
@@ -265,7 +273,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let fringe = select(0.0, smoothstep(0.7, 0.85, in.edge), in.material == 1u && !is_top);
     let light = lighting(n);
     var color = mix(base, grass, fringe) * light;
-    color = mix(color, color * 0.6, grid(in.world, n) * g.params.y);
+    color = mix(color, color * 0.6, grid(in.world, n) * g.params.y * on_map(in.world));
 
     // Everything needing derivatives is done above this line.
     let px = pixel_size(in.world);
@@ -310,7 +318,23 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     let wire_bg = select(color, vec3<f32>(0.08, 0.09, 0.12), g.options.x > 0.5);
     color = mix(wire_bg, vec3<f32>(1.0, 0.85, 0.2), wf);
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(mix(color, SKY, fog(in.world)), 1.0);
+}
+
+// Fog for the endless ocean: nothing on the map is fogged, but the sea fades
+// into the sky with distance past the map's edge, so it has no visible end.
+fn fog(world: vec3<f32>) -> f32 {
+    // Measured from a circle around the island so the horizon is a smooth arc.
+    let size = g.ocean.x;
+    let from_centre = length(world.xz - vec2<f32>(size * 0.5));
+    return smoothstep(size * 0.85, size * 2.2, from_centre);
+}
+
+// 1 on the map, 0 outside it (e.g. on the endless ocean floor).
+fn on_map(world: vec3<f32>) -> f32 {
+    let size = g.ocean.x;
+    let inside = world.x >= 0.0 && world.z >= 0.0 && world.x <= size && world.z <= size;
+    return select(0.0, 1.0, inside || size == 0.0);
 }
 
 @fragment
@@ -321,7 +345,57 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let wf = wire(in.quad_uv) * g.params.w;
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);
     alpha = mix(alpha, 1.0, wf);
-    return vec4<f32>(color, alpha);
+    let f = fog(in.world);
+    return vec4<f32>(mix(color, SKY, f), mix(alpha, 1.0, f));
+}
+
+// --- Endless ocean -------------------------------------------------------------
+//
+// Four big rectangles framing the map, generated from the vertex and instance
+// index (no vertex buffers): a seabed under the sea surface. Instance i is the
+// north, south, west or east band.
+
+fn ocean_vertex(vi: u32, band: u32, y: f32, material: u32) -> VsOut {
+    let size = g.ocean.x;
+    let r = g.ocean.w;
+    var lo = vec2<f32>(-r, -r);
+    var hi = vec2<f32>(size + r, 0.0);
+    if band == 1u {
+        lo = vec2<f32>(-r, size);
+        hi = vec2<f32>(size + r, size + r);
+    } else if band == 2u {
+        lo = vec2<f32>(-r, 0.0);
+        hi = vec2<f32>(0.0, size);
+    } else if band == 3u {
+        lo = vec2<f32>(size, 0.0);
+        hi = vec2<f32>(size + r, size);
+    }
+    // Two triangles, anticlockwise from above: (lo), (lo.x, hi.z), (hi), (lo), (hi), (hi.x, lo.z).
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(1.0, 0.0),
+    );
+    let c = corners[vi];
+    let xz = mix(lo, hi, c);
+    var out: VsOut;
+    out.world = vec3<f32>(xz.x, y, xz.y);
+    out.local = out.world;
+    out.clip = g.view_proj * vec4<f32>(out.world, 1.0);
+    out.edge = 0.0;
+    out.quad_uv = c;
+    out.material = material;
+    return out;
+}
+
+@vertex
+fn vs_ocean_floor(@builtin(vertex_index) vi: u32, @builtin(instance_index) band: u32) -> VsOut {
+    return ocean_vertex(vi, band, g.ocean.z, 9u);
+}
+
+@vertex
+fn vs_ocean_water(@builtin(vertex_index) vi: u32, @builtin(instance_index) band: u32) -> VsOut {
+    // The water vertex shader lowers water slightly below sea level; match it.
+    return ocean_vertex(vi, band, g.ocean.y - 0.12 * g.params.x, WATER);
 }
 
 // --- Clouds ------------------------------------------------------------------

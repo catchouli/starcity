@@ -18,11 +18,12 @@ const SKY: wgpu::Color = wgpu::Color {
 };
 
 /// Texture array layers, matching the `L_*` constants in the shader.
-const TEXTURES: [&[u8]; 4] = [
+const TEXTURES: [&[u8]; 5] = [
     include_bytes!("../assets/textures/grass.png"),
     include_bytes!("../assets/textures/dirt.png"),
     include_bytes!("../assets/textures/rock.png"),
     include_bytes!("../assets/textures/gravel.png"),
+    include_bytes!("../assets/textures/sand.png"),
 ];
 
 #[repr(C)]
@@ -42,6 +43,8 @@ pub struct Globals {
     pub clouds: [f32; 4],
     /// Cursor position in render-target pixels, fade radius in pixels, and whether it's over the view.
     pub cursor: [f32; 4],
+    /// Endless ocean: map size, sea surface y, seabed y, extent past the map.
+    pub ocean: [f32; 4],
 }
 
 /// Per-frame cloud state.
@@ -145,6 +148,8 @@ pub struct SceneRenderer {
     pub stats: RenderStats,
     /// Whether the drag preview shows track (true) or road pieces.
     pub preview_is_rail: bool,
+    /// Endless ocean parameters (see `Globals::ocean`); size 0 hides it.
+    pub ocean: [f32; 4],
 }
 
 impl SceneRenderer {
@@ -250,6 +255,7 @@ impl SceneRenderer {
             target: None,
             stats: RenderStats::default(),
             preview_is_rail: false,
+            ocean: [0.0; 4],
         }
     }
 
@@ -411,6 +417,7 @@ impl SceneRenderer {
                 0.0,
             ],
             clouds: [clouds.altitude, self.cloud_field, clouds.opacity, 0.0],
+            ocean: self.ocean,
             cursor: match clouds.cursor {
                 Some(c) => [c.x, c.y, clouds.fade_radius, 1.0],
                 None => [0.0; 4],
@@ -494,6 +501,10 @@ impl SceneRenderer {
                     drawn += n;
                 }
             }
+            if self.ocean[0] > 0.0 {
+                pass.set_pipeline(&self.pipelines.ocean_floor);
+                pass.draw(0..6, 0..4);
+            }
             if !cloud_draws.is_empty() {
                 pass.set_pipeline(&self.pipelines.clouds);
                 for (i, &(chunk, _)) in cloud_draws.iter().enumerate() {
@@ -511,6 +522,10 @@ impl SceneRenderer {
                     pass.draw_indexed(0..n * 6, 0, 0..1);
                     drawn += n;
                 }
+            }
+            if self.ocean[0] > 0.0 {
+                pass.set_pipeline(&self.pipelines.ocean_water);
+                pass.draw(0..6, 0..4);
             }
             self.stats.quads_drawn = drawn;
             self.stats.chunks_drawn = visible.len() as u32;
@@ -664,6 +679,8 @@ struct Pipelines {
     terrain: wgpu::RenderPipeline,
     clouds: wgpu::RenderPipeline,
     water: wgpu::RenderPipeline,
+    ocean_floor: wgpu::RenderPipeline,
+    ocean_water: wgpu::RenderPipeline,
 }
 
 fn create_pipelines(
@@ -742,6 +759,15 @@ fn create_pipelines(
             "vs_main",
             "fs_water",
             &terrain_buffers,
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+            false,
+        ),
+        ocean_floor: make("ocean floor", "vs_ocean_floor", "fs_terrain", &[], None, true),
+        ocean_water: make(
+            "ocean water",
+            "vs_ocean_water",
+            "fs_water",
+            &[],
             Some(wgpu::BlendState::ALPHA_BLENDING),
             false,
         ),
