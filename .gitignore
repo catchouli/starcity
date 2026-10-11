@@ -1,0 +1,6 @@
+# Haskell reference implementation, kept locally only
+/tyke/
+
+/target/
+/dist/
+.DS_Store
