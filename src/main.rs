@@ -4,6 +4,7 @@ mod camera;
 mod devtools;
 mod picking;
 mod render;
+mod roads;
 #[cfg(test)]
 mod shader_test;
 mod sim;

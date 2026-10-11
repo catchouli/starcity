@@ -110,6 +110,12 @@ pub struct SceneRenderer {
     water_pipeline: wgpu::RenderPipeline,
     pipeline_samples: u32,
     globals: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    terrain_textures: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    /// Per-tile infrastructure bits (Rgba8Uint): r = roads, g = rails (later),
+    /// b = preview pieces that fit, a = preview pieces that are blocked.
+    infra: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     quad_indices: wgpu::Buffer,
     quad_capacity: u32,
@@ -155,6 +161,16 @@ impl SceneRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -180,24 +196,8 @@ impl SceneRenderer {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&textures),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let infra = create_infra_texture(device, 1, 1);
+        let bind_group = create_bind_group(device, &bgl, &globals, &textures, &sampler, &infra);
 
         let (terrain_pipeline, water_pipeline) = create_pipelines(device, &layout, &shader, 1);
         let (quad_indices, quad_capacity) = create_quad_indices(device, 1024);
@@ -209,6 +209,10 @@ impl SceneRenderer {
             water_pipeline,
             pipeline_samples: 1,
             globals,
+            bind_group_layout: bgl,
+            terrain_textures: textures,
+            sampler,
+            infra,
             bind_group,
             quad_indices,
             quad_capacity,
@@ -216,6 +220,42 @@ impl SceneRenderer {
             target: None,
             stats: RenderStats::default(),
         }
+    }
+
+    /// Recreates the infrastructure texture for a new map size (all zero).
+    pub fn resize_infra(&mut self, device: &wgpu::Device, size_x: u32, size_z: u32) {
+        self.infra = create_infra_texture(device, size_x, size_z);
+        self.bind_group = create_bind_group(
+            device,
+            &self.bind_group_layout,
+            &self.globals,
+            &self.terrain_textures,
+            &self.sampler,
+            &self.infra,
+        );
+    }
+
+    /// Writes RGBA infrastructure bits for a rectangle of tiles, row-major.
+    pub fn write_infra(&self, queue: &wgpu::Queue, x: u32, z: u32, w: u32, h: u32, rgba: &[u8]) {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.infra,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y: z, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Replaces all chunk meshes.
@@ -457,6 +497,56 @@ impl SceneRenderer {
             egui_id,
         });
     }
+}
+
+fn create_infra_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("infrastructure"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Uint,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+fn create_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    globals: &wgpu::Buffer,
+    textures: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    infra: &wgpu::Texture,
+) -> wgpu::BindGroup {
+    let infra_view = infra.create_view(&Default::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("globals"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(textures),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&infra_view),
+            },
+        ],
+    })
 }
 
 fn quads(b: &Option<(wgpu::Buffer, u32)>) -> u32 {

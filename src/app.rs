@@ -1,7 +1,8 @@
 use crate::camera::Camera;
 use crate::picking;
 use crate::render::{Highlight, HighlightKind, RenderSettings, SceneRenderer};
-use crate::sim::{self, Sim};
+use crate::roads::{self, Roads};
+use crate::sim::{self, Changes, Clear, Sim};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::ui::{self, Tool, UiState, win95};
@@ -32,6 +33,11 @@ pub struct StarcityApp {
     last_hover_tile: Option<(i32, i32)>,
     drag_start: Option<(i32, i32)>,
     highlight: Option<Highlight>,
+    roads: Roads,
+    /// The road being dragged out, shown as a preview.
+    road_plan: roads::Plan,
+    /// Tiles (min x, min z, max x, max z) whose infrastructure texels are stale.
+    infra_dirty: Option<[i32; 4]>,
     #[cfg(not(target_arch = "wasm32"))]
     devtools: crate::devtools::DevTools,
 }
@@ -72,6 +78,9 @@ impl StarcityApp {
             last_hover_tile: None,
             drag_start: None,
             highlight: None,
+            roads: Roads::new(1, 1),
+            road_plan: roads::Plan::default(),
+            infra_dirty: None,
             #[cfg(not(target_arch = "wasm32"))]
             devtools: crate::devtools::DevTools::from_env(),
             params,
@@ -79,7 +88,38 @@ impl StarcityApp {
         app.regenerate(rs);
         let c = app.params.size as f32 / 2.0;
         app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
+        #[cfg(not(target_arch = "wasm32"))]
+        app.dev_setup(c as i32);
         app
+    }
+
+    /// Native-only: applies `STARCITY_*` dev settings (see `devtools`).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn dev_setup(&mut self, c: i32) {
+        use crate::devtools::DevTools;
+        if let Some(zoom) = DevTools::zoom() {
+            self.camera.screen_width = zoom;
+        }
+        if DevTools::demo().as_deref() == Some("roads") {
+            let mut built = Vec::new();
+            for (a, b) in [
+                ((c - 12, c), (c + 6, c)),
+                ((c - 2, c - 8), (c - 2, c + 6)),
+                ((c + 6, c), (c + 6, c - 6)),
+                ((c + 2, c + 2), (c + 8, c + 8)),
+                ((c - 10, c - 6), (c - 4, c - 6)),
+            ] {
+                built.extend(roads::plan(&self.world, &self.roads, a, b).build(&mut self.roads));
+            }
+            self.mark_infra(&built);
+            // A road being dragged, to show the preview.
+            self.drag_start = Some((c - 10, c + 4));
+            self.last_hover_tile = Some((c - 4, c + 10));
+            self.road_plan = roads::plan(&self.world, &self.roads, (c - 10, c + 4), (c - 4, c + 10));
+            let preview: Vec<_> = self.road_plan.valid.iter().chain(&self.road_plan.blocked).map(|&(t, _)| t).collect();
+            self.mark_infra(&preview);
+            self.ui.tool = Tool::Road;
+        }
     }
 
     fn regenerate(&mut self, rs: &RenderState) {
@@ -97,6 +137,15 @@ impl StarcityApp {
         self.mesh_ms = t.elapsed().as_secs_f32() * 1000.0;
         self.renderer.upload_chunks(&rs.device, &meshes);
         self.sim = Sim::new(&self.world, self.params.seed as u64);
+        self.roads = Roads::new(self.world.size_x, self.world.size_z);
+        self.road_plan = roads::Plan::default();
+        self.infra_dirty = None;
+        self.drag_start = None;
+        self.renderer.resize_infra(
+            &rs.device,
+            self.world.size_x as u32,
+            self.world.size_z as u32,
+        );
         self.scene_dirty = true;
     }
 
@@ -134,12 +183,13 @@ impl StarcityApp {
     }
 
     /// Picks the hovered tile and runs the active tool. Returns tiles that changed.
+    /// Picks the hovered tile and runs the active tool.
     fn handle_tool(
         &mut self,
         ctx: &egui::Context,
         response: &egui::Response,
         view_proj: Mat4,
-    ) -> Vec<(i32, i32)> {
+    ) -> Changes {
         let rect = response.rect;
         let pointer = ctx
             .pointer_latest_pos()
@@ -155,25 +205,44 @@ impl StarcityApp {
             self.last_hover_tile = self.hover_tile;
         }
 
-        let mut changed = Vec::new();
+        // Every building tool works by dragging from a start tile to the cursor.
+        let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
-        if self.ui.tool != Tool::Bulldoze {
+        let tool = self.ui.tool;
+        if !matches!(tool, Tool::Bulldoze | Tool::RemoveRoad | Tool::Road) {
             self.drag_start = None;
         } else if response.drag_started_by(primary) {
             self.drag_start = self.hover_tile;
         } else if response.drag_stopped_by(primary) {
             if let (Some(a), Some(b)) = (self.drag_start.take(), self.last_hover_tile) {
-                changed = self.sim.bulldoze(&mut self.world, a, b);
+                changes = self.apply_tool(a, b);
             }
         } else if response.clicked_by(primary) {
             if let Some(t) = self.hover_tile {
-                changed = self.sim.bulldoze(&mut self.world, t, t);
+                changes = self.apply_tool(t, t);
             }
         }
 
-        let highlight = match self.ui.tool {
+        let plan = match (tool, self.drag_start, self.last_hover_tile) {
+            (Tool::Road, Some(a), Some(b)) => roads::plan(&self.world, &self.roads, a, b),
+            _ => roads::Plan::default(),
+        };
+        if plan != self.road_plan {
+            let old = std::mem::replace(&mut self.road_plan, plan);
+            let touched: Vec<_> = old
+                .valid
+                .iter()
+                .chain(&old.blocked)
+                .chain(&self.road_plan.valid)
+                .chain(&self.road_plan.blocked)
+                .map(|&(t, _)| t)
+                .collect();
+            self.mark_infra(&touched);
+        }
+
+        let highlight = match tool {
             Tool::Pointer => None,
-            Tool::Bulldoze => {
+            Tool::Bulldoze | Tool::RemoveRoad => {
                 let end = if self.drag_start.is_some() {
                     self.last_hover_tile
                 } else {
@@ -185,6 +254,8 @@ impl StarcityApp {
                     kind: HighlightKind::Bulldoze,
                 })
             }
+            // While dragging a road, the preview shows where it goes.
+            Tool::Road if self.drag_start.is_some() => None,
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -195,7 +266,75 @@ impl StarcityApp {
             self.highlight = highlight;
             self.scene_dirty = true;
         }
-        changed
+        changes
+    }
+
+    /// Applies the active tool to a dragged-out span of tiles.
+    fn apply_tool(&mut self, a: (i32, i32), b: (i32, i32)) -> Changes {
+        match self.ui.tool {
+            Tool::Bulldoze => {
+                self.sim
+                    .clear(&mut self.world, &mut self.roads, a, b, Clear::Everything)
+            }
+            Tool::RemoveRoad => {
+                self.sim
+                    .clear(&mut self.world, &mut self.roads, a, b, Clear::Roads)
+            }
+            Tool::Road => {
+                let plan = roads::plan(&self.world, &self.roads, a, b);
+                Changes {
+                    infra: plan.build(&mut self.roads),
+                    ..Default::default()
+                }
+            }
+            _ => Changes::default(),
+        }
+    }
+
+    fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
+        self.remesh_tiles(rs, &changes.terrain);
+        self.mark_infra(&changes.infra);
+    }
+
+    /// Marks tiles whose infrastructure texels need re-uploading.
+    fn mark_infra(&mut self, tiles: &[(i32, i32)]) {
+        for &(x, z) in tiles {
+            let r = self.infra_dirty.get_or_insert([x, z, x, z]);
+            *r = [r[0].min(x), r[1].min(z), r[2].max(x), r[3].max(z)];
+        }
+    }
+
+    /// Uploads the dirty rectangle of the infrastructure texture: roads plus the drag preview.
+    fn flush_infra(&mut self, rs: &RenderState) {
+        let Some([x0, z0, x1, z1]) = self.infra_dirty.take() else {
+            return;
+        };
+        let (x0, z0) = (x0.max(0), z0.max(0));
+        let (x1, z1) = (
+            x1.min(self.roads.size_x as i32 - 1),
+            z1.min(self.roads.size_z as i32 - 1),
+        );
+        if x0 > x1 || z0 > z1 {
+            return;
+        }
+        let mut preview = std::collections::HashMap::new();
+        for &(t, bits) in &self.road_plan.valid {
+            preview.entry(t).or_insert([0u8; 2])[0] |= bits;
+        }
+        for &(t, bits) in &self.road_plan.blocked {
+            preview.entry(t).or_insert([0u8; 2])[1] |= bits;
+        }
+        let mut rgba = Vec::with_capacity(((x1 - x0 + 1) * (z1 - z0 + 1) * 4) as usize);
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let [valid, blocked] = preview.get(&(x, z)).copied().unwrap_or_default();
+                rgba.extend_from_slice(&[self.roads.get(x, z), 0, valid, blocked]);
+            }
+        }
+        let (w, h) = ((x1 - x0 + 1) as u32, (z1 - z0 + 1) as u32);
+        self.renderer
+            .write_infra(&rs.queue, x0 as u32, z0 as u32, w, h, &rgba);
+        self.scene_dirty = true;
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context, dt: f32) {
@@ -414,12 +553,20 @@ impl StarcityApp {
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
             .show(ui, |ui| ui::toolbar(ui, &mut self.ui));
-        let status = match self.hover_tile {
-            Some((x, z)) => {
-                let h = self.world.surface(x, z).map_or(0, |(base, _)| base);
-                format!("Tile ({x}, {z})  height {h}")
+        let plan = &self.road_plan;
+        let status = if !plan.is_empty() {
+            match plan.blocked.len() {
+                0 => format!("Road: {} tiles", plan.valid.len()),
+                n => format!("Road: {} tiles, {n} blocked", plan.valid.len()),
             }
-            None => format!("Zoom {:.0}", self.camera.screen_width),
+        } else {
+            match self.hover_tile {
+                Some((x, z)) => {
+                    let h = self.world.surface(x, z).map_or(0, |(base, _)| base);
+                    format!("Tile ({x}, {z})  height {h}")
+                }
+                None => format!("Zoom {:.0}", self.camera.screen_width),
+            }
         };
         egui::Panel::bottom("status_bar")
             .frame(panel)
@@ -478,8 +625,9 @@ impl eframe::App for StarcityApp {
                     (rect.width() * scale).max(1.0) as u32,
                     (rect.height() * scale).max(1.0) as u32,
                 ];
-                let changed = self.handle_tool(&ctx, &response, self.view_proj(size));
-                self.remesh_tiles(&rs, &changed);
+                let changes = self.handle_tool(&ctx, &response, self.view_proj(size));
+                self.apply_changes(&rs, changes);
+                self.flush_infra(&rs);
                 self.handle_mouse(ui, &response);
 
                 if size != self.last_size {

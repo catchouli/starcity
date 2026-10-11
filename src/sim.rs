@@ -1,6 +1,22 @@
 //! Fixed-tick world simulation. For now: bulldozing and grass regrowth.
 
+use crate::roads::Roads;
 use crate::terrain::{Block, Material, World};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clear {
+    /// Bulldoze: remove everything and leave bare ground.
+    Everything,
+    /// Only tiles with roads: remove the roads and leave bare ground.
+    Roads,
+}
+
+/// Tiles whose terrain (needs re-meshing) or infrastructure (needs re-uploading) changed.
+#[derive(Default, Debug)]
+pub struct Changes {
+    pub terrain: Vec<(i32, i32)>,
+    pub infra: Vec<(i32, i32)>,
+}
 
 /// Simulation tick length.
 pub const TICK_SECONDS: f32 = 0.25;
@@ -34,41 +50,65 @@ impl Sim {
         !self.regrowing.is_empty()
     }
 
-    /// Clears an inclusive rectangle of tiles to bare ground. Grass becomes dirt
-    /// and starts regrowing; other surfaces are left as they are (there is
-    /// nothing built on them yet). Returns the tiles that changed.
-    pub fn bulldoze(&mut self, world: &mut World, a: (i32, i32), b: (i32, i32)) -> Vec<(i32, i32)> {
-        let mut changed = Vec::new();
+    /// Clears an inclusive rectangle of tiles. Cleared tiles lose their roads
+    /// and are left as bare ground: grass becomes dirt and starts regrowing.
+    pub fn clear(
+        &mut self,
+        world: &mut World,
+        roads: &mut Roads,
+        a: (i32, i32),
+        b: (i32, i32),
+        what: Clear,
+    ) -> Changes {
+        let mut changes = Changes::default();
         for z in a.1.min(b.1)..=a.1.max(b.1) {
             for x in a.0.min(b.0)..=a.0.max(b.0) {
-                let Some((y, block)) = world.top_block(x, z) else {
-                    continue;
-                };
-                if block.material != Material::Grass {
+                if !world.in_bounds(x, z) {
                     continue;
                 }
-                world.set(
-                    x as usize,
-                    y,
-                    z as usize,
-                    Block {
-                        material: Material::Dirt,
-                        ..block
-                    },
-                );
-                changed.push((x, z));
-                let i = z as usize * self.size_x + x as usize;
-                if !self.is_regrowing[i]
-                    && world
-                        .surface(x, z)
-                        .is_some_and(|(base, _)| base > world.sea_level)
-                {
-                    self.is_regrowing[i] = true;
-                    self.regrowing.push((x as u16, z as u16));
+                let had_road = roads.get(x, z) != 0;
+                if what == Clear::Roads && !had_road {
+                    continue;
+                }
+                if had_road {
+                    roads.set(x, z, 0);
+                    changes.infra.push((x, z));
+                }
+                if self.make_bare(world, x, z) {
+                    changes.terrain.push((x, z));
                 }
             }
         }
-        changed
+        changes
+    }
+
+    /// Turns a grass tile to dirt and queues it to regrow. Returns whether it changed.
+    fn make_bare(&mut self, world: &mut World, x: i32, z: i32) -> bool {
+        let Some((y, block)) = world.top_block(x, z) else {
+            return false;
+        };
+        if block.material != Material::Grass {
+            return false;
+        }
+        world.set(
+            x as usize,
+            y,
+            z as usize,
+            Block {
+                material: Material::Dirt,
+                ..block
+            },
+        );
+        let i = z as usize * self.size_x + x as usize;
+        if !self.is_regrowing[i]
+            && world
+                .surface(x, z)
+                .is_some_and(|(base, _)| base > world.sea_level)
+        {
+            self.is_regrowing[i] = true;
+            self.regrowing.push((x as u16, z as u16));
+        }
+        true
     }
 
     /// Runs as many ticks as `dt` covers. Returns the tiles that changed.
@@ -164,8 +204,9 @@ mod tests {
     fn bulldozed_patch_regrows_from_edges() {
         let mut w = grass_world(12);
         let mut sim = Sim::new(&w, 7);
-        let changed = sim.bulldoze(&mut w, (3, 3), (8, 8));
-        assert_eq!(changed.len(), 36);
+        let mut roads = Roads::new(12, 12);
+        let changes = sim.clear(&mut w, &mut roads, (3, 3), (8, 8), Clear::Everything);
+        assert_eq!(changes.terrain.len(), 36);
         assert_eq!(w.top_block(5, 5).unwrap().1.material, Material::Dirt);
 
         let mut ticks = 0;
@@ -181,9 +222,28 @@ mod tests {
     fn isolated_dirt_never_regrows() {
         let mut w = grass_world(5);
         let mut sim = Sim::new(&w, 3);
-        sim.bulldoze(&mut w, (0, 0), (4, 4));
+        sim.clear(
+            &mut w,
+            &mut Roads::new(5, 5),
+            (0, 0),
+            (4, 4),
+            Clear::Everything,
+        );
         for _ in 0..1000 {
             assert!(sim.advance(&mut w, TICK_SECONDS).is_empty());
         }
+    }
+
+    #[test]
+    fn removing_roads_leaves_other_tiles_alone() {
+        let mut w = grass_world(6);
+        let mut sim = Sim::new(&w, 1);
+        let mut roads = Roads::new(6, 6);
+        roads.set(2, 2, crate::roads::E | crate::roads::W);
+        let changes = sim.clear(&mut w, &mut roads, (0, 0), (5, 5), Clear::Roads);
+        assert_eq!(changes.infra, vec![(2, 2)]);
+        assert_eq!(changes.terrain, vec![(2, 2)]);
+        assert_eq!(roads.get(2, 2), 0);
+        assert_eq!(w.top_block(3, 3).unwrap().1.material, Material::Grass);
     }
 }

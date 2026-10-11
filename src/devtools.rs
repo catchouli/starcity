@@ -2,6 +2,8 @@
 //!
 //! - `STARCITY_SCREENSHOT=out.png`: render a few frames, save a screenshot, exit.
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
+//! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
+//! - `STARCITY_ZOOM=30`: initial zoom (visible width in tiles).
 
 use eframe::egui;
 
@@ -18,6 +20,14 @@ impl DevTools {
             frames: 0,
             requested: false,
         }
+    }
+
+    pub fn demo() -> Option<String> {
+        std::env::var("STARCITY_DEMO").ok()
+    }
+
+    pub fn zoom() -> Option<f32> {
+        std::env::var("STARCITY_ZOOM").ok()?.parse().ok()
     }
 
     pub fn show_debug() -> bool {

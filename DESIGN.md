@@ -65,7 +65,10 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 ### 4.1 Roads
 
 - **Two-way**: one tile holds a lane in each direction, so cars can pass each other.
-- 1 tile wide, and they **auto-connect** to orthogonally adjacent road tiles (the tile picks straight, corner, T or cross from its neighbours).
+- **Pieces**: each tile has 8 road bits. Four *halves* join the tile centre to an edge midpoint, and combine into straights, bends, T-junctions and crossroads. Four *diagonals* join two adjacent edge midpoints across a corner, and a 45° road is a staircase of them. Pieces meet at edge midpoints, which later forms the graph cars drive on.
+- **Drawing**: drag from a tile; mostly along an axis gives a straight road, nearer 45° gives a diagonal. The end tiles get the half pointing inwards, plus the outward half if a road already reaches that edge. That gives T-junctions, bends and continuations without special cases.
+- **Fit rules (v1)**: anything on flat ground; on a slope only straight pieces running up the slope; diagonals need flat ground; nothing on water. Pieces that don't fit show red in the preview and aren't built.
+- **Rendering**: roads are drawn by the terrain shader from a per-tile `Rgba8Uint` texture (r = roads, g = rails, b/a = drag preview), as a distance field around the pieces. They follow slopes exactly, cost no extra geometry, and placing one rewrites a single texel.
 - Towns are made of the same roads the player builds.
 
 ### 4.2 Railways
@@ -109,6 +112,10 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 
 - Individual cars driving on roads, people commuting between towns.
 - Start abstract (cargo and passenger counts moving between stations) and add visible agents once the core loop works.
+
+## 7a. Atmosphere
+
+- **Clouds**: blocky voxel clouds with sloped edges (the same block shapes as the terrain), generated from noise, drifting slowly over the map at a fixed altitude. They fade out near the mouse cursor so they never get in the way of building.
 
 ## 8. UI
 
@@ -191,9 +198,9 @@ Terrain generation was never really started: it only produced random noise for o
 - Overlay showing the flatness score and candidate settlement sites.
 
 **M3 — Win95 UI, roads & rail drawing**
-- Win95 egui theme and top toolbar (§8).
+- Win95 egui theme and top toolbar (§8). ✅
 - Tile picking (mouse ray → tile/corner) and a hover highlight.
-- Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles.
+- Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles. ✅ Remove-road tool ✅.
 - Rail tool: drag to draw track, and place signals.
 - Bulldoze tool and grass regrowth (first use of the fixed-tick simulation). ✅
 - Tile picking and hover/drag highlight ✅. Loading dialog with download progress ✅.

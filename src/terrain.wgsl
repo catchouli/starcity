@@ -20,6 +20,9 @@ struct Globals {
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var textures: texture_2d_array<f32>;
 @group(0) @binding(2) var tex_sampler: sampler;
+// Per-tile infrastructure bits: r = roads, g = rails, b = preview pieces that
+// fit, a = preview pieces that are blocked.
+@group(0) @binding(3) var infra: texture_2d<u32>;
 
 const WATER: u32 = 15u;
 
@@ -85,17 +88,94 @@ fn grid(world: vec3<f32>, n: vec3<f32>) -> f32 {
     return line * fade * step(0.5, n.y);
 }
 
+// Size of a screen pixel in world units on the ground.
+fn pixel_size(world: vec3<f32>) -> f32 {
+    return max(max(fwidth(world.x), fwidth(world.z)), 1e-5);
+}
+
 // Tints the highlighted tile rectangle and outlines its border.
-fn highlight(color: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+fn highlight(color: vec3<f32>, world: vec3<f32>, px: f32) -> vec3<f32> {
     let h = g.highlight;
     let inside = step(h.x, world.x) * step(world.x, h.z) * step(h.y, world.z) * step(world.z, h.w);
     let d = min(min(world.x - h.x, h.z - world.x), min(world.z - h.y, h.w - world.z));
-    let px = max(max(fwidth(world.x), fwidth(world.z)), 1e-5);
     let border = inside * (1.0 - smoothstep(1.0, 2.5, d / px));
     let tint = select(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(1.0, 0.2, 0.15), g.options.y > 1.5);
     let enabled = step(0.5, g.options.y);
     let c = mix(color, tint, inside * 0.3 * enabled);
     return mix(c, tint, border * enabled);
+}
+
+// --- Roads -------------------------------------------------------------------
+//
+// Each tile's road bits are pieces between its centre and edge midpoints
+// (bits 0-3: centre to N, E, S, W) or between adjacent edge midpoints
+// (bits 4-7: N-E, E-S, S-W, W-N). A fragment is on a road if it is within
+// half a road width of any piece in its own or a neighbouring tile.
+
+const ROAD_HALF_WIDTH: f32 = 0.34;
+
+// Distance from p to segment ab, and how far along the segment the nearest point is.
+fn segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+    let ab = b - a;
+    let t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+    return vec2<f32>(length(p - (a + ab * t)), t * length(ab));
+}
+
+fn nearest(best: vec2<f32>, candidate: vec2<f32>) -> vec2<f32> {
+    return select(best, candidate, candidate.x < best.x);
+}
+
+// Nearest piece among a tile's road bits: (distance, distance along the piece).
+fn pieces(p: vec2<f32>, o: vec2<f32>, bits: u32) -> vec2<f32> {
+    var best = vec2<f32>(1e6, 0.0);
+    if bits == 0u {
+        return best;
+    }
+    let c = o + vec2<f32>(0.5, 0.5);
+    let n = o + vec2<f32>(0.5, 0.0);
+    let e = o + vec2<f32>(1.0, 0.5);
+    let s = o + vec2<f32>(0.5, 1.0);
+    let w = o + vec2<f32>(0.0, 0.5);
+    if (bits & 1u) != 0u { best = nearest(best, segment(p, c, n)); }
+    if (bits & 2u) != 0u { best = nearest(best, segment(p, c, e)); }
+    if (bits & 4u) != 0u { best = nearest(best, segment(p, c, s)); }
+    if (bits & 8u) != 0u { best = nearest(best, segment(p, c, w)); }
+    if (bits & 16u) != 0u { best = nearest(best, segment(p, n, e)); }
+    if (bits & 32u) != 0u { best = nearest(best, segment(p, e, s)); }
+    if (bits & 64u) != 0u { best = nearest(best, segment(p, s, w)); }
+    if (bits & 128u) != 0u { best = nearest(best, segment(p, w, n)); }
+    return best;
+}
+
+struct Infra {
+    road: vec2<f32>,
+    preview: f32,
+    blocked: f32,
+};
+
+// Note: branches on texture data, so call it after anything that needs
+// derivatives or implicit-LOD sampling.
+fn infra_at(p: vec2<f32>) -> Infra {
+    var out = Infra(vec2<f32>(1e6, 0.0), 1e6, 1e6);
+    let tile = vec2<i32>(floor(p));
+    let dims = vec2<i32>(textureDimensions(infra));
+    for (var dz = -1; dz <= 1; dz++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let t = tile + vec2<i32>(dx, dz);
+            if t.x < 0 || t.y < 0 || t.x >= dims.x || t.y >= dims.y {
+                continue;
+            }
+            let bits = textureLoad(infra, t, 0);
+            if (bits.r | bits.b | bits.a) == 0u {
+                continue;
+            }
+            let o = vec2<f32>(t);
+            out.road = nearest(out.road, pieces(p, o, bits.r));
+            out.preview = min(out.preview, pieces(p, o, bits.b).x);
+            out.blocked = min(out.blocked, pieces(p, o, bits.a).x);
+        }
+    }
+    return out;
 }
 
 fn lighting(n: vec3<f32>) -> f32 {
@@ -124,13 +204,39 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let base = textureSample(textures, tex_sampler, uv, layer).rgb;
     // Grass fringe on the top edge of grass block sides.
     let grass = textureSample(textures, tex_sampler, uv, L_GRASS).rgb;
+    let rock = textureSample(textures, tex_sampler, in.world.xz * 0.6, L_ROCK).rgb;
     let fringe = select(0.0, smoothstep(0.7, 0.85, in.edge), in.material == 1u && !is_top);
-    var color = mix(base, grass, fringe) * lighting(n);
-
+    let light = lighting(n);
+    var color = mix(base, grass, fringe) * light;
     color = mix(color, color * 0.6, grid(in.world, n) * g.params.y);
-    color = highlight(color, in.world);
 
+    // Everything needing derivatives is done above this line.
+    let px = pixel_size(in.world);
     let wf = wire(in.quad_uv) * g.params.w;
+
+    // Roads, only on upward-facing surfaces.
+    let inf = infra_at(in.world.xz);
+    let top = step(0.5, n.y);
+    let hw = ROAD_HALF_WIDTH;
+    let road = (1.0 - smoothstep(hw - px, hw + px, inf.road.x)) * top;
+    // Fine details fade out once they'd be smaller than a pixel or two.
+    let detail = 1.0 - smoothstep(0.015, 0.05, px);
+    var asphalt = vec3<f32>(0.13, 0.13, 0.14) * (0.75 + dot(rock, vec3<f32>(0.3, 0.5, 0.2)) * 0.8);
+    let kerb = smoothstep(hw - 0.07, hw - 0.05, inf.road.x) * detail;
+    asphalt = mix(asphalt, vec3<f32>(0.5, 0.5, 0.48), kerb);
+    let centre = 1.0 - smoothstep(0.018, 0.018 + px, inf.road.x);
+    let dash = centre * step(0.5, fract(inf.road.y * 2.5)) * detail;
+    asphalt = mix(asphalt, vec3<f32>(0.9, 0.85, 0.6), dash);
+    color = mix(color, asphalt * light, road);
+
+    // Drag preview: a pale ghost road where it fits, red where it doesn't.
+    let preview = (1.0 - smoothstep(hw - px, hw + px, inf.preview)) * top;
+    color = mix(color, vec3<f32>(0.85, 0.88, 0.9) * light, preview * 0.65);
+    let blocked = (1.0 - smoothstep(hw - px, hw + px, inf.blocked)) * top;
+    color = mix(color, vec3<f32>(0.9, 0.15, 0.1), blocked * 0.7);
+
+    color = highlight(color, in.world, px);
+
     let wire_bg = select(color, vec3<f32>(0.08, 0.09, 0.12), g.options.x > 0.5);
     color = mix(wire_bg, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(color, 1.0);
@@ -139,7 +245,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let n = flat_normal(in.world);
-    var color = highlight(vec3<f32>(0.12, 0.32, 0.45) * lighting(n), in.world);
+    var color = highlight(vec3<f32>(0.12, 0.32, 0.45) * lighting(n), in.world, pixel_size(in.world));
     var alpha = 0.78;
     let wf = wire(in.quad_uv) * g.params.w;
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);
