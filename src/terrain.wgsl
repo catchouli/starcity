@@ -43,6 +43,8 @@ struct VsOut {
     // Quad-local coordinates for the wireframe overlay.
     @location(2) quad_uv: vec2<f32>,
     @location(3) @interpolate(flat) material: u32,
+    // Position in the object's own grid (clouds use it for per-block shading).
+    @location(4) local: vec3<f32>,
 };
 
 @vertex
@@ -54,6 +56,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) v: vec4<u32>) -> VsOut {
         world.y -= 0.12 * g.params.x;
     }
     out.world = world;
+    out.local = world;
     out.clip = g.view_proj * vec4<f32>(world, 1.0);
     out.edge = f32((v.w >> 4u) & 1u);
     let corner = vi & 3u;
@@ -269,6 +272,7 @@ fn vs_cloud(@builtin(vertex_index) vi: u32, @location(0) v: vec4<u32>, @location
     // Cloud blocks are cubes: one world unit tall.
     let world = vec3<f32>(f32(v.x) + offset.x, f32(v.y) + g.clouds.x, f32(v.z) + offset.y);
     out.world = world;
+    out.local = vec3<f32>(f32(v.x), f32(v.y), f32(v.z));
     out.clip = g.view_proj * vec4<f32>(world, 1.0);
     out.edge = 0.0;
     let corner = vi & 3u;
@@ -298,14 +302,18 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Each cloud has a tone (materials 5-8) from light grey to rain-cloud grey.
-    // Lit tops, darker sides and blue-grey undersides make the blocks read as 3D.
+    // Mostly white. Each cloud has a tone (materials 5-8) from white to a light
+    // grey; cumulus are brightest on top and greyer towards the base, and each
+    // block varies a little so the surface looks fluffy rather than flat.
     let tone = f32(clamp(in.material, 5u, 8u) - 5u);
-    let albedo = vec3<f32>(0.9, 0.91, 0.94) - vec3<f32>(0.11, 0.11, 0.09) * tone;
+    let albedo = vec3<f32>(1.0, 1.0, 1.0) - vec3<f32>(0.045, 0.045, 0.035) * tone;
+    let height = smoothstep(3.0, 11.0, in.local.y);
+    let block = floor(in.local - n * 0.01);
+    let jitter = fract(sin(dot(block, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453) - 0.5;
     let sun = max(dot(n, g.sun_dir.xyz), 0.0);
-    let shade = mix(0.5, 0.8, n.y * 0.5 + 0.5) + 0.25 * sun;
-    let under = mix(vec3<f32>(0.78, 0.82, 0.92), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
-    var color = albedo * under * shade;
+    let shade = mix(0.68, 0.9, n.y * 0.5 + 0.5) + 0.18 * sun;
+    let under = mix(vec3<f32>(0.84, 0.87, 0.94), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
+    var color = albedo * under * shade * mix(0.86, 1.04, height) * (1.0 + jitter * 0.08);
     color = mix(color, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(color, 1.0);
 }

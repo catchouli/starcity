@@ -114,7 +114,7 @@ impl StarcityApp {
     fn dev_setup(&mut self, c: i32) {
         use crate::devtools::DevTools;
         if let Some(zoom) = DevTools::zoom() {
-            self.camera.screen_width = zoom;
+            self.camera.view_height = zoom;
         }
         if DevTools::demo().as_deref() == Some("roads") {
             let mut built = Vec::new();
@@ -201,7 +201,7 @@ impl StarcityApp {
 
     /// Clouds fade away as you zoom in, so they never fill the screen.
     fn cloud_opacity(&self) -> f32 {
-        let t = ((self.camera.screen_width - 30.0) / 40.0).clamp(0.0, 1.0);
+        let t = ((self.camera.view_height - 20.0) / 25.0).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     }
 
@@ -389,7 +389,7 @@ impl StarcityApp {
             let back = axis(&[Key::W, Key::ArrowUp], &[Key::S, Key::ArrowDown]);
             let rotate = axis(&[Key::Q], &[Key::E]);
             if right != 0.0 || back != 0.0 {
-                let speed = self.camera.screen_width * 0.8 * dt;
+                let speed = self.camera.view_height * 0.8 * dt;
                 self.camera.pan(right * speed, back * speed);
                 self.scene_dirty = true;
             }
@@ -410,7 +410,7 @@ impl StarcityApp {
         let pan_button = response.dragged_by(egui::PointerButton::Middle)
             || (self.ui.tool == Tool::Pointer && response.dragged_by(egui::PointerButton::Primary));
         if pan_button {
-            let units_per_point = self.camera.screen_width / response.rect.width();
+            let units_per_point = self.camera.view_height / response.rect.height();
             let foreshorten = (-self.camera.pitch).sin().max(0.2);
             self.camera
                 .pan(-delta.x * units_per_point, -delta.y * units_per_point / foreshorten);
@@ -419,10 +419,34 @@ impl StarcityApp {
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
-                self.camera
-                    .zoom((-scroll * 0.0015).exp(), self.world.size_x as f32 * 2.0);
+                self.zoom_at_cursor(ui, response.rect, (-scroll * 0.0015).exp());
                 self.scene_dirty = true;
             }
+        }
+    }
+
+    /// Zooms while keeping the ground point under the cursor fixed on screen.
+    fn zoom_at_cursor(&mut self, ui: &egui::Ui, rect: egui::Rect, factor: f32) {
+        let max_width = self.world.size_x as f32 * 2.0;
+        let Some(pos) = ui.ctx().pointer_latest_pos() else {
+            self.camera.zoom(factor, max_width);
+            return;
+        };
+        let ndc = Vec2::new(
+            (pos.x - rect.min.x) / rect.width() * 2.0 - 1.0,
+            1.0 - (pos.y - rect.min.y) / rect.height() * 2.0,
+        );
+        let size = [rect.width().max(1.0) as u32, rect.height().max(1.0) as u32];
+        let plane = self.camera.focus.y;
+        let ground = |view_proj: Mat4| {
+            let ray = picking::screen_ray(view_proj, ndc);
+            (ray.dir.y < -1e-4).then(|| ray.origin + ray.dir * ((plane - ray.origin.y) / ray.dir.y))
+        };
+        let before = ground(self.view_proj(size));
+        self.camera.zoom(factor, max_width);
+        if let (Some(before), Some(after)) = (before, ground(self.view_proj(size))) {
+            self.camera.focus.x += before.x - after.x;
+            self.camera.focus.z += before.z - after.z;
         }
     }
 
@@ -467,7 +491,7 @@ impl StarcityApp {
                 ui.label(format!("focus ({:.1}, {:.1}, {:.1})", c.focus.x, c.focus.y, c.focus.z));
                 ui.label(format!(
                     "yaw {:.2}  pitch {:.2}  width {:.0}",
-                    c.yaw, c.pitch, c.screen_width
+                    c.yaw, c.pitch, c.view_height
                 ));
                 ui.label(if c.is_ortho() { "orthographic" } else { "perspective" });
             });
@@ -566,7 +590,7 @@ impl StarcityApp {
                     let h = self.world.surface(x, z).map_or(0, |(base, _)| base);
                     format!("Tile ({x}, {z})  height {h}")
                 }
-                None => format!("Zoom {:.0}", self.camera.screen_width),
+                None => format!("Zoom {:.0}", self.camera.view_height),
             }
         };
         egui::Panel::bottom("status_bar")

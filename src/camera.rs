@@ -2,7 +2,7 @@
 //!
 //! The camera blends smoothly between perspective and orthographic with a dolly
 //! zoom. As the field of view shrinks, the camera backs away so that the visible
-//! width at the focal point (`screen_width`) stays the same. Once the FOV reaches
+//! height at the focal point (`view_height`) stays the same. Once the FOV reaches
 //! its minimum, the camera switches to a true orthographic projection.
 
 use glam::camera::rh::{proj::directx as proj, view};
@@ -20,8 +20,8 @@ pub struct Camera {
     pub yaw: f32,
     /// Negative is looking down.
     pub pitch: f32,
-    /// World-space width visible at the focal point; this is the zoom level.
-    pub screen_width: f32,
+    /// World-space height visible at the focal point; this is the zoom level.
+    pub view_height: f32,
     pub fov: f32,
     pub want_ortho: bool,
 }
@@ -32,7 +32,7 @@ impl Camera {
             focus,
             yaw: PI / 6.0,
             pitch: -PI / 5.0,
-            screen_width: 80.0,
+            view_height: 50.0,
             fov: PERSPECTIVE_FOV,
             want_ortho: false,
         }
@@ -65,9 +65,9 @@ impl Camera {
         )
     }
 
-    /// Distance from the focal point that gives `screen_width` at the current FOV.
+    /// Distance from the focal point that gives `view_height` at the current FOV.
     pub fn distance(&self) -> f32 {
-        self.screen_width / (2.0 * (0.5 * self.fov).tan())
+        self.view_height / (2.0 * (0.5 * self.fov).tan())
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -82,8 +82,10 @@ impl Camera {
         let near = (dist - scene_radius).max(dist * 0.002).max(0.05);
         let far = dist + scene_radius;
         let proj = if self.is_ortho() {
-            let w = self.screen_width * 0.5;
-            let h = w / aspect;
+            // Same visible height as the perspective view at the focus (the FOV
+            // is vertical), so switching to true ortho doesn't jump.
+            let h = self.view_height * 0.5;
+            let w = h * aspect;
             proj::orthographic(-w, w, -h, h, near, far)
         } else {
             proj::perspective(self.fov, aspect, near, far)
@@ -104,7 +106,27 @@ impl Camera {
         self.pitch = (self.pitch + dpitch).clamp(-1.5, -0.12);
     }
 
-    pub fn zoom(&mut self, factor: f32, max_width: f32) {
-        self.screen_width = (self.screen_width * factor).clamp(4.0, max_width);
+    pub fn zoom(&mut self, factor: f32, max_height: f32) {
+        self.view_height = (self.view_height * factor).clamp(4.0, max_height);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn switching_to_ortho_does_not_jump() {
+        let mut cam = Camera::new(Vec3::new(50.0, 5.0, 50.0));
+        let aspect = 16.0 / 9.0;
+        let point = cam.focus + Vec3::new(7.0, 2.0, -4.0);
+        let project = |cam: &Camera| cam.view_proj(aspect, 400.0).project_point3(point).truncate();
+        cam.fov = MIN_FOV * 1.001;
+        assert!(!cam.is_ortho());
+        let before = project(&cam);
+        cam.fov = MIN_FOV;
+        assert!(cam.is_ortho());
+        let after = project(&cam);
+        assert!((before - after).length() < 0.01, "{before} vs {after}");
     }
 }
