@@ -46,7 +46,7 @@ impl Default for GenParams {
     fn default() -> Self {
         GenParams {
             seed: 1,
-            size: 256,
+            size: 512,
             max_height: 40,
             sea_level: 6,
             hill_scale: 180.0,

@@ -3,7 +3,7 @@ use crate::clouds;
 use crate::input::PhysicalKeys;
 use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
-use crate::render::{BoxInstance, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::render::{BoxInstance, BoxLayer, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::stations::{StationId, Stations};
 use crate::terrain::generation::{self, GenParams};
@@ -11,6 +11,7 @@ use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::towns::{TownId, Towns};
 use crate::trains::{SpawnError, Trains};
 use crate::ui::{self, Tool, UiState, win95};
+use crate::vehicles::{Kind, Vehicles};
 use crate::{rails, roads};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
@@ -57,6 +58,10 @@ pub struct StarcityApp {
     trains: Trains,
     stations: Stations,
     towns: Towns,
+    vehicles: Vehicles,
+    vehicles_moving: bool,
+    /// Buildings or stations changed, so the static prop boxes need rebuilding.
+    static_changed: bool,
     selected_town: Option<TownId>,
     /// Seconds since the last town and passenger update.
     town_clock: f32,
@@ -133,6 +138,9 @@ impl StarcityApp {
             trains: Trains::new(1),
             stations: Stations::default(),
             towns: Towns::empty(1, 1),
+            vehicles: Vehicles::new(1),
+            vehicles_moving: false,
+            static_changed: false,
             selected_town: None,
             town_clock: 0.0,
             track_version: 0,
@@ -258,6 +266,7 @@ impl StarcityApp {
                 }
             }
             self.props_changed = true;
+            self.static_changed = true;
             // A road being dragged, to show the preview.
             self.drag_start = Some((c - 10, c + 4));
             self.last_hover_tile = Some((c - 4, c + 10));
@@ -289,7 +298,9 @@ impl StarcityApp {
         self.selected_station = None;
         self.selected_town = None;
         self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed);
+        self.vehicles = Vehicles::new(self.params.seed as u64);
         self.props_changed = true;
+        self.static_changed = true;
         self.plan = Plan::default();
         self.drag_start = None;
         self.renderer
@@ -577,7 +588,7 @@ impl StarcityApp {
                 if plan.blocked.is_none() {
                     // Platforms on existing track change routing without changing the track.
                     self.track_version += 1;
-                    self.props_changed = true;
+                    self.static_changed = true;
                 }
                 let before: Vec<StationId> = self.stations.list.keys().copied().collect();
                 let infra = self.stations.build(&plan, &mut self.rails);
@@ -610,7 +621,7 @@ impl StarcityApp {
             self.props_changed = true;
         }
         if what == Clear::Everything && self.towns.demolish(a, b) {
-            self.props_changed = true;
+            self.static_changed = true;
         }
         changes
     }
@@ -653,7 +664,7 @@ impl StarcityApp {
         let (road_tiles, built) = self.towns.update(1.0, &self.world, &mut self.roads, &self.rails);
         self.mark_infra(&road_tiles);
         if built {
-            self.props_changed = true;
+            self.static_changed = true;
         }
         for station in self.stations.list.values_mut() {
             // Each person nearby makes about one trip every 100 seconds.
@@ -704,15 +715,21 @@ impl StarcityApp {
             }
         }
         if self.stations.tile_count() != platforms {
-            self.props_changed = true;
+            self.static_changed = true;
             self.track_version += 1;
+        }
+        if std::mem::take(&mut self.static_changed) {
+            let mut boxes = station_boxes(&self.world, &self.rails, &self.stations);
+            boxes.extend(building_boxes(&self.world, &self.towns));
+            self.renderer.set_boxes(&rs.device, &rs.queue, BoxLayer::Static, &boxes);
+            self.scene_dirty = true;
         }
         if std::mem::take(&mut self.props_changed) {
             let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
-            boxes.extend(station_boxes(&self.world, &self.rails, &self.stations));
-            boxes.extend(building_boxes(&self.world, &self.towns));
             boxes.extend(train_boxes(&self.world, &self.trains));
-            self.renderer.set_boxes(&rs.device, &rs.queue, &boxes);
+            boxes.extend(vehicle_boxes(&self.world, &self.vehicles));
+            self.renderer
+                .set_boxes(&rs.device, &rs.queue, BoxLayer::Dynamic, &boxes);
             self.scene_dirty = true;
         }
     }
@@ -1361,6 +1378,10 @@ impl eframe::App for StarcityApp {
         if !self.paused {
             self.tick_towns(frame_dt);
         }
+        self.vehicles_moving = !self.paused && self.vehicles.update(frame_dt, &self.roads, &self.towns);
+        if self.vehicles_moving {
+            self.props_changed = true;
+        }
         let changed = self.sim.advance(&mut self.world, (now - self.last_time) as f32);
         self.last_time = now;
         self.remesh_tiles(&rs, &changed);
@@ -1432,7 +1453,7 @@ impl eframe::App for StarcityApp {
         // Keep frames coming only while something is moving (including egui's
         // smoothed scrolling, which spreads one wheel tick over several frames).
         let keys_held = self.physical_keys.any_down() || ctx.input(|i| !i.keys_down.is_empty());
-        if keys_held || scene_changed || self.scene_dirty || self.trains_moving {
+        if keys_held || scene_changed || self.scene_dirty || self.trains_moving || self.vehicles_moving {
             ctx.request_repaint();
         } else if clouds_visible {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLOUD_FRAME_SECONDS));
@@ -1647,6 +1668,69 @@ fn building_boxes(world: &World, towns: &crate::towns::Towns) -> Vec<BoxInstance
             yaw: 0.0,
             color: [roof[0], roof[1], roof[2], 0],
         });
+    }
+    boxes
+}
+
+/// Props for road vehicles: cars with a cabin, long buses, and trucks with a
+/// cab and a cargo box.
+fn vehicle_boxes(world: &World, vehicles: &Vehicles) -> Vec<BoxInstance> {
+    let mut boxes = Vec::with_capacity(vehicles.list.len() * 2);
+    for v in &vehicles.list {
+        let (p, dir) = v.placement();
+        let yaw = (-dir.y).atan2(dir.x);
+        let ground = world.height_at(p.x, p.y);
+        let at = |along: f32, y: f32| {
+            let q = p + dir * along;
+            [q.x, ground + y, q.y]
+        };
+        let [r, g, b] = v.color;
+        let body = [r, g, b, 0];
+        let dark = [r / 2, g / 2, b / 2, 0];
+        match v.kind {
+            Kind::Car => boxes.extend([
+                BoxInstance {
+                    center: at(0.0, 0.06),
+                    half: [0.14, 0.045, 0.075],
+                    yaw,
+                    color: body,
+                },
+                BoxInstance {
+                    center: at(-0.02, 0.14),
+                    half: [0.08, 0.04, 0.065],
+                    yaw,
+                    color: [60, 70, 85, 0],
+                },
+            ]),
+            Kind::Bus => boxes.extend([
+                BoxInstance {
+                    center: at(0.0, 0.12),
+                    half: [0.28, 0.1, 0.085],
+                    yaw,
+                    color: body,
+                },
+                BoxInstance {
+                    center: at(0.0, 0.17),
+                    half: [0.26, 0.03, 0.088],
+                    yaw,
+                    color: [70, 80, 95, 0],
+                },
+            ]),
+            Kind::Truck => boxes.extend([
+                BoxInstance {
+                    center: at(0.15, 0.1),
+                    half: [0.08, 0.08, 0.08],
+                    yaw,
+                    color: dark,
+                },
+                BoxInstance {
+                    center: at(-0.07, 0.12),
+                    half: [0.15, 0.1, 0.09],
+                    yaw,
+                    color: body,
+                },
+            ]),
+        }
     }
     boxes
 }

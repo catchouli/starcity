@@ -242,6 +242,13 @@ impl Train {
     }
 }
 
+/// Whether a train could get from station `from` to station `to`.
+pub fn reachable(rails: &Layer, stations: &Stations, from: StationId, to: StationId) -> bool {
+    let dist = distances(rails, stations, to);
+    let Some(from) = stations.get(from) else { return false };
+    dist.keys().any(|s| from.tiles.contains(&s.tile))
+}
+
 /// Shortest distance from the end of each segment to the start of a segment
 /// in `station`, by Dijkstra backwards from the station's track.
 fn distances(rails: &Layer, stations: &Stations, station: StationId) -> HashMap<Seg, f32> {

@@ -9,6 +9,7 @@ mod picking;
 mod rails;
 mod render;
 mod roads;
+mod scenario;
 #[cfg(test)]
 mod shader_test;
 mod sim;
@@ -17,6 +18,7 @@ mod terrain;
 mod towns;
 mod trains;
 mod ui;
+mod vehicles;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {

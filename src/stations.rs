@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 
 pub type StationId = u32;
 
+#[derive(Clone)]
 pub struct Station {
     pub id: StationId,
     pub name: String,
@@ -27,7 +28,7 @@ impl Station {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Stations {
     pub list: BTreeMap<StationId, Station>,
     by_tile: BTreeMap<(i32, i32), StationId>,

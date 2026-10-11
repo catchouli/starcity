@@ -162,7 +162,17 @@ pub struct SceneRenderer {
     pub preview_is_rail: bool,
     /// Endless ocean parameters (see `Globals::ocean`); size 0 hides it.
     pub ocean: [f32; 4],
-    boxes: Option<(wgpu::Buffer, u32)>,
+    /// Instanced boxes, one buffer per `BoxLayer`.
+    boxes: [Option<(wgpu::Buffer, u32)>; 2],
+}
+
+/// Boxes that rarely change (buildings, stations) are kept apart from ones
+/// that move every frame (trains, vehicles, signals), so moving things don't
+/// re-upload the whole town.
+#[derive(Clone, Copy, Debug)]
+pub enum BoxLayer {
+    Static = 0,
+    Dynamic = 1,
 }
 
 impl SceneRenderer {
@@ -269,7 +279,7 @@ impl SceneRenderer {
             stats: RenderStats::default(),
             preview_is_rail: false,
             ocean: [0.0; 4],
-            boxes: None,
+            boxes: [None, None],
         }
     }
 
@@ -311,12 +321,10 @@ impl SceneRenderer {
 
     /// Replaces the set of instanced boxes. Reuses the buffer when it's big
     /// enough, since trains update this every frame.
-    pub fn set_boxes(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, boxes: &[BoxInstance]) {
+    pub fn set_boxes(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layer: BoxLayer, boxes: &[BoxInstance]) {
+        let slot = &mut self.boxes[layer as usize];
         let bytes: &[u8] = bytemuck::cast_slice(boxes);
-        let fits = self
-            .boxes
-            .as_ref()
-            .is_some_and(|(buf, _)| buf.size() >= bytes.len() as u64);
+        let fits = slot.as_ref().is_some_and(|(buf, _)| buf.size() >= bytes.len() as u64);
         if !fits && !boxes.is_empty() {
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("boxes"),
@@ -324,9 +332,9 @@ impl SceneRenderer {
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            self.boxes = Some((buf, 0));
+            *slot = Some((buf, 0));
         }
-        if let Some((buf, n)) = &mut self.boxes {
+        if let Some((buf, n)) = slot {
             queue.write_buffer(buf, 0, bytes);
             *n = boxes.len() as u32;
         }
@@ -542,7 +550,7 @@ impl SceneRenderer {
                 pass.set_pipeline(&self.pipelines.ocean_floor);
                 pass.draw(0..6, 0..4);
             }
-            if let Some((buf, n)) = self.boxes.as_ref().filter(|(_, n)| *n > 0) {
+            for (buf, n) in self.boxes.iter().flatten().filter(|(_, n)| *n > 0) {
                 pass.set_pipeline(&self.pipelines.boxes);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..36, 0..*n);

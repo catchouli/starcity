@@ -240,3 +240,31 @@ Terrain generation was never really started: it only produced random noise for o
 5. Visual style: textured blocks like tyke/Minecraft, or flat-shaded low-poly?
 6. Name: "Starcity" is just the directory name for now.
 7. ~~Diagonal roads and rail~~: dedicated diagonal pieces (§4.2).
+
+## 13. Hand-off: where things stand (2026-10-11)
+
+### Done in the latest session (uncommitted work is now committed)
+- **Road vehicles** (`src/vehicles.rs`): cars, buses and trucks drive the road graph in the right-hand lane, choose randomly at junctions, turn at dead ends and queue behind each other. Each town keeps a fleet sized to its population (capped at 900 vehicles in total). Tested: junction options, dead-end U-turns, queueing.
+- **Static/dynamic prop buffers**: buildings and stations go in a static box buffer, rebuilt only when they change. Trains, vehicles and signals go in a dynamic one, rebuilt each frame.
+- **Default map is 512×512** (about 29 towns).
+- **Demo scenario** (`src/scenario.rs`): `build_lines` builds rail lines between neighbouring towns (a station near each, track laid straight + 45° + straight, kept only if `trains::reachable` succeeds both ways, otherwise rolled back). **It is written and compiles, but it isn't wired up yet.**
+
+### Next steps, in order
+1. **Wire up demo mode.**
+   - Native: in `main.rs`, check `std::env::args().any(|a| a == "--demo")` and pass a flag to `StarcityApp::new`.
+   - Web: check `web_sys::window().location().search()` contains `demo`.
+   - When set, after `regenerate`: call `scenario::build_lines(&mut Railway { world, roads, buildings: &towns.occupied, signals, rails, stations }, &towns, 12)`. Then for each `Line`, `trains.spawn(&rails, line.start, line.forward, 3)` and `set_orders(id, vec![line.to, line.from], 0)`. Then name the new stations (`name_station`), mark the whole infra layer dirty, set `static_changed`, bump `track_version`, and show "Demo: N lines" in the status bar.
+   - Add a unit test that `build_lines` builds at least one line on a generated 512 map.
+   - Mention `--demo` / `?demo` in the README.
+2. **Check road vehicles visually** (native screenshot with `STARCITY_DEMO=towns`), and tune sizes, speeds and colours. Possible follow-ups: buses running between bus stops, trucks to industries, and despawning vehicles that wander far from home.
+3. **Check performance on the web at 512²**, with ~29 towns and hundreds of vehicles. The whole scene redraws every frame while anything moves. Look at generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
+4. **Not yet verified live**: passenger loading and unloading (`StarcityApp::handle_arrivals` has no test), the train, station and town windows, and the station and train tools in the browser.
+5. **Money** (M7 start): construction costs, passenger income by distance, a balance in the status bar, and loans.
+6. **Industries and cargo** (M7): coal mines and power stations etc., freight wagons, catchment for cargo.
+7. **Terraforming** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1).
+8. Smaller items: cars and trains tilting on slopes, cloud shadows, settlement-site overlay (M2), save/load.
+
+### Working notes
+- `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page.
+- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_DEMO=roads|towns`.
+- `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, so give screenshot runs ~40 s.

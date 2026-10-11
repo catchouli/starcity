@@ -79,6 +79,7 @@ pub fn diagonal_walk(start: (i32, i32), (sx, sz): (i32, i32), end: (i32, i32)) -
 }
 
 /// A per-tile bitmask layer covering the map.
+#[derive(Clone)]
 pub struct Layer {
     pub size_x: usize,
     pub size_z: usize,
