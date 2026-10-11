@@ -24,7 +24,22 @@ pub enum Material {
     Dirt = 2,
     Rock = 3,
     Gravel = 4,
-    Cloud = 5,
+    // Clouds come in four tones, from light to rain-cloud grey.
+    Cloud0 = 5,
+    Cloud1 = 6,
+    Cloud2 = 7,
+    Cloud3 = 8,
+}
+
+impl Material {
+    pub fn cloud(tone: u8) -> Material {
+        match tone {
+            0 => Material::Cloud0,
+            1 => Material::Cloud1,
+            2 => Material::Cloud2,
+            _ => Material::Cloud3,
+        }
+    }
 }
 
 /// Which top corners of a block are raised to the full block height, as a bitmask.

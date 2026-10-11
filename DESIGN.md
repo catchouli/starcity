@@ -117,7 +117,7 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 
 ## 7a. Atmosphere
 
-- **Clouds**: blocky voxel clouds with sloped edges (the same block shapes as the terrain), generated from noise, drifting slowly over the map at a fixed altitude. They fade out near the mouse cursor so they never get in the way of building. ✅ Implemented as a seamlessly tiling cloud `World` (4D-torus noise), meshed with the terrain mesher and drawn per chunk at a wind offset. They fade with an ordered dither (no sorting), near the cursor, past the map edge and when zoomed in. Idle redraws are capped at 15 fps while they drift, and C toggles them. Later: cloud shadows on the ground.
+- **Clouds**: blocky voxel clouds with sloped edges (the same block shapes as the terrain), generated from noise, drifting slowly over the map at a fixed altitude. They fade out near the mouse cursor so they never get in the way of building. ✅ Implemented as a seamlessly tiling cloud `World` holding a few small clouds (clusters of domes in cube-sized blocks, four grey tones), meshed with the terrain mesher and drawn per chunk at a wind offset. They fade with an ordered dither (no sorting), near the cursor, past the map edge and when zoomed in. Idle redraws are capped at 15 fps while they drift, and C toggles them. Later: cloud shadows on the ground.
 
 ## 8. UI
 

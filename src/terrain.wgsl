@@ -266,7 +266,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
 @vertex
 fn vs_cloud(@builtin(vertex_index) vi: u32, @location(0) v: vec4<u32>, @location(1) offset: vec2<f32>) -> VsOut {
     var out: VsOut;
-    let world = vec3<f32>(f32(v.x) + offset.x, f32(v.y) * g.params.x + g.clouds.x, f32(v.z) + offset.y);
+    // Cloud blocks are cubes: one world unit tall.
+    let world = vec3<f32>(f32(v.x) + offset.x, f32(v.y) + g.clouds.x, f32(v.z) + offset.y);
     out.world = world;
     out.clip = g.view_proj * vec4<f32>(world, 1.0);
     out.edge = 0.0;
@@ -297,11 +298,14 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Bright tops, greyer sides, blue-grey undersides, so the blocks read as 3D.
+    // Each cloud has a tone (materials 5-8) from light grey to rain-cloud grey.
+    // Lit tops, darker sides and blue-grey undersides make the blocks read as 3D.
+    let tone = f32(clamp(in.material, 5u, 8u) - 5u);
+    let albedo = vec3<f32>(0.9, 0.91, 0.94) - vec3<f32>(0.11, 0.11, 0.09) * tone;
     let sun = max(dot(n, g.sun_dir.xyz), 0.0);
-    let shade = mix(0.55, 0.82, n.y * 0.5 + 0.5) + 0.25 * sun;
-    let tint = mix(vec3<f32>(0.80, 0.85, 0.95), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
-    var color = tint * shade;
+    let shade = mix(0.5, 0.8, n.y * 0.5 + 0.5) + 0.25 * sun;
+    let under = mix(vec3<f32>(0.78, 0.82, 0.92), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
+    var color = albedo * under * shade;
     color = mix(color, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(color, 1.0);
 }
