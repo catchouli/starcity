@@ -15,6 +15,10 @@ struct Globals {
     options: vec4<f32>,
     // Highlighted tile rectangle: min x, min z, max x, max z (world units).
     highlight: vec4<f32>,
+    // Clouds: altitude (world units), field size (tiles), opacity.
+    clouds: vec4<f32>,
+    // Cursor in render-target pixels (xy), fade radius in pixels, 1 if over the view.
+    cursor: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -251,4 +255,53 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);
     alpha = mix(alpha, 1.0, wf);
     return vec4<f32>(color, alpha);
+}
+
+// --- Clouds ------------------------------------------------------------------
+//
+// Cloud chunks are drawn with a per-draw xz offset (wind drift and wrapping).
+// They're opaque, and fade with an ordered dither (screen-door transparency):
+// near the cursor, beyond the map edge, and when zoomed in close.
+
+@vertex
+fn vs_cloud(@builtin(vertex_index) vi: u32, @location(0) v: vec4<u32>, @location(1) offset: vec2<f32>) -> VsOut {
+    var out: VsOut;
+    let world = vec3<f32>(f32(v.x) + offset.x, f32(v.y) * g.params.x + g.clouds.x, f32(v.z) + offset.y);
+    out.world = world;
+    out.clip = g.view_proj * vec4<f32>(world, 1.0);
+    out.edge = 0.0;
+    let corner = vi & 3u;
+    out.quad_uv = vec2<f32>(f32(corner == 1u || corner == 2u), f32(corner >= 2u));
+    out.material = v.w & 15u;
+    return out;
+}
+
+// 4x4 Bayer matrix threshold in (0, 1).
+fn bayer4(p: vec2<u32>) -> f32 {
+    var m = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    return (m[(p.y & 3u) * 4u + (p.x & 3u)] + 0.5) / 16.0;
+}
+
+@fragment
+fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
+    let n = flat_normal(in.world);
+    let wf = wire(in.quad_uv) * g.params.w;
+
+    let to_cursor = distance(in.clip.xy, g.cursor.xy);
+    let near_cursor = select(1.0, smoothstep(g.cursor.z * 0.4, g.cursor.z, to_cursor), g.cursor.w > 0.5);
+    let size = g.clouds.y;
+    let outside = max(max(-in.world.x, in.world.x - size), max(-in.world.z, in.world.z - size));
+    let past_edge = 1.0 - smoothstep(0.0, 20.0, outside);
+    let alpha = g.clouds.z * near_cursor * past_edge;
+    if alpha < bayer4(vec2<u32>(in.clip.xy)) {
+        discard;
+    }
+
+    // Bright tops, greyer sides, blue-grey undersides, so the blocks read as 3D.
+    let sun = max(dot(n, g.sun_dir.xyz), 0.0);
+    let shade = mix(0.55, 0.82, n.y * 0.5 + 0.5) + 0.25 * sun;
+    let tint = mix(vec3<f32>(0.80, 0.85, 0.95), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
+    var color = tint * shade;
+    color = mix(color, vec3<f32>(1.0, 0.85, 0.2), wf);
+    return vec4<f32>(color, 1.0);
 }

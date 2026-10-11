@@ -100,11 +100,7 @@ impl Sim {
             },
         );
         let i = z as usize * self.size_x + x as usize;
-        if !self.is_regrowing[i]
-            && world
-                .surface(x, z)
-                .is_some_and(|(base, _)| base > world.sea_level)
-        {
+        if !self.is_regrowing[i] && world.surface(x, z).is_some_and(|(base, _)| base > world.sea_level) {
             self.is_regrowing[i] = true;
             self.regrowing.push((x as u16, z as u16));
         }
@@ -222,13 +218,7 @@ mod tests {
     fn isolated_dirt_never_regrows() {
         let mut w = grass_world(5);
         let mut sim = Sim::new(&w, 3);
-        sim.clear(
-            &mut w,
-            &mut Roads::new(5, 5),
-            (0, 0),
-            (4, 4),
-            Clear::Everything,
-        );
+        sim.clear(&mut w, &mut Roads::new(5, 5), (0, 0), (4, 4), Clear::Everything);
         for _ in 0..1000 {
             assert!(sim.advance(&mut w, TICK_SECONDS).is_empty());
         }

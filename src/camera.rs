@@ -44,11 +44,7 @@ impl Camera {
 
     /// Advances the FOV transition. Returns true while it is still animating.
     pub fn update(&mut self, dt: f32) -> bool {
-        let target = if self.want_ortho {
-            MIN_FOV
-        } else {
-            PERSPECTIVE_FOV
-        };
+        let target = if self.want_ortho { MIN_FOV } else { PERSPECTIVE_FOV };
         if self.fov == target {
             return false;
         }

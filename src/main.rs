@@ -1,5 +1,6 @@
 mod app;
 mod camera;
+mod clouds;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
 mod picking;

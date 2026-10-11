@@ -1,6 +1,7 @@
 use crate::camera::Camera;
+use crate::clouds;
 use crate::picking;
-use crate::render::{Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::render::{CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
 use crate::roads::{self, Roads};
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::terrain::generation::{self, GenParams};
@@ -11,6 +12,11 @@ use eframe::egui_wgpu::RenderState;
 use glam::{Mat4, Vec2, Vec3};
 use std::collections::BTreeSet;
 use web_time::Instant;
+
+/// Wind speed and direction, in tiles per second.
+const WIND: Vec2 = Vec2::new(0.6, 0.25);
+/// Redraw interval while the only thing moving is the clouds.
+const CLOUD_FRAME_SECONDS: f64 = 1.0 / 15.0;
 
 pub struct StarcityApp {
     params: GenParams,
@@ -38,6 +44,11 @@ pub struct StarcityApp {
     road_plan: roads::Plan,
     /// Tiles (min x, min z, max x, max z) whose infrastructure texels are stale.
     infra_dirty: Option<[i32; 4]>,
+    /// How far the wind has carried the clouds, in tiles.
+    wind: Vec2,
+    last_cloud_render: f64,
+    last_cursor_px: Option<Vec2>,
+    clouds_shown: bool,
     #[cfg(not(target_arch = "wasm32"))]
     devtools: crate::devtools::DevTools,
 }
@@ -66,6 +77,7 @@ impl StarcityApp {
                 wireframe: false,
                 grid: true,
                 ortho: false,
+                clouds: true,
                 #[cfg(not(target_arch = "wasm32"))]
                 show_debug: crate::devtools::DevTools::show_debug(),
                 #[cfg(target_arch = "wasm32")]
@@ -81,6 +93,10 @@ impl StarcityApp {
             roads: Roads::new(1, 1),
             road_plan: roads::Plan::default(),
             infra_dirty: None,
+            wind: Vec2::ZERO,
+            last_cloud_render: 0.0,
+            last_cursor_px: None,
+            clouds_shown: true,
             #[cfg(not(target_arch = "wasm32"))]
             devtools: crate::devtools::DevTools::from_env(),
             params,
@@ -116,7 +132,13 @@ impl StarcityApp {
             self.drag_start = Some((c - 10, c + 4));
             self.last_hover_tile = Some((c - 4, c + 10));
             self.road_plan = roads::plan(&self.world, &self.roads, (c - 10, c + 4), (c - 4, c + 10));
-            let preview: Vec<_> = self.road_plan.valid.iter().chain(&self.road_plan.blocked).map(|&(t, _)| t).collect();
+            let preview: Vec<_> = self
+                .road_plan
+                .valid
+                .iter()
+                .chain(&self.road_plan.blocked)
+                .map(|&(t, _)| t)
+                .collect();
             self.mark_infra(&preview);
             self.ui.tool = Tool::Road;
         }
@@ -141,11 +163,11 @@ impl StarcityApp {
         self.road_plan = roads::Plan::default();
         self.infra_dirty = None;
         self.drag_start = None;
-        self.renderer.resize_infra(
-            &rs.device,
-            self.world.size_x as u32,
-            self.world.size_z as u32,
-        );
+        self.renderer
+            .resize_infra(&rs.device, self.world.size_x as u32, self.world.size_z as u32);
+        let cloud_field = clouds::generate(self.world.size_x, self.params.seed);
+        self.renderer
+            .upload_clouds(&rs.device, cloud_field.size_x, &clouds::mesh(&cloud_field));
         self.scene_dirty = true;
     }
 
@@ -170,10 +192,15 @@ impl StarcityApp {
         }
         for (cx, cz) in chunks {
             let mesh = mesh::mesh_chunk(&self.world, cx, cz);
-            self.renderer
-                .update_chunk(&rs.device, cz * cw as usize + cx, &mesh);
+            self.renderer.update_chunk(&rs.device, cz * cw as usize + cx, &mesh);
         }
         self.scene_dirty = true;
+    }
+
+    /// Clouds fade away as you zoom in, so they never fill the screen.
+    fn cloud_opacity(&self) -> f32 {
+        let t = ((self.camera.screen_width - 30.0) / 40.0).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 
     fn view_proj(&self, size: [u32; 2]) -> Mat4 {
@@ -184,12 +211,7 @@ impl StarcityApp {
 
     /// Picks the hovered tile and runs the active tool. Returns tiles that changed.
     /// Picks the hovered tile and runs the active tool.
-    fn handle_tool(
-        &mut self,
-        ctx: &egui::Context,
-        response: &egui::Response,
-        view_proj: Mat4,
-    ) -> Changes {
+    fn handle_tool(&mut self, ctx: &egui::Context, response: &egui::Response, view_proj: Mat4) -> Changes {
         let rect = response.rect;
         let pointer = ctx
             .pointer_latest_pos()
@@ -272,14 +294,10 @@ impl StarcityApp {
     /// Applies the active tool to a dragged-out span of tiles.
     fn apply_tool(&mut self, a: (i32, i32), b: (i32, i32)) -> Changes {
         match self.ui.tool {
-            Tool::Bulldoze => {
-                self.sim
-                    .clear(&mut self.world, &mut self.roads, a, b, Clear::Everything)
-            }
-            Tool::RemoveRoad => {
-                self.sim
-                    .clear(&mut self.world, &mut self.roads, a, b, Clear::Roads)
-            }
+            Tool::Bulldoze => self
+                .sim
+                .clear(&mut self.world, &mut self.roads, a, b, Clear::Everything),
+            Tool::RemoveRoad => self.sim.clear(&mut self.world, &mut self.roads, a, b, Clear::Roads),
             Tool::Road => {
                 let plan = roads::plan(&self.world, &self.roads, a, b);
                 Changes {
@@ -332,8 +350,7 @@ impl StarcityApp {
             }
         }
         let (w, h) = ((x1 - x0 + 1) as u32, (z1 - z0 + 1) as u32);
-        self.renderer
-            .write_infra(&rs.queue, x0 as u32, z0 as u32, w, h, &rgba);
+        self.renderer.write_infra(&rs.queue, x0 as u32, z0 as u32, w, h, &rgba);
         self.scene_dirty = true;
     }
 
@@ -351,6 +368,9 @@ impl StarcityApp {
             }
             if i.key_pressed(Key::R) {
                 self.ui.ortho = !self.ui.ortho;
+            }
+            if i.key_pressed(Key::C) {
+                self.ui.clouds = !self.ui.clouds;
             }
             if i.key_pressed(Key::G) {
                 self.ui.grid = !self.ui.grid;
@@ -390,10 +410,8 @@ impl StarcityApp {
         if pan_button {
             let units_per_point = self.camera.screen_width / response.rect.width();
             let foreshorten = (-self.camera.pitch).sin().max(0.2);
-            self.camera.pan(
-                -delta.x * units_per_point,
-                -delta.y * units_per_point / foreshorten,
-            );
+            self.camera
+                .pan(-delta.x * units_per_point, -delta.y * units_per_point / foreshorten);
             self.scene_dirty = true;
         }
         if response.hovered() {
@@ -427,10 +445,7 @@ impl StarcityApp {
             ui.set_width(270.0);
             let info = rs.adapter.get_info();
             let s = self.renderer.stats;
-            ui.label(format!(
-                "{:.1} ms/frame  ·  {:?}",
-                self.frame_ms, info.backend
-            ));
+            ui.label(format!("{:.1} ms/frame  ·  {:?}", self.frame_ms, info.backend));
             ui.label(format!("scene renders: {}", self.scene_renders));
             ui.label(format!(
                 "chunks {}/{}  ·  quads {}/{}",
@@ -447,19 +462,12 @@ impl StarcityApp {
 
             ui.collapsing("Camera", |ui| {
                 let c = &self.camera;
-                ui.label(format!(
-                    "focus ({:.1}, {:.1}, {:.1})",
-                    c.focus.x, c.focus.y, c.focus.z
-                ));
+                ui.label(format!("focus ({:.1}, {:.1}, {:.1})", c.focus.x, c.focus.y, c.focus.z));
                 ui.label(format!(
                     "yaw {:.2}  pitch {:.2}  width {:.0}",
                     c.yaw, c.pitch, c.screen_width
                 ));
-                ui.label(if c.is_ortho() {
-                    "orthographic"
-                } else {
-                    "perspective"
-                });
+                ui.label(if c.is_ortho() { "orthographic" } else { "perspective" });
             });
 
             ui.collapsing("Rendering", |ui| {
@@ -475,14 +483,8 @@ impl StarcityApp {
                             ui.selectable_value(&mut self.settings.msaa, n, format!("{n}x"));
                         }
                     });
-                ui.add(
-                    egui::Slider::new(&mut self.settings.render_scale, 0.25..=1.0)
-                        .text("render scale"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.settings.texture_repeat, 0.05..=1.0)
-                        .text("texture repeat"),
-                );
+                ui.add(egui::Slider::new(&mut self.settings.render_scale, 0.25..=1.0).text("render scale"));
+                ui.add(egui::Slider::new(&mut self.settings.texture_repeat, 0.05..=1.0).text("texture repeat"));
                 if self.settings != before {
                     self.scene_dirty = true;
                 }
@@ -497,8 +499,7 @@ impl StarcityApp {
                         ui.label("seed");
                         ui.add(egui::DragValue::new(&mut p.seed));
                         if ui.button("🎲").clicked() {
-                            p.seed = (ui.input(|i| i.time) * 1e6) as u32
-                                ^ p.seed.wrapping_mul(2654435761);
+                            p.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ p.seed.wrapping_mul(2654435761);
                         }
                     });
                     egui::ComboBox::from_label("map size")
@@ -514,10 +515,7 @@ impl StarcityApp {
                     ui.add(egui::Slider::new(&mut p.octaves, 1..=6).text("octaves"));
                     ui.add(egui::Slider::new(&mut p.persistence, 0.1..=0.7).text("roughness"));
                     ui.add(egui::Slider::new(&mut p.warp, 0.0..=100.0).text("warp"));
-                    ui.add(
-                        egui::Slider::new(&mut p.valley_exponent, 0.5..=3.0)
-                            .text("valley flattening"),
-                    );
+                    ui.add(egui::Slider::new(&mut p.valley_exponent, 0.5..=3.0).text("valley flattening"));
                     ui.add(egui::Slider::new(&mut p.flatness, 0.0..=1.0).text("plateaus"));
                     ui.add(egui::Slider::new(&mut p.terrace_step, 2.0..=12.0).text("terrace step"));
                     regen = *p != before;
@@ -579,10 +577,13 @@ impl StarcityApp {
             self.scene_dirty = true;
         }
         self.camera.want_ortho = self.ui.ortho;
+        if self.ui.clouds != self.clouds_shown {
+            self.clouds_shown = self.ui.clouds;
+            self.scene_dirty = true;
+        }
 
         if actions.new_map {
-            self.params.seed =
-                (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
+            self.params.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
             self.regenerate(rs);
         }
     }
@@ -602,9 +603,16 @@ impl eframe::App for StarcityApp {
         self.settle_focus(dt);
 
         let now = ctx.input(|i| i.time);
-        let changed = self
-            .sim
-            .advance(&mut self.world, (now - self.last_time) as f32);
+        let clouds_visible = self.ui.clouds && self.cloud_opacity() > 0.0;
+        if clouds_visible {
+            self.wind += WIND * (now - self.last_time) as f32;
+            // Drifting clouds don't need full frame rate.
+            if now - self.last_cloud_render >= CLOUD_FRAME_SECONDS {
+                self.last_cloud_render = now;
+                self.scene_dirty = true;
+            }
+        }
+        let changed = self.sim.advance(&mut self.world, (now - self.last_time) as f32);
         self.last_time = now;
         self.remesh_tiles(&rs, &changed);
 
@@ -615,56 +623,64 @@ impl eframe::App for StarcityApp {
         ui::about_window(&ctx, &mut self.ui.show_about);
 
         let mut scene_changed = false;
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                let rect = ui.max_rect();
-                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                let scale = ctx.pixels_per_point() * self.settings.render_scale;
-                let size = [
-                    (rect.width() * scale).max(1.0) as u32,
-                    (rect.height() * scale).max(1.0) as u32,
-                ];
-                let changes = self.handle_tool(&ctx, &response, self.view_proj(size));
-                self.apply_changes(&rs, changes);
-                self.flush_infra(&rs);
-                self.handle_mouse(ui, &response);
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            let rect = ui.max_rect();
+            let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+            let scale = ctx.pixels_per_point() * self.settings.render_scale;
+            let size = [
+                (rect.width() * scale).max(1.0) as u32,
+                (rect.height() * scale).max(1.0) as u32,
+            ];
+            let changes = self.handle_tool(&ctx, &response, self.view_proj(size));
+            self.apply_changes(&rs, changes);
+            self.flush_infra(&rs);
+            self.handle_mouse(ui, &response);
+            // Clouds fade around the cursor, so redraw when it moves over them.
+            let cursor = ctx.pointer_latest_pos().filter(|_| response.hovered());
+            let cursor_px = cursor.map(|p| Vec2::new((p.x - rect.min.x) * scale, (p.y - rect.min.y) * scale));
+            if clouds_visible && cursor_px != self.last_cursor_px {
+                self.scene_dirty = true;
+            }
+            self.last_cursor_px = cursor_px;
 
-                if size != self.last_size {
-                    self.last_size = size;
-                    self.scene_dirty = true;
-                }
+            if size != self.last_size {
+                self.last_size = size;
+                self.scene_dirty = true;
+            }
 
-                if self.scene_dirty {
-                    scene_changed = true;
-                    let view_proj = self.view_proj(size);
-                    let camera_pos = if self.camera.is_ortho() {
-                        (-self.camera.forward()).extend(0.0)
-                    } else {
-                        self.camera.eye().extend(1.0)
-                    };
-                    self.renderer.render(
-                        &rs,
-                        size,
-                        &self.settings,
-                        view_proj,
-                        camera_pos,
-                        self.highlight,
-                    );
-                    self.scene_renders += 1;
-                    self.scene_dirty = false;
-                }
-                if let Some(id) = self.renderer.texture_id() {
-                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    ui.painter().image(id, rect, uv, egui::Color32::WHITE);
-                }
-            });
+            if self.scene_dirty {
+                scene_changed = true;
+                let view_proj = self.view_proj(size);
+                let camera_pos = if self.camera.is_ortho() {
+                    (-self.camera.forward()).extend(0.0)
+                } else {
+                    self.camera.eye().extend(1.0)
+                };
+                let clouds = CloudState {
+                    wind: self.wind,
+                    altitude: (self.params.max_height as f32 + 6.0) * crate::terrain::BLOCK_HEIGHT,
+                    opacity: if self.ui.clouds { self.cloud_opacity() } else { 0.0 },
+                    cursor: cursor_px,
+                    fade_radius: 220.0 * scale,
+                };
+                self.renderer
+                    .render(&rs, size, &self.settings, view_proj, camera_pos, self.highlight, clouds);
+                self.scene_renders += 1;
+                self.scene_dirty = false;
+            }
+            if let Some(id) = self.renderer.texture_id() {
+                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                ui.painter().image(id, rect, uv, egui::Color32::WHITE);
+            }
+        });
 
         // Keep frames coming only while something is moving (including egui's
         // smoothed scrolling, which spreads one wheel tick over several frames).
         let keys_held = ctx.input(|i| !i.keys_down.is_empty());
         if keys_held || scene_changed || self.scene_dirty {
             ctx.request_repaint();
+        } else if clouds_visible {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLOUD_FRAME_SECONDS));
         } else if self.sim.is_active() {
             ctx.request_repaint_after(std::time::Duration::from_secs_f32(sim::TICK_SECONDS));
         }

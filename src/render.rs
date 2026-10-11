@@ -5,7 +5,7 @@ use crate::terrain::mesh::{ChunkMesh, Vertex};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -38,6 +38,23 @@ pub struct Globals {
     pub options: [f32; 4],
     /// Highlighted tile rectangle in world x/z: min x, min z, max x, max z.
     pub highlight: [f32; 4],
+    /// Cloud altitude (world units), cloud field size, opacity.
+    pub clouds: [f32; 4],
+    /// Cursor position in render-target pixels, fade radius in pixels, and whether it's over the view.
+    pub cursor: [f32; 4],
+}
+
+/// Per-frame cloud state.
+#[derive(Clone, Copy, Debug)]
+pub struct CloudState {
+    /// How far the wind has carried the clouds, in tiles.
+    pub wind: Vec2,
+    pub altitude: f32,
+    /// 0 hides the clouds entirely.
+    pub opacity: f32,
+    /// Cursor position in render-target pixels, if it's over the 3D view.
+    pub cursor: Option<Vec2>,
+    pub fade_radius: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,8 +123,7 @@ struct Target {
 pub struct SceneRenderer {
     shader: wgpu::ShaderModule,
     layout: wgpu::PipelineLayout,
-    terrain_pipeline: wgpu::RenderPipeline,
-    water_pipeline: wgpu::RenderPipeline,
+    pipelines: Pipelines,
     pipeline_samples: u32,
     globals: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -120,6 +136,11 @@ pub struct SceneRenderer {
     quad_indices: wgpu::Buffer,
     quad_capacity: u32,
     chunks: Vec<GpuChunk>,
+    /// Cloud chunks: vertex buffer, quad count and origin in tiles.
+    clouds: Vec<(wgpu::Buffer, u32, [f32; 2])>,
+    cloud_offsets: wgpu::Buffer,
+    /// Size of the (square, wrapping) cloud field in tiles.
+    cloud_field: f32,
     target: Option<Target>,
     pub stats: RenderStats,
 }
@@ -199,14 +220,21 @@ impl SceneRenderer {
         let infra = create_infra_texture(device, 1, 1);
         let bind_group = create_bind_group(device, &bgl, &globals, &textures, &sampler, &infra);
 
-        let (terrain_pipeline, water_pipeline) = create_pipelines(device, &layout, &shader, 1);
+        let pipelines = create_pipelines(device, &layout, &shader, 1);
         let (quad_indices, quad_capacity) = create_quad_indices(device, 1024);
 
         SceneRenderer {
             shader,
             layout,
-            terrain_pipeline,
-            water_pipeline,
+            pipelines,
+            clouds: Vec::new(),
+            cloud_offsets: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cloud offsets"),
+                size: 8 * 256,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            cloud_field: 1.0,
             pipeline_samples: 1,
             globals,
             bind_group_layout: bgl,
@@ -258,6 +286,50 @@ impl SceneRenderer {
         );
     }
 
+    /// Replaces the cloud field's chunk meshes.
+    pub fn upload_clouds(&mut self, device: &wgpu::Device, field_size: usize, meshes: &[(ChunkMesh, (u32, u32))]) {
+        self.cloud_field = field_size as f32;
+        self.clouds = meshes
+            .iter()
+            .map(|(m, (x, z))| {
+                let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("cloud chunk"),
+                    contents: bytemuck::cast_slice(&m.terrain),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let quads = (m.terrain.len() / 4) as u32;
+                if quads > self.quad_capacity {
+                    (self.quad_indices, self.quad_capacity) = create_quad_indices(device, quads.next_power_of_two());
+                }
+                (buf, quads, [*x as f32, *z as f32])
+            })
+            .collect();
+    }
+
+    /// Which cloud chunks to draw and at what xz offset. The field wraps, so a
+    /// chunk is drawn wherever a copy of it overlaps the map (plus a margin the
+    /// clouds fade out over), possibly more than once near the seams.
+    fn cloud_draws(&self, wind: Vec2) -> Vec<(usize, [f32; 2])> {
+        let size = self.cloud_field;
+        let chunk = crate::terrain::CHUNK_SIZE as f32;
+        let margin = 24.0;
+        let shift = Vec2::new(wind.x.rem_euclid(size), wind.y.rem_euclid(size));
+        let mut draws = Vec::new();
+        for (i, (_, _, origin)) in self.clouds.iter().enumerate() {
+            for kz in -1..=1 {
+                for kx in -1..=1 {
+                    let offset = shift + Vec2::new(kx as f32, kz as f32) * size;
+                    let min = Vec2::from(*origin) + offset;
+                    let visible = |lo: f32| lo + chunk > -margin && lo < size + margin;
+                    if visible(min.x) && visible(min.y) {
+                        draws.push((i, offset.into()));
+                    }
+                }
+            }
+        }
+        draws
+    }
+
     /// Replaces all chunk meshes.
     pub fn upload_chunks(&mut self, device: &wgpu::Device, meshes: &[ChunkMesh]) {
         self.chunks = meshes.iter().map(|m| self.gpu_chunk(device, m)).collect();
@@ -273,8 +345,7 @@ impl SceneRenderer {
     fn gpu_chunk(&mut self, device: &wgpu::Device, m: &ChunkMesh) -> GpuChunk {
         let quads = (m.terrain.len().max(m.water.len()) / 4) as u32;
         if quads > self.quad_capacity {
-            (self.quad_indices, self.quad_capacity) =
-                create_quad_indices(device, quads.next_power_of_two());
+            (self.quad_indices, self.quad_capacity) = create_quad_indices(device, quads.next_power_of_two());
         }
         let upload = |verts: &[Vertex]| {
             (!verts.is_empty()).then(|| {
@@ -289,26 +360,14 @@ impl SceneRenderer {
         GpuChunk {
             terrain: upload(&m.terrain),
             water: upload(&m.water),
-            min: Vec3::new(
-                m.min[0] as f32,
-                m.min[1] as f32 * BLOCK_HEIGHT - 0.1,
-                m.min[2] as f32,
-            ),
-            max: Vec3::new(
-                m.max[0] as f32,
-                m.max[1] as f32 * BLOCK_HEIGHT,
-                m.max[2] as f32,
-            ),
+            min: Vec3::new(m.min[0] as f32, m.min[1] as f32 * BLOCK_HEIGHT - 0.1, m.min[2] as f32),
+            max: Vec3::new(m.max[0] as f32, m.max[1] as f32 * BLOCK_HEIGHT, m.max[2] as f32),
         }
     }
 
     fn update_stats(&mut self) {
         self.stats.chunks_total = self.chunks.len() as u32;
-        self.stats.quads_total = self
-            .chunks
-            .iter()
-            .map(|c| quads(&c.terrain) + quads(&c.water))
-            .sum();
+        self.stats.quads_total = self.chunks.iter().map(|c| quads(&c.terrain) + quads(&c.water)).sum();
     }
 
     /// Renders the scene at `size` pixels into the offscreen target.
@@ -320,12 +379,12 @@ impl SceneRenderer {
         view_proj: Mat4,
         camera_pos: Vec4,
         highlight: Option<Highlight>,
+        clouds: CloudState,
     ) {
         let device = &rs.device;
         let samples = supported_samples(rs, settings.msaa);
         if self.pipeline_samples != samples {
-            (self.terrain_pipeline, self.water_pipeline) =
-                create_pipelines(device, &self.layout, &self.shader, samples);
+            self.pipelines = create_pipelines(device, &self.layout, &self.shader, samples);
             self.pipeline_samples = samples;
         }
         self.ensure_target(rs, size, samples);
@@ -348,6 +407,11 @@ impl SceneRenderer {
                 0.0,
                 0.0,
             ],
+            clouds: [clouds.altitude, self.cloud_field, clouds.opacity, 0.0],
+            cursor: match clouds.cursor {
+                Some(c) => [c.x, c.y, clouds.fade_radius, 1.0],
+                None => [0.0; 4],
+            },
             highlight: highlight.map_or([0.0; 4], |h| {
                 [
                     h.a.0.min(h.b.0) as f32,
@@ -357,8 +421,7 @@ impl SceneRenderer {
                 ]
             }),
         };
-        rs.queue
-            .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        rs.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
         let planes = frustum_planes(view_proj);
         let visible: Vec<&GpuChunk> = self
@@ -367,9 +430,27 @@ impl SceneRenderer {
             .filter(|c| aabb_visible(&planes, c.min, c.max))
             .collect();
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("scene"),
-        });
+        let cloud_draws = if clouds.opacity > 0.0 {
+            self.cloud_draws(clouds.wind)
+        } else {
+            Vec::new()
+        };
+        if !cloud_draws.is_empty() {
+            let offsets: Vec<[f32; 2]> = cloud_draws.iter().map(|&(_, o)| o).collect();
+            let bytes = (offsets.len() * 8) as u64;
+            if bytes > self.cloud_offsets.size() {
+                self.cloud_offsets = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("cloud offsets"),
+                    size: bytes.next_power_of_two(),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            rs.queue
+                .write_buffer(&self.cloud_offsets, 0, bytemuck::cast_slice(&offsets));
+        }
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("scene") });
         {
             let (view, resolve) = match &target.msaa {
                 Some(msaa) => (msaa, Some(&target.color)),
@@ -402,7 +483,7 @@ impl SceneRenderer {
             pass.set_index_buffer(self.quad_indices.slice(..), wgpu::IndexFormat::Uint32);
 
             let mut drawn = 0;
-            pass.set_pipeline(&self.terrain_pipeline);
+            pass.set_pipeline(&self.pipelines.terrain);
             for c in &visible {
                 if let Some((buf, n)) = &c.terrain {
                     pass.set_vertex_buffer(0, buf.slice(..));
@@ -410,7 +491,17 @@ impl SceneRenderer {
                     drawn += n;
                 }
             }
-            pass.set_pipeline(&self.water_pipeline);
+            if !cloud_draws.is_empty() {
+                pass.set_pipeline(&self.pipelines.clouds);
+                for (i, &(chunk, _)) in cloud_draws.iter().enumerate() {
+                    let (buf, n, _) = &self.clouds[chunk];
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.set_vertex_buffer(1, self.cloud_offsets.slice(i as u64 * 8..(i as u64 + 1) * 8));
+                    pass.draw_indexed(0..n * 6, 0, 0..1);
+                    drawn += n;
+                }
+            }
+            pass.set_pipeline(&self.pipelines.water);
             for c in &visible {
                 if let Some((buf, n)) = &c.water {
                     pass.set_vertex_buffer(0, buf.slice(..));
@@ -566,31 +657,48 @@ fn supported_samples(rs: &RenderState, wanted: u32) -> u32 {
     }
 }
 
+struct Pipelines {
+    terrain: wgpu::RenderPipeline,
+    clouds: wgpu::RenderPipeline,
+    water: wgpu::RenderPipeline,
+}
+
 fn create_pipelines(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     samples: u32,
-) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-    let attributes = [wgpu::VertexAttribute {
+) -> Pipelines {
+    let vertex_attrs = [wgpu::VertexAttribute {
         format: wgpu::VertexFormat::Uint16x4,
         offset: 0,
         shader_location: 0,
     }];
-    let buffers = [Some(wgpu::VertexBufferLayout {
+    let vertices = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &attributes,
-    })];
-    let make = |label, fs, blend, depth_write| {
+        attributes: &vertex_attrs,
+    };
+    // Clouds take a per-draw xz offset as an instance attribute.
+    let offset_attrs = [wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x2,
+        offset: 0,
+        shader_location: 1,
+    }];
+    let offsets = wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &offset_attrs,
+    };
+    let make = |label, vs, fs, buffers: &[Option<wgpu::VertexBufferLayout>], blend, depth_write| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(vs),
                 compilation_options: Default::default(),
-                buffers: &buffers,
+                buffers,
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
@@ -621,22 +729,25 @@ fn create_pipelines(
             cache: None,
         })
     };
-    (
-        make("terrain", "fs_terrain", None, true),
-        make(
+    let terrain_buffers = [Some(vertices.clone())];
+    let cloud_buffers = [Some(vertices), Some(offsets)];
+    Pipelines {
+        terrain: make("terrain", "vs_main", "fs_terrain", &terrain_buffers, None, true),
+        clouds: make("clouds", "vs_cloud", "fs_cloud", &cloud_buffers, None, true),
+        water: make(
             "water",
+            "vs_main",
             "fs_water",
+            &terrain_buffers,
             Some(wgpu::BlendState::ALPHA_BLENDING),
             false,
         ),
-    )
+    }
 }
 
 /// One index buffer shared by every chunk: quad q uses vertices 4q..4q+3.
 fn create_quad_indices(device: &wgpu::Device, quads: u32) -> (wgpu::Buffer, u32) {
-    let indices: Vec<u32> = (0..quads)
-        .flat_map(|q| [0, 1, 2, 0, 2, 3].map(|i| q * 4 + i))
-        .collect();
+    let indices: Vec<u32> = (0..quads).flat_map(|q| [0, 1, 2, 0, 2, 3].map(|i| q * 4 + i)).collect();
     let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("quad indices"),
         contents: bytemuck::cast_slice(&indices),
@@ -741,9 +852,7 @@ fn downsample_srgb(src: &[u8], dim: u32) -> Vec<u8> {
                 let v = if c == 3 {
                     samples.iter().map(|&s| s as f32).sum::<f32>() / 4.0
                 } else {
-                    linear_to_srgb(
-                        samples.iter().map(|&s| to_linear[s as usize]).sum::<f32>() / 4.0,
-                    ) * 255.0
+                    linear_to_srgb(samples.iter().map(|&s| to_linear[s as usize]).sum::<f32>() / 4.0) * 255.0
                 };
                 out[((y * half + x) * 4 + c) as usize] = v.round() as u8;
             }

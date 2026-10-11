@@ -63,9 +63,7 @@ pub fn generate_heights(p: &GenParams) -> Vec<u16> {
     let warp_z = Perlin::new(p.seed.wrapping_add(2));
     let flat = Perlin::new(p.seed.wrapping_add(3));
 
-    let amp_total: f64 = (0..p.octaves)
-        .map(|o| (p.persistence as f64).powi(o as i32))
-        .sum();
+    let amp_total: f64 = (0..p.octaves).map(|o| (p.persistence as f64).powi(o as i32)).sum();
     let mut heights = vec![0u16; n * n];
 
     for z in 0..n {
@@ -109,7 +107,7 @@ pub fn generate_heights(p: &GenParams) -> Vec<u16> {
 /// Lowers corners so no corner is more than one block above any of its eight
 /// neighbours. This is a chamfer distance transform with unit weights, which is
 /// exact for the 8-neighbour metric after one forward and one backward pass.
-fn limit_slopes(h: &mut [u16], n: usize) {
+pub(crate) fn limit_slopes(h: &mut [u16], n: usize) {
     let at = |x: usize, z: usize| z * n + x;
     for z in 0..n {
         for x in 0..n {
@@ -157,8 +155,7 @@ pub fn generate(p: &GenParams) -> World {
 
     for z in 0..p.size {
         for x in 0..p.size {
-            let corners =
-                Shape::CORNERS.map(|(cx, cz)| heights[(z + cz as usize) * n + x + cx as usize]);
+            let corners = Shape::CORNERS.map(|(cx, cz)| heights[(z + cz as usize) * n + x + cx as usize]);
             let base = *corners.iter().min().unwrap();
             let mut mask = 0u8;
             for (i, &c) in corners.iter().enumerate() {

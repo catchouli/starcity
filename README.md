@@ -33,6 +33,7 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 | R | Toggle perspective / orthographic |
 | F1 | Wireframe (shows the greedy-meshed quads) |
 | G | Tile grid |
+| C | Clouds on/off |
 | F3 | Debug window (stats, render settings, terrain generator) |
 | Esc | Back to the pointer tool |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
@@ -53,5 +54,7 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 - `src/ui/`: Win95-style theme, windows, menu bar, toolbar and status bar
 - `src/picking.rs`: mouse ray to terrain tile
 - `src/sim.rs`: fixed-tick simulation (bulldozing, grass regrowth)
+- `src/roads.rs`: road pieces and drag planning
+- `src/clouds.rs`: tiling voxel cloud field
 - `loader.mjs`: download progress for the loading dialog in `index.html`
 - `tools/process_textures.sh`: downscales source textures into `assets/`

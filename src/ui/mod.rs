@@ -32,9 +32,7 @@ impl Tool {
     pub fn hint(self) -> &'static str {
         match self {
             Tool::Pointer => "Drag to pan, right-drag to rotate, scroll to zoom",
-            Tool::Road => {
-                "Drag along an axis or at 45° to draw road. Red pieces can't be built (water or slope)."
-            }
+            Tool::Road => "Drag along an axis or at 45° to draw road. Red pieces can't be built (water or slope).",
             Tool::RemoveRoad => "Click or drag a rectangle to remove road",
             Tool::Rail => "Drag along an axis or a 45° diagonal to lay track (coming soon)",
             Tool::Signal => "Click track to place a signal (coming soon)",
@@ -68,6 +66,7 @@ pub struct UiState {
     pub wireframe: bool,
     pub grid: bool,
     pub ortho: bool,
+    pub clouds: bool,
     pub show_debug: bool,
     pub show_about: bool,
 }
@@ -96,6 +95,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
             ui.checkbox(&mut s.wireframe, "Wireframe\tF1");
             ui.checkbox(&mut s.grid, "Tile grid\tG");
             ui.checkbox(&mut s.ortho, "Orthographic\tR");
+            ui.checkbox(&mut s.clouds, "Clouds\tC");
             ui.separator();
             ui.checkbox(&mut s.show_debug, "Debug window\tF3");
         });
@@ -159,10 +159,7 @@ pub fn about_window(ctx: &egui::Context, open: &mut bool) {
 fn icon_pointer(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
     let outline = Stroke::new(1.0, Color32::BLACK);
-    p.line_segment(
-        [at(0.45, 0.6), at(0.65, 1.0)],
-        Stroke::new(3.0, Color32::BLACK),
-    );
+    p.line_segment([at(0.45, 0.6), at(0.65, 1.0)], Stroke::new(3.0, Color32::BLACK));
     p.add(egui::Shape::convex_polygon(
         vec![at(0.2, 0.0), at(0.2, 0.8), at(0.75, 0.62)],
         Color32::WHITE,
@@ -216,16 +213,8 @@ fn icon_signal(p: &Painter, r: Rect) {
     );
     let head = Rect::from_min_max(pos2(cx - 4.0, r.min.y), pos2(cx + 4.0, r.min.y + 13.0));
     p.rect_filled(head, 0.0, Color32::BLACK);
-    p.circle_filled(
-        pos2(cx, r.min.y + 3.5),
-        2.2,
-        Color32::from_rgb(0xff, 0x30, 0x30),
-    );
-    p.circle_filled(
-        pos2(cx, r.min.y + 9.0),
-        2.2,
-        Color32::from_rgb(0x30, 0xd0, 0x40),
-    );
+    p.circle_filled(pos2(cx, r.min.y + 3.5), 2.2, Color32::from_rgb(0xff, 0x30, 0x30));
+    p.circle_filled(pos2(cx, r.min.y + 9.0), 2.2, Color32::from_rgb(0x30, 0xd0, 0x40));
 }
 
 fn icon_bulldozer(p: &Painter, r: Rect) {
@@ -233,21 +222,13 @@ fn icon_bulldozer(p: &Painter, r: Rect) {
     let yellow = Color32::from_rgb(0xf0, 0xc0, 0x10);
     let dark = Color32::from_gray(40);
     // Cab, body, blade and tracks.
-    p.rect_filled(
-        Rect::from_min_max(at(0.35, 0.15), at(0.7, 0.5)),
-        0.0,
-        yellow,
-    );
+    p.rect_filled(Rect::from_min_max(at(0.35, 0.15), at(0.7, 0.5)), 0.0, yellow);
     p.rect_filled(
         Rect::from_min_max(at(0.42, 0.22), at(0.63, 0.42)),
         0.0,
         Color32::from_rgb(0x90, 0xc8, 0xf0),
     );
-    p.rect_filled(
-        Rect::from_min_max(at(0.2, 0.45), at(0.85, 0.7)),
-        0.0,
-        yellow,
-    );
+    p.rect_filled(Rect::from_min_max(at(0.2, 0.45), at(0.85, 0.7)), 0.0, yellow);
     p.rect_filled(
         Rect::from_min_max(at(0.0, 0.35), at(0.12, 0.9)),
         0.0,

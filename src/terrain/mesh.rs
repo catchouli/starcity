@@ -86,10 +86,7 @@ pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
                 continue;
             }
             let col = world.column(x as usize, z as usize);
-            let solid = col
-                .iter()
-                .take_while(|b| !b.is_air() && b.shape.is_full())
-                .count();
+            let solid = col.iter().take_while(|b| !b.is_air() && b.shape.is_full()).count();
             let top = col.iter().rposition(|b| !b.is_air()).map_or(0, |y| y + 1);
             stats[bz * bw + bx] = (solid, top);
         }
@@ -182,11 +179,7 @@ pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
                 // At the map edge, close the water off with a side face.
                 for ((dx, dz), a, bc) in SIDES {
                     let (nx, nz) = (xi + dx, zi + dz);
-                    if nx >= 0
-                        && nz >= 0
-                        && (nx as usize) < world.size_x
-                        && (nz as usize) < world.size_z
-                    {
+                    if nx >= 0 && nz >= 0 && (nx as usize) < world.size_x && (nz as usize) < world.size_z {
                         continue;
                     }
                     let ha = (base + shape.corner(a.0, a.1)).min(sea);

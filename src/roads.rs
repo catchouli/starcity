@@ -258,13 +258,7 @@ mod tests {
         let p = plan(&w, &r, (1, 1), (3, 3));
         assert_eq!(
             p.valid,
-            vec![
-                ((1, 1), NE),
-                ((2, 1), SW),
-                ((2, 2), NE),
-                ((3, 2), SW),
-                ((3, 3), NE)
-            ]
+            vec![((1, 1), NE), ((2, 1), SW), ((2, 2), NE), ((3, 2), SW), ((3, 3), NE)]
         );
         // Same in the opposite direction: pieces stay connected corner to corner.
         let p = plan(&w, &r, (3, 3), (1, 5));

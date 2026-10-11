@@ -95,9 +95,7 @@ fn hit_tile(world: &World, ray: &Ray, x: i32, z: i32) -> Option<f32> {
     } else {
         [[p[0], p[1], p[2]], [p[0], p[2], p[3]]]
     };
-    tris.iter()
-        .filter_map(|t| ray_triangle(ray, t))
-        .reduce(f32::min)
+    tris.iter().filter_map(|t| ray_triangle(ray, t)).reduce(f32::min)
 }
 
 /// Möller–Trumbore, two-sided.

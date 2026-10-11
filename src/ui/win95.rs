@@ -1,9 +1,6 @@
 //! Windows 95 look for egui: grey surfaces, bevelled edges, navy selection.
 
-use eframe::egui::{
-    self, Color32, CornerRadius, Painter, Rect, Response, Sense, Shadow, Stroke, Ui, Vec2, pos2,
-    vec2,
-};
+use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, Response, Sense, Shadow, Stroke, Ui, Vec2, pos2, vec2};
 
 pub const FACE: Color32 = Color32::from_rgb(0xc0, 0xc0, 0xc0);
 pub const LIGHT: Color32 = Color32::from_rgb(0xdf, 0xdf, 0xdf);
@@ -81,9 +78,7 @@ pub fn window<R>(
         return None;
     }
     let mut close = false;
-    let frame = egui::Frame::NONE
-        .fill(FACE)
-        .inner_margin(egui::Margin::same(4));
+    let frame = egui::Frame::NONE.fill(FACE).inner_margin(egui::Margin::same(4));
     let response = egui::Window::new(title)
         .title_bar(false)
         .frame(frame)
@@ -113,10 +108,7 @@ pub fn window<R>(
 /// Paints a title bar across the top of a window. Returns true if the close button was clicked.
 fn title_bar(ui: &mut Ui, title: &str) -> bool {
     let height = 20.0;
-    let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width().max(160.0), height),
-        Sense::hover(),
-    );
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(160.0), height), Sense::hover());
     let p = ui.painter();
     // Navy to blue gradient, as drawn by Win95 Plus! / Win98 title bars.
     let mut mesh = egui::Mesh::default();
@@ -170,26 +162,10 @@ pub fn bevel(painter: &Painter, rect: Rect, raised: bool) {
 
 fn edge(painter: &Painter, r: Rect, tl: Color32, br: Color32) {
     let px = 1.0;
-    painter.rect_filled(
-        Rect::from_min_max(r.min, pos2(r.max.x, r.min.y + px)),
-        0.0,
-        tl,
-    );
-    painter.rect_filled(
-        Rect::from_min_max(r.min, pos2(r.min.x + px, r.max.y)),
-        0.0,
-        tl,
-    );
-    painter.rect_filled(
-        Rect::from_min_max(pos2(r.min.x, r.max.y - px), r.max),
-        0.0,
-        br,
-    );
-    painter.rect_filled(
-        Rect::from_min_max(pos2(r.max.x - px, r.min.y), r.max),
-        0.0,
-        br,
-    );
+    painter.rect_filled(Rect::from_min_max(r.min, pos2(r.max.x, r.min.y + px)), 0.0, tl);
+    painter.rect_filled(Rect::from_min_max(r.min, pos2(r.min.x + px, r.max.y)), 0.0, tl);
+    painter.rect_filled(Rect::from_min_max(pos2(r.min.x, r.max.y - px), r.max), 0.0, br);
+    painter.rect_filled(Rect::from_min_max(pos2(r.max.x - px, r.min.y), r.max), 0.0, br);
 }
 
 /// Etched vertical separator, as between toolbar groups.
@@ -210,12 +186,7 @@ pub fn separator(ui: &mut Ui, height: f32) {
 }
 
 /// A square toolbar button with a custom-painted icon. Stays pressed while `selected`.
-pub fn tool_button(
-    ui: &mut Ui,
-    size: f32,
-    selected: bool,
-    icon: impl FnOnce(&Painter, Rect),
-) -> Response {
+pub fn tool_button(ui: &mut Ui, size: f32, selected: bool, icon: impl FnOnce(&Painter, Rect)) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     let pressed = selected || response.is_pointer_button_down_on();
     let p = ui.painter();
@@ -226,11 +197,7 @@ pub fn tool_button(
         while y < rect.max.y - 2.0 {
             let mut x = rect.min.x + 2.0 + ((y - rect.min.y) as i32 % 2) as f32;
             while x < rect.max.x - 2.0 {
-                p.rect_filled(
-                    Rect::from_min_size(pos2(x, y), Vec2::splat(1.0)),
-                    0.0,
-                    HIGHLIGHT,
-                );
+                p.rect_filled(Rect::from_min_size(pos2(x, y), Vec2::splat(1.0)), 0.0, HIGHLIGHT);
                 x += 2.0;
             }
             y += 1.0;

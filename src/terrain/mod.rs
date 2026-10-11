@@ -24,6 +24,7 @@ pub enum Material {
     Dirt = 2,
     Rock = 3,
     Gravel = 4,
+    Cloud = 5,
 }
 
 /// Which top corners of a block are raised to the full block height, as a bitmask.
