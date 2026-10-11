@@ -3,7 +3,7 @@ use crate::clouds;
 use crate::input::PhysicalKeys;
 use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
-use crate::render::{CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::render::{BoxInstance, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
@@ -50,6 +50,8 @@ pub struct StarcityApp {
     highlight: Option<Highlight>,
     roads: Layer,
     rails: Layer,
+    signals: rails::Signals,
+    signals_changed: bool,
     /// The road or track being dragged out, shown as a preview.
     plan: Plan,
     /// Which network `plan` is for.
@@ -106,6 +108,8 @@ impl StarcityApp {
             highlight: None,
             roads: Layer::new(1, 1),
             rails: Layer::new(1, 1),
+            signals: rails::Signals::default(),
+            signals_changed: false,
             plan: Plan::default(),
             plan_network: Network::Road,
             infra_dirty: None,
@@ -162,13 +166,21 @@ impl StarcityApp {
                 ((c - 6, c + 14), (c, c + 20)),
                 ((c - 12, c + 17), (c - 6, c + 17)),
             ] {
-                let plan = rails::plan(&self.world, &self.rails, &self.roads, a, b);
+                let plan = rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
                 if let Some(why) = plan.blocked {
                     eprintln!("demo track {a:?} -> {b:?} blocked: {why:?}");
                 }
                 built.extend(plan.build(&mut self.rails));
             }
             self.mark_infra(&built);
+            for (t, forward) in [
+                ((c - 9, c + 14), true),
+                ((c - 2, c + 14), false),
+                ((c - 9, c + 17), true),
+            ] {
+                self.signals.click(&self.rails, t, forward);
+            }
+            self.signals_changed = true;
             // A road being dragged, to show the preview.
             self.drag_start = Some((c - 10, c + 4));
             self.last_hover_tile = Some((c - 4, c + 10));
@@ -193,6 +205,8 @@ impl StarcityApp {
         self.sim = Sim::new(&self.world, self.params.seed as u64);
         self.roads = Layer::new(self.world.size_x, self.world.size_z);
         self.rails = Layer::new(self.world.size_x, self.world.size_z);
+        self.signals = rails::Signals::default();
+        self.signals_changed = true;
         self.plan = Plan::default();
         self.infra_dirty = None;
         self.drag_start = None;
@@ -281,6 +295,17 @@ impl StarcityApp {
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
         let tool = self.ui.tool;
+        if let (Tool::Signal, Some(t)) = (tool, self.hover_tile) {
+            if response.clicked_by(primary) {
+                // A new signal faces the camera: trains it controls travel away from the viewer.
+                let ((fx, fz), (tx, tz)) = rails::piece_ends(self.rails.get(t.0, t.1));
+                let view = self.camera.forward();
+                let forward = (tx - fx) * view.x + (tz - fz) * view.z >= 0.0;
+                self.signals_changed |= self.signals.click(&self.rails, t, forward);
+            } else if response.clicked_by(egui::PointerButton::Secondary) {
+                self.signals_changed |= self.signals.remove(t);
+            }
+        }
         if !matches!(
             tool,
             Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail
@@ -300,7 +325,10 @@ impl StarcityApp {
 
         let (plan, network) = match (tool, self.drag_start, self.last_hover_tile) {
             (Tool::Road, Some(a), Some(b)) => (roads::plan(&self.world, &self.roads, &self.rails, a, b), Network::Road),
-            (Tool::Rail, Some(a), Some(b)) => (rails::plan(&self.world, &self.rails, &self.roads, a, b), Network::Rail),
+            (Tool::Rail, Some(a), Some(b)) => (
+                rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b),
+                Network::Rail,
+            ),
             _ => (Plan::default(), self.plan_network),
         };
         if plan != self.plan || network != self.plan_network {
@@ -354,7 +382,7 @@ impl StarcityApp {
                 }
             }
             Tool::Rail => {
-                let plan = rails::plan(&self.world, &self.rails, &self.roads, a, b);
+                let plan = rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
                 Changes {
                     infra: plan.build(&mut self.rails),
                     ..Default::default()
@@ -372,6 +400,19 @@ impl StarcityApp {
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
         self.remesh_tiles(rs, &changes.terrain);
         self.mark_infra(&changes.infra);
+        self.update_signals(rs);
+    }
+
+    /// Rebuilds the signal props if signals (or the track under them) changed.
+    fn update_signals(&mut self, rs: &RenderState) {
+        if self.signals.prune(&self.rails) {
+            self.signals_changed = true;
+        }
+        if std::mem::take(&mut self.signals_changed) {
+            let boxes = signal_boxes(&self.world, &self.signals);
+            self.renderer.set_boxes(&rs.device, &boxes);
+            self.scene_dirty = true;
+        }
     }
 
     /// Marks tiles whose infrastructure texels need re-uploading.
@@ -672,6 +713,14 @@ impl StarcityApp {
                 Some(Blocked::Water) => format!("Can't build {what} on water"),
                 Some(Blocked::Slope) => format!("Can't build {what} across this slope"),
                 Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
+                Some(Blocked::Signal) => "There's a signal in the way: remove it first".to_string(),
+            }
+        } else if let (Tool::Signal, Some(t)) = (self.ui.tool, self.hover_tile) {
+            match self.signals.click_effect(&self.rails, t) {
+                rails::SignalClick::Place => "Click to place a signal facing you".to_string(),
+                rails::SignalClick::Flip => "Click to turn it round, right-click to remove".to_string(),
+                rails::SignalClick::NoTrack => "No track here".to_string(),
+                rails::SignalClick::Junction => "Signals go on plain track, not junctions".to_string(),
             }
         } else {
             match self.hover_tile {
@@ -813,4 +862,42 @@ impl eframe::App for StarcityApp {
 fn is_arrow(key: egui::Key) -> bool {
     use egui::Key::*;
     matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown)
+}
+
+/// Props for the signals: a post beside the track on the right of the way
+/// it faces, a head, and a lamp facing oncoming trains.
+fn signal_boxes(world: &World, signals: &rails::Signals) -> Vec<BoxInstance> {
+    let mut boxes = Vec::new();
+    for (&(x, z), sig) in &signals.by_tile {
+        let ((fx, fz), (tx, tz)) = rails::piece_ends(sig.piece);
+        let along = Vec2::new(tx - fx, tz - fz).normalize() * if sig.forward { 1.0 } else { -1.0 };
+        let right = Vec2::new(-along.y, along.x);
+        let mid = Vec2::new(x as f32 + (fx + tx) / 2.0, z as f32 + (fz + tz) / 2.0);
+        let p = mid + right * 0.4;
+        let ground = world.height_at(p.x, p.y);
+        // Local x runs along the track (see vs_box).
+        let yaw = (-along.y).atan2(along.x);
+        let lamp = p - along * 0.065;
+        boxes.extend([
+            BoxInstance {
+                center: [p.x, ground + 0.45, p.y],
+                half: [0.035, 0.45, 0.035],
+                yaw,
+                color: [130, 130, 136, 0],
+            },
+            BoxInstance {
+                center: [p.x, ground + 0.98, p.y],
+                half: [0.06, 0.16, 0.09],
+                yaw,
+                color: [40, 40, 44, 0],
+            },
+            BoxInstance {
+                center: [lamp.x, ground + 1.04, lamp.y],
+                half: [0.012, 0.065, 0.065],
+                yaw,
+                color: [60, 235, 90, 255],
+            },
+        ]);
+    }
+    boxes
 }

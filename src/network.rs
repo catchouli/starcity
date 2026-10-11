@@ -126,6 +126,8 @@ pub enum Blocked {
     Water,
     Slope,
     Occupied,
+    /// Track would change a tile that has a signal on it.
+    Signal,
 }
 
 /// A dragged-out piece of network. All or nothing: if any piece doesn't fit,

@@ -39,6 +39,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | F3 | Debug window (stats, render settings, terrain generator) |
 | Esc | Back to the pointer tool |
 | Home / island button | Centre the view on the island |
+| Signal tool | Click track to place a signal facing you, click again to turn it round, right-click to remove |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
 
 ## Development

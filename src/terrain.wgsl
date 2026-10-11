@@ -455,3 +455,67 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     color = mix(color, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(color, 1.0);
 }
+
+// --- Boxes ---------------------------------------------------------------------
+//
+// Small props (signals now, trains later) are instanced boxes: a centre,
+// half-extents, a rotation about the vertical axis and a colour. The 36
+// vertices of the cube come from tables here; no vertex buffer is needed.
+
+struct BoxOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) @interpolate(flat) normal: vec3<f32>,
+    @location(2) @interpolate(flat) color: vec4<f32>,
+};
+
+@vertex
+fn vs_box(
+    @builtin(vertex_index) vi: u32,
+    @location(1) center: vec3<f32>,
+    @location(2) half: vec3<f32>,
+    @location(3) yaw: f32,
+    @location(4) color: vec4<f32>,
+) -> BoxOut {
+    // Each face: outward normal n and axes u, v with u x v = n, so the
+    // triangles wind anticlockwise seen from outside.
+    var normals = array<vec3<f32>, 6>(
+        vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0),
+        vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, -1.0),
+    );
+    var us = array<vec3<f32>, 6>(
+        vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, 1.0),
+        vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0),
+    );
+    var vs = array<vec3<f32>, 6>(
+        vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0),
+        vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0),
+    );
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let face = vi / 6u;
+    let c = corners[vi % 6u];
+    let local = (normals[face] + us[face] * c.x + vs[face] * c.y) * half;
+    let sn = sin(yaw);
+    let cs = cos(yaw);
+    let rotate = mat2x2<f32>(cs, -sn, sn, cs);
+    let xz = rotate * local.xz;
+    let n = rotate * normals[face].xz;
+
+    var out: BoxOut;
+    out.world = center + vec3<f32>(xz.x, local.y, xz.y);
+    out.clip = g.view_proj * vec4<f32>(out.world, 1.0);
+    out.normal = vec3<f32>(n.x, normals[face].y, n.y);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_box(in: BoxOut) -> @location(0) vec4<f32> {
+    // Colours arrive as sRGB bytes; alpha > 0.5 marks a lamp, which isn't shaded.
+    let albedo = pow(in.color.rgb, vec3<f32>(2.2));
+    var color = select(albedo * lighting(in.normal), albedo * 1.4, in.color.a > 0.5);
+    return vec4<f32>(mix(color, SKY, fog(in.world)), 1.0);
+}

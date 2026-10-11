@@ -47,6 +47,18 @@ pub struct Globals {
     pub ocean: [f32; 4],
 }
 
+/// An instanced box (signals, and later trains and other props).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BoxInstance {
+    pub center: [f32; 3],
+    pub half: [f32; 3],
+    /// Rotation about the vertical axis, in radians.
+    pub yaw: f32,
+    /// sRGB colour; alpha 255 marks an unshaded lamp.
+    pub color: [u8; 4],
+}
+
 /// Per-frame cloud state.
 #[derive(Clone, Copy, Debug)]
 pub struct CloudState {
@@ -150,6 +162,7 @@ pub struct SceneRenderer {
     pub preview_is_rail: bool,
     /// Endless ocean parameters (see `Globals::ocean`); size 0 hides it.
     pub ocean: [f32; 4],
+    boxes: Option<(wgpu::Buffer, u32)>,
 }
 
 impl SceneRenderer {
@@ -256,6 +269,7 @@ impl SceneRenderer {
             stats: RenderStats::default(),
             preview_is_rail: false,
             ocean: [0.0; 4],
+            boxes: None,
         }
     }
 
@@ -293,6 +307,18 @@ impl SceneRenderer {
                 depth_or_array_layers: 1,
             },
         );
+    }
+
+    /// Replaces the set of instanced boxes.
+    pub fn set_boxes(&mut self, device: &wgpu::Device, boxes: &[BoxInstance]) {
+        self.boxes = (!boxes.is_empty()).then(|| {
+            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("boxes"),
+                contents: bytemuck::cast_slice(boxes),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            (buf, boxes.len() as u32)
+        });
     }
 
     /// Replaces the cloud field's chunk meshes.
@@ -505,6 +531,11 @@ impl SceneRenderer {
                 pass.set_pipeline(&self.pipelines.ocean_floor);
                 pass.draw(0..6, 0..4);
             }
+            if let Some((buf, n)) = &self.boxes {
+                pass.set_pipeline(&self.pipelines.boxes);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..36, 0..*n);
+            }
             if !cloud_draws.is_empty() {
                 pass.set_pipeline(&self.pipelines.clouds);
                 for (i, &(chunk, _)) in cloud_draws.iter().enumerate() {
@@ -681,6 +712,7 @@ struct Pipelines {
     water: wgpu::RenderPipeline,
     ocean_floor: wgpu::RenderPipeline,
     ocean_water: wgpu::RenderPipeline,
+    boxes: wgpu::RenderPipeline,
 }
 
 fn create_pipelines(
@@ -749,6 +781,33 @@ fn create_pipelines(
             cache: None,
         })
     };
+    let box_attrs = [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 1,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 12,
+            shader_location: 2,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32,
+            offset: 24,
+            shader_location: 3,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Unorm8x4,
+            offset: 28,
+            shader_location: 4,
+        },
+    ];
+    let box_buffers = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<BoxInstance>() as u64,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &box_attrs,
+    })];
     let terrain_buffers = [Some(vertices.clone())];
     let cloud_buffers = [Some(vertices), Some(offsets)];
     Pipelines {
@@ -763,6 +822,7 @@ fn create_pipelines(
             false,
         ),
         ocean_floor: make("ocean floor", "vs_ocean_floor", "fs_terrain", &[], None, true),
+        boxes: make("boxes", "vs_box", "fs_box", &box_buffers, None, true),
         ocean_water: make(
             "ocean water",
             "vs_ocean_water",

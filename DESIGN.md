@@ -83,13 +83,14 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Collisions are real.** If two trains meet head-on on unsignalled track, they crash. Safety is the player's job.
 - **Diagonal pieces**: a 45° drag builds dedicated diagonal track (TTD-style half-tile pieces running corner to corner), not a staircase of straight tiles.
 
-### 4.3 Signals: block reservation
+### 4.3 Signals: path signals only
 
+- One kind of signal, like OpenTTD's **path signals**. Each faces one way along its piece of track. Trains may only pass it travelling that way, and **nothing may enter a signalled block from behind**, which prevents accidental head-on crashes.
 - Signals split track into **blocks**: the stretch between one signal and the next.
-- When a train reaches a signal, it tries to take an **exclusive lock on the track ahead up to the next signal**. If it gets the lock, it proceeds. If another train holds any part of that block, it waits at the signal.
-- The lock is released as the train's tail clears the block.
-- With this one rule, players can build two parallel lines with crossovers and junctions, and signal them correctly to keep everything safe.
-- Design note: if the lock covers the *whole path through the block*, junctions need no special signal types (this is OpenTTD's "path signal" idea, but simpler). Decide later whether a lock covers the whole block or only the reserved path. Per-path locking allows more traffic through junctions.
+- When a train reaches a signal, it tries to **reserve a path through the block ahead**, up to the next signal. If any piece of that path is reserved by another train, it waits. Reservations are released as the train's tail clears them. Because only the path is locked, trains can use different routes through the same junction at the same time.
+- On unsignalled track nothing stops trains, so they can still crash head-on.
+- **Placing** ✅: with the signal tool, click plain track (not a junction) to place a signal facing the camera; click it again to turn it round; right-click to remove it. Building track that would change a signal's tile is blocked, and removing track takes its signals with it.
+- Signals are drawn as small 3D props (post, head, lamp) with the instanced box renderer, which trains will use too.
 
 ### 4.4 Stations & routes
 
@@ -206,7 +207,7 @@ Terrain generation was never really started: it only produced random noise for o
 - Win95 egui theme and top toolbar (§8). ✅
 - Tile picking (mouse ray → tile/corner) and a hover highlight.
 - Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles. ✅ Remove-road tool ✅.
-- Rail tool: drag to draw track ✅, and place signals (next).
+- Rail tool: drag to draw track ✅, and place path signals ✅.
 - Bulldoze tool and grass regrowth (first use of the fixed-tick simulation). ✅
 - Tile picking and hover/drag highlight ✅. Loading dialog with download progress ✅.
 - Incremental re-meshing of edited chunks.
@@ -230,7 +231,7 @@ Terrain generation was never really started: it only produced random noise for o
 
 1. ~~Height step~~: half a tile (§3.2).
 2. ~~Rail semantics~~: single bidirectional track per tile with block-reservation signals (§4.2–4.3).
-3. Signal locks: whole block or reserved path only (§4.3)?
+3. ~~Signal locks~~: path reservation only (§4.3).
 4. Map size target: 256², 512², 1024² tiles? This affects chunk count and memory on the web.
 5. Visual style: textured blocks like tyke/Minecraft, or flat-shaded low-poly?
 6. Name: "Starcity" is just the directory name for now.

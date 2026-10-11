@@ -23,7 +23,7 @@ impl Tool {
             Tool::Road => "Build road",
             Tool::RemoveRoad => "Remove road",
             Tool::Rail => "Build railway",
-            Tool::Signal => "Place signal",
+            Tool::Signal => "Path signal",
             Tool::RemoveRail => "Remove railway",
             Tool::Bulldoze => "Bulldoze",
         }
@@ -35,7 +35,9 @@ impl Tool {
             Tool::Road => "Drag along an axis or at 45° to draw road. Red means it can't be built there.",
             Tool::RemoveRoad => "Click or drag a rectangle to remove road",
             Tool::Rail => "Drag along an axis or at 45° to lay track. Red means it can't be built there.",
-            Tool::Signal => "Click track to place a signal (coming soon)",
+            Tool::Signal => {
+                "Click track to place a path signal facing you; click again to turn it round, right-click to remove"
+            }
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
         }

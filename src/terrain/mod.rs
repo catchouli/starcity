@@ -193,10 +193,61 @@ impl World {
         })
     }
 
+    /// World-space height of the terrain surface at any point, following the
+    /// same triangles the mesher draws.
+    pub fn height_at(&self, x: f32, z: f32) -> f32 {
+        let (tx, tz) = (x.floor() as i32, z.floor() as i32);
+        let Some((base, shape)) = self.surface(tx, tz) else {
+            return 0.0;
+        };
+        let (fx, fz) = (x - tx as f32, z - tz as f32);
+        let c = |cx, cz| (base + shape.corner(cx, cz)) as f32;
+        let (c00, c10, c11, c01) = (c(0, 0), c(1, 0), c(1, 1), c(0, 1));
+        let h = if !shape.splits_13() {
+            // Split along (0,0)-(1,1).
+            if fx >= fz {
+                c00 + (c10 - c00) * fx + (c11 - c10) * fz
+            } else {
+                c00 + (c01 - c00) * fz + (c11 - c01) * fx
+            }
+        } else if fx + fz <= 1.0 {
+            // Split along (1,0)-(0,1).
+            c00 + (c10 - c00) * fx + (c01 - c00) * fz
+        } else {
+            c11 + (c01 - c11) * (1.0 - fx) + (c10 - c11) * (1.0 - fz)
+        };
+        h * BLOCK_HEIGHT
+    }
+
     /// World-space height of the terrain surface at the centre of a tile.
     pub fn surface_height(&self, x: i32, z: i32) -> f32 {
         self.surface(x, z).map_or(0.0, |(base, shape)| {
             (base as f32 + shape.0.count_ones() as f32 / 4.0) * BLOCK_HEIGHT
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn height_follows_slopes() {
+        let mut w = World::new(3, 3, 4, 0);
+        w.set(0, 0, 0, Block::full(Material::Grass));
+        // Tile (1, 0): raised along its east edge (corners NE and SE).
+        w.set(
+            1,
+            0,
+            0,
+            Block {
+                material: Material::Grass,
+                shape: Shape(0b0110),
+            },
+        );
+        assert_eq!(w.height_at(0.5, 0.5), BLOCK_HEIGHT);
+        assert_eq!(w.height_at(1.0, 0.5), 0.0);
+        assert!((w.height_at(1.5, 0.3) - 0.5 * BLOCK_HEIGHT).abs() < 1e-6);
+        assert!((w.height_at(1.99, 0.9) - 0.99 * BLOCK_HEIGHT).abs() < 1e-5);
     }
 }

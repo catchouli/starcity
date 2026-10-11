@@ -5,6 +5,7 @@
 
 use crate::network::{self, Blocked, E, Layer, N, Piece, Plan, S, W, edge_towards, midpoint};
 use crate::terrain::World;
+use std::collections::BTreeMap;
 
 pub const X: u8 = 1 << 0;
 pub const Y: u8 = 1 << 1;
@@ -34,6 +35,98 @@ fn touching(edge: u8) -> u8 {
     }
 }
 
+/// Where a piece starts and ends within its tile, as (from, to) offsets from
+/// the tile's corner. "Forward" along a piece means from `from` to `to`.
+pub fn piece_ends(piece: u8) -> ((f32, f32), (f32, f32)) {
+    let (n, e, s, w) = ((0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5));
+    match piece {
+        X => (w, e),
+        Y => (n, s),
+        NE => (n, e),
+        ES => (e, s),
+        SW => (s, w),
+        _ => (w, n),
+    }
+}
+
+/// A path signal. It faces one way along its piece: trains may only pass it
+/// travelling that way, and only once they've reserved a path through the
+/// block ahead. Nothing may enter a signalled block from behind its signals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Signal {
+    /// The track piece it stands beside.
+    pub piece: u8,
+    /// Faces trains travelling forward along the piece (see `piece_ends`):
+    /// its lamp is on the side they approach from.
+    pub forward: bool,
+}
+
+/// Signals by tile. At most one per tile, and only on tiles with a single
+/// track piece (not junctions).
+#[derive(Default)]
+pub struct Signals {
+    pub by_tile: BTreeMap<(i32, i32), Signal>,
+}
+
+/// What left-clicking a tile with the signal tool will do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignalClick {
+    Place,
+    Flip,
+    NoTrack,
+    Junction,
+}
+
+impl Signals {
+    pub fn click_effect(&self, rails: &Layer, tile: (i32, i32)) -> SignalClick {
+        let bits = rails.get(tile.0, tile.1);
+        if self.by_tile.contains_key(&tile) {
+            SignalClick::Flip
+        } else if bits == 0 {
+            SignalClick::NoTrack
+        } else if bits.count_ones() > 1 {
+            SignalClick::Junction
+        } else {
+            SignalClick::Place
+        }
+    }
+
+    /// Left-click: places a signal (facing `forward` along its piece) or flips
+    /// an existing one round. Returns whether anything changed.
+    pub fn click(&mut self, rails: &Layer, tile: (i32, i32), forward: bool) -> bool {
+        match self.click_effect(rails, tile) {
+            SignalClick::Place => {
+                self.by_tile.insert(
+                    tile,
+                    Signal {
+                        piece: rails.get(tile.0, tile.1),
+                        forward,
+                    },
+                );
+                true
+            }
+            SignalClick::Flip => {
+                let sig = self.by_tile.get_mut(&tile).unwrap();
+                sig.forward = !sig.forward;
+                true
+            }
+            SignalClick::NoTrack | SignalClick::Junction => false,
+        }
+    }
+
+    /// Right-click: removes the signal on a tile. Returns whether there was one.
+    pub fn remove(&mut self, tile: (i32, i32)) -> bool {
+        self.by_tile.remove(&tile).is_some()
+    }
+
+    /// Drops signals whose track has gone or changed. Returns whether any were removed.
+    pub fn prune(&mut self, rails: &Layer) -> bool {
+        let before = self.by_tile.len();
+        self.by_tile.retain(|&(x, z), sig| rails.get(x, z) == sig.piece);
+        self.by_tile.len() != before
+    }
+}
+
 /// Whether a tile could hold these track pieces.
 pub fn check(world: &World, roads: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
     if roads.get(x, z) != 0 {
@@ -44,7 +137,7 @@ pub fn check(world: &World, roads: &Layer, x: i32, z: i32, bits: u8) -> Result<(
 
 /// Plans track dragged from tile `a` to tile `b`: straight along an axis, or
 /// diagonal when the drag is nearer 45°.
-pub fn plan(world: &World, rails: &Layer, roads: &Layer, a: (i32, i32), b: (i32, i32)) -> Plan {
+pub fn plan(world: &World, rails: &Layer, roads: &Layer, signals: &Signals, a: (i32, i32), b: (i32, i32)) -> Plan {
     let (dx, dz) = (b.0 - a.0, b.1 - a.1);
     let pieces = if dx == 0 && dz == 0 {
         Vec::new()
@@ -60,6 +153,10 @@ pub fn plan(world: &World, rails: &Layer, roads: &Layer, a: (i32, i32), b: (i32,
     let tiles: Vec<_> = plan.tiles().collect();
     for t in tiles {
         let bits = plan.result(rails, t).unwrap();
+        if signals.by_tile.contains_key(&t) && bits != rails.get(t.0, t.1) {
+            plan.blocked = Some(Blocked::Signal);
+            break;
+        }
         if let Err(why) = check(world, roads, t.0, t.1, bits) {
             plan.blocked = Some(why);
             break;
@@ -153,7 +250,7 @@ mod tests {
     }
 
     fn build(w: &World, r: &mut Layer, a: (i32, i32), b: (i32, i32)) {
-        let p = plan(w, r, &Layer::new(r.size_x, r.size_z), a, b);
+        let p = plan(w, r, &Layer::new(r.size_x, r.size_z), &Signals::default(), a, b);
         assert!(p.blocked.is_none(), "{a:?} -> {b:?} blocked: {:?}", p.blocked);
         p.build(r);
     }
@@ -214,12 +311,59 @@ mod tests {
             },
         );
         let mut r = Layer::new(8, 8);
-        let p = plan(&w, &r, &Layer::new(8, 8), (1, 2), (7, 2));
+        let p = plan(&w, &r, &Layer::new(8, 8), &Signals::default(), (1, 2), (7, 2));
         assert_eq!(p.blocked, Some(Blocked::Slope));
         assert!(p.build(&mut r).is_empty());
         let mut roads = Layer::new(8, 8);
         roads.set(2, 5, 1);
-        let p = plan(&w, &r, &roads, (0, 5), (5, 5));
+        let p = plan(&w, &r, &roads, &Signals::default(), (0, 5), (5, 5));
         assert_eq!(p.blocked, Some(Blocked::Occupied));
+    }
+
+    #[test]
+    fn signals_flip_and_stay_off_junctions() {
+        let w = flat_world(12);
+        let mut r = Layer::new(12, 12);
+        build(&w, &mut r, (1, 2), (8, 2));
+        let mut sigs = Signals::default();
+        assert_eq!(sigs.click_effect(&r, (3, 3)), SignalClick::NoTrack);
+        assert!(sigs.click(&r, (3, 2), true));
+        assert_eq!(
+            sigs.by_tile[&(3, 2)],
+            Signal {
+                piece: X,
+                forward: true
+            }
+        );
+        sigs.click(&r, (3, 2), true);
+        assert!(!sigs.by_tile[&(3, 2)].forward, "clicking again flips it");
+        assert!(sigs.remove((3, 2)));
+        assert!(sigs.by_tile.is_empty());
+
+        // A branch dragged from (5, 2) leaves from its east edge, so the junction is (6, 2).
+        build(&w, &mut r, (5, 2), (8, 5));
+        assert!(r.get(6, 2).count_ones() > 1);
+        assert_eq!(sigs.click_effect(&r, (6, 2)), SignalClick::Junction);
+    }
+
+    #[test]
+    fn track_through_a_signal_is_blocked_and_removal_prunes() {
+        let w = flat_world(12);
+        let mut r = Layer::new(12, 12);
+        build(&w, &mut r, (1, 2), (8, 2));
+        let mut sigs = Signals::default();
+        sigs.click(&r, (4, 2), true);
+        // A branch dragged from (3, 2) starts on (4, 2), which would make the
+        // signal's tile a junction; one from (5, 2) is clear of it.
+        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (3, 2), (6, 5));
+        assert_eq!(p.blocked, Some(Blocked::Signal));
+        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (5, 2), (8, 5));
+        assert_eq!(p.blocked, None);
+        // A north-south line crossing the signal's tile would change it.
+        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (4, 0), (4, 5));
+        assert_eq!(p.blocked, Some(Blocked::Signal));
+        r.set(4, 2, 0);
+        assert!(sigs.prune(&r));
+        assert!(sigs.by_tile.is_empty());
     }
 }
