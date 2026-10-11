@@ -1,13 +1,14 @@
 use crate::camera::Camera;
 use crate::clouds;
 use crate::input::PhysicalKeys;
+use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
 use crate::render::{CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
-use crate::roads::{self, Roads};
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::ui::{self, Tool, UiState, win95};
+use crate::{rails, roads};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use glam::{Mat4, Vec2, Vec3};
@@ -18,6 +19,12 @@ use web_time::Instant;
 const WIND: Vec2 = Vec2::new(0.6, 0.25);
 /// Redraw interval while the only thing moving is the clouds.
 const CLOUD_FRAME_SECONDS: f64 = 1.0 / 15.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Network {
+    Road,
+    Rail,
+}
 
 pub struct StarcityApp {
     params: GenParams,
@@ -41,9 +48,12 @@ pub struct StarcityApp {
     last_hover_tile: Option<(i32, i32)>,
     drag_start: Option<(i32, i32)>,
     highlight: Option<Highlight>,
-    roads: Roads,
-    /// The road being dragged out, shown as a preview.
-    road_plan: roads::Plan,
+    roads: Layer,
+    rails: Layer,
+    /// The road or track being dragged out, shown as a preview.
+    plan: Plan,
+    /// Which network `plan` is for.
+    plan_network: Network,
     /// Tiles (min x, min z, max x, max z) whose infrastructure texels are stale.
     infra_dirty: Option<[i32; 4]>,
     /// How far the wind has carried the clouds, in tiles.
@@ -93,8 +103,10 @@ impl StarcityApp {
             last_hover_tile: None,
             drag_start: None,
             highlight: None,
-            roads: Roads::new(1, 1),
-            road_plan: roads::Plan::default(),
+            roads: Layer::new(1, 1),
+            rails: Layer::new(1, 1),
+            plan: Plan::default(),
+            plan_network: Network::Road,
             infra_dirty: None,
             wind: Vec2::ZERO,
             last_cloud_render: 0.0,
@@ -119,6 +131,13 @@ impl StarcityApp {
         if let Some(zoom) = DevTools::zoom() {
             self.camera.view_height = zoom;
         }
+        if let Some((dx, dz)) = std::env::var("STARCITY_FOCUS").ok().and_then(|v| {
+            let (x, z) = v.split_once(',')?;
+            Some((x.trim().parse::<f32>().ok()?, z.trim().parse::<f32>().ok()?))
+        }) {
+            self.camera.focus.x += dx;
+            self.camera.focus.z += dz;
+        }
         if DevTools::demo().as_deref() == Some("roads") {
             let mut built = Vec::new();
             for (a, b) in [
@@ -130,21 +149,28 @@ impl StarcityApp {
                 ((c - 4, c - 6), (c + 1, c - 11)),
                 ((c + 1, c - 11), (c + 6, c - 11)),
             ] {
-                built.extend(roads::plan(&self.world, &self.roads, a, b).build(&mut self.roads));
+                let plan = roads::plan(&self.world, &self.roads, &self.rails, a, b);
+                if let Some(why) = plan.blocked {
+                    eprintln!("demo road {a:?} -> {b:?} blocked: {why:?}");
+                }
+                built.extend(plan.build(&mut self.roads));
+            }
+            for (a, b) in [
+                ((c - 12, c + 14), (c + 2, c + 14)),
+                ((c + 2, c + 14), (c + 8, c + 20)),
+                ((c - 6, c + 14), (c, c + 20)),
+                ((c - 12, c + 17), (c - 6, c + 17)),
+            ] {
+                let plan = rails::plan(&self.world, &self.rails, &self.roads, a, b);
+                if let Some(why) = plan.blocked {
+                    eprintln!("demo track {a:?} -> {b:?} blocked: {why:?}");
+                }
+                built.extend(plan.build(&mut self.rails));
             }
             self.mark_infra(&built);
             // A road being dragged, to show the preview.
             self.drag_start = Some((c - 10, c + 4));
             self.last_hover_tile = Some((c - 4, c + 10));
-            self.road_plan = roads::plan(&self.world, &self.roads, (c - 10, c + 4), (c - 4, c + 10));
-            let preview: Vec<_> = self
-                .road_plan
-                .valid
-                .iter()
-                .chain(&self.road_plan.blocked)
-                .map(|&(t, _)| t)
-                .collect();
-            self.mark_infra(&preview);
             self.ui.tool = Tool::Road;
         }
     }
@@ -164,8 +190,9 @@ impl StarcityApp {
         self.mesh_ms = t.elapsed().as_secs_f32() * 1000.0;
         self.renderer.upload_chunks(&rs.device, &meshes);
         self.sim = Sim::new(&self.world, self.params.seed as u64);
-        self.roads = Roads::new(self.world.size_x, self.world.size_z);
-        self.road_plan = roads::Plan::default();
+        self.roads = Layer::new(self.world.size_x, self.world.size_z);
+        self.rails = Layer::new(self.world.size_x, self.world.size_z);
+        self.plan = Plan::default();
         self.infra_dirty = None;
         self.drag_start = None;
         self.renderer
@@ -236,7 +263,10 @@ impl StarcityApp {
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
         let tool = self.ui.tool;
-        if !matches!(tool, Tool::Bulldoze | Tool::RemoveRoad | Tool::Road) {
+        if !matches!(
+            tool,
+            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail
+        ) {
             self.drag_start = None;
         } else if response.drag_started_by(primary) {
             self.drag_start = self.hover_tile;
@@ -250,26 +280,22 @@ impl StarcityApp {
             }
         }
 
-        let plan = match (tool, self.drag_start, self.last_hover_tile) {
-            (Tool::Road, Some(a), Some(b)) => roads::plan(&self.world, &self.roads, a, b),
-            _ => roads::Plan::default(),
+        let (plan, network) = match (tool, self.drag_start, self.last_hover_tile) {
+            (Tool::Road, Some(a), Some(b)) => (roads::plan(&self.world, &self.roads, &self.rails, a, b), Network::Road),
+            (Tool::Rail, Some(a), Some(b)) => (rails::plan(&self.world, &self.rails, &self.roads, a, b), Network::Rail),
+            _ => (Plan::default(), self.plan_network),
         };
-        if plan != self.road_plan {
-            let old = std::mem::replace(&mut self.road_plan, plan);
-            let touched: Vec<_> = old
-                .valid
-                .iter()
-                .chain(&old.blocked)
-                .chain(&self.road_plan.valid)
-                .chain(&self.road_plan.blocked)
-                .map(|&(t, _)| t)
-                .collect();
+        if plan != self.plan || network != self.plan_network {
+            let old = std::mem::replace(&mut self.plan, plan);
+            self.plan_network = network;
+            self.renderer.preview_is_rail = network == Network::Rail;
+            let touched: Vec<_> = old.tiles().chain(self.plan.tiles()).collect();
             self.mark_infra(&touched);
         }
 
         let highlight = match tool {
             Tool::Pointer => None,
-            Tool::Bulldoze | Tool::RemoveRoad => {
+            Tool::Bulldoze | Tool::RemoveRoad | Tool::RemoveRail => {
                 let end = if self.drag_start.is_some() {
                     self.last_hover_tile
                 } else {
@@ -281,8 +307,8 @@ impl StarcityApp {
                     kind: HighlightKind::Bulldoze,
                 })
             }
-            // While dragging a road, the preview shows where it goes.
-            Tool::Road if self.drag_start.is_some() => None,
+            // While dragging a road or track, the preview shows where it goes.
+            Tool::Road | Tool::Rail if self.drag_start.is_some() => None,
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -299,19 +325,30 @@ impl StarcityApp {
     /// Applies the active tool to a dragged-out span of tiles.
     fn apply_tool(&mut self, a: (i32, i32), b: (i32, i32)) -> Changes {
         match self.ui.tool {
-            Tool::Bulldoze => self
-                .sim
-                .clear(&mut self.world, &mut self.roads, a, b, Clear::Everything),
-            Tool::RemoveRoad => self.sim.clear(&mut self.world, &mut self.roads, a, b, Clear::Roads),
+            Tool::Bulldoze => self.clear(a, b, Clear::Everything),
+            Tool::RemoveRoad => self.clear(a, b, Clear::Roads),
+            Tool::RemoveRail => self.clear(a, b, Clear::Rails),
             Tool::Road => {
-                let plan = roads::plan(&self.world, &self.roads, a, b);
+                let plan = roads::plan(&self.world, &self.roads, &self.rails, a, b);
                 Changes {
                     infra: plan.build(&mut self.roads),
                     ..Default::default()
                 }
             }
+            Tool::Rail => {
+                let plan = rails::plan(&self.world, &self.rails, &self.roads, a, b);
+                Changes {
+                    infra: plan.build(&mut self.rails),
+                    ..Default::default()
+                }
+            }
             _ => Changes::default(),
         }
+    }
+
+    fn clear(&mut self, a: (i32, i32), b: (i32, i32), what: Clear) -> Changes {
+        self.sim
+            .clear(&mut self.world, &mut self.roads, &mut self.rails, a, b, what)
     }
 
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
@@ -327,7 +364,9 @@ impl StarcityApp {
         }
     }
 
-    /// Uploads the dirty rectangle of the infrastructure texture: roads plus the drag preview.
+    /// Uploads the dirty rectangle of the infrastructure texture: roads, rails
+    /// and the drag preview. While previewing, pieces the plan would replace
+    /// are hidden; if the plan is blocked, its pieces show in the red channel.
     fn flush_infra(&mut self, rs: &RenderState) {
         let Some([x0, z0, x1, z1]) = self.infra_dirty.take() else {
             return;
@@ -340,18 +379,26 @@ impl StarcityApp {
         if x0 > x1 || z0 > z1 {
             return;
         }
+        let blocked = self.plan.blocked.is_some();
         let mut preview = std::collections::HashMap::new();
-        for &(t, bits) in &self.road_plan.valid {
-            preview.entry(t).or_insert([0u8; 2])[0] |= bits;
-        }
-        for &(t, bits) in &self.road_plan.blocked {
-            preview.entry(t).or_insert([0u8; 2])[1] |= bits;
+        for p in &self.plan.pieces {
+            let e = preview.entry(p.tile).or_insert((0u8, 0u8));
+            e.0 |= p.add;
+            if !blocked {
+                e.1 |= p.remove;
+            }
         }
         let mut rgba = Vec::with_capacity(((x1 - x0 + 1) * (z1 - z0 + 1) * 4) as usize);
         for z in z0..=z1 {
             for x in x0..=x1 {
-                let [valid, blocked] = preview.get(&(x, z)).copied().unwrap_or_default();
-                rgba.extend_from_slice(&[self.roads.get(x, z), 0, valid, blocked]);
+                let (add, remove) = preview.get(&(x, z)).copied().unwrap_or_default();
+                let (mut road, mut rail) = (self.roads.get(x, z), self.rails.get(x, z));
+                match self.plan_network {
+                    Network::Road => road &= !remove,
+                    Network::Rail => rail &= !remove,
+                }
+                let (ok, red) = if blocked { (0, add) } else { (add, 0) };
+                rgba.extend_from_slice(&[road, rail, ok, red]);
             }
         }
         let (w, h) = ((x1 - x0 + 1) as u32, (z1 - z0 + 1) as u32);
@@ -586,11 +633,17 @@ impl StarcityApp {
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
             .show(ui, |ui| ui::toolbar(ui, &mut self.ui));
-        let plan = &self.road_plan;
+        let plan = &self.plan;
         let status = if !plan.is_empty() {
-            match plan.blocked.len() {
-                0 => format!("Road: {} tiles", plan.valid.len()),
-                n => format!("Road: {} tiles, {n} blocked", plan.valid.len()),
+            let what = match self.plan_network {
+                Network::Road => "road",
+                Network::Rail => "track",
+            };
+            match plan.blocked {
+                None => format!("Build {what}: {} tiles", plan.pieces.len()),
+                Some(Blocked::Water) => format!("Can't build {what} on water"),
+                Some(Blocked::Slope) => format!("Can't build {what} across this slope"),
+                Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
             }
         } else {
             match self.hover_tile {

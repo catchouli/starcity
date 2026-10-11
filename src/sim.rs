@@ -1,6 +1,6 @@
 //! Fixed-tick world simulation. For now: bulldozing and grass regrowth.
 
-use crate::roads::Roads;
+use crate::network::Layer;
 use crate::terrain::{Block, Material, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,6 +9,8 @@ pub enum Clear {
     Everything,
     /// Only tiles with roads: remove the roads and leave bare ground.
     Roads,
+    /// Only tiles with track: remove the track and leave bare ground.
+    Rails,
 }
 
 /// Tiles whose terrain (needs re-meshing) or infrastructure (needs re-uploading) changed.
@@ -51,11 +53,13 @@ impl Sim {
     }
 
     /// Clears an inclusive rectangle of tiles. Cleared tiles lose their roads
-    /// and are left as bare ground: grass becomes dirt and starts regrowing.
+    /// and/or track and are left as bare ground: grass becomes dirt and starts
+    /// regrowing.
     pub fn clear(
         &mut self,
         world: &mut World,
-        roads: &mut Roads,
+        roads: &mut Layer,
+        rails: &mut Layer,
         a: (i32, i32),
         b: (i32, i32),
         what: Clear,
@@ -66,12 +70,24 @@ impl Sim {
                 if !world.in_bounds(x, z) {
                     continue;
                 }
-                let had_road = roads.get(x, z) != 0;
-                if what == Clear::Roads && !had_road {
+                let layer = match what {
+                    Clear::Everything => None,
+                    Clear::Roads => Some(&*roads),
+                    Clear::Rails => Some(&*rails),
+                };
+                if layer.is_some_and(|l| l.get(x, z) == 0) {
                     continue;
                 }
-                if had_road {
+                let mut cleared = false;
+                if what != Clear::Rails && roads.get(x, z) != 0 {
                     roads.set(x, z, 0);
+                    cleared = true;
+                }
+                if what != Clear::Roads && rails.get(x, z) != 0 {
+                    rails.set(x, z, 0);
+                    cleared = true;
+                }
+                if cleared {
                     changes.infra.push((x, z));
                 }
                 if self.make_bare(world, x, z) {
@@ -200,8 +216,14 @@ mod tests {
     fn bulldozed_patch_regrows_from_edges() {
         let mut w = grass_world(12);
         let mut sim = Sim::new(&w, 7);
-        let mut roads = Roads::new(12, 12);
-        let changes = sim.clear(&mut w, &mut roads, (3, 3), (8, 8), Clear::Everything);
+        let changes = sim.clear(
+            &mut w,
+            &mut Layer::new(12, 12),
+            &mut Layer::new(12, 12),
+            (3, 3),
+            (8, 8),
+            Clear::Everything,
+        );
         assert_eq!(changes.terrain.len(), 36);
         assert_eq!(w.top_block(5, 5).unwrap().1.material, Material::Dirt);
 
@@ -218,7 +240,14 @@ mod tests {
     fn isolated_dirt_never_regrows() {
         let mut w = grass_world(5);
         let mut sim = Sim::new(&w, 3);
-        sim.clear(&mut w, &mut Roads::new(5, 5), (0, 0), (4, 4), Clear::Everything);
+        sim.clear(
+            &mut w,
+            &mut Layer::new(5, 5),
+            &mut Layer::new(5, 5),
+            (0, 0),
+            (4, 4),
+            Clear::Everything,
+        );
         for _ in 0..1000 {
             assert!(sim.advance(&mut w, TICK_SECONDS).is_empty());
         }
@@ -228,12 +257,15 @@ mod tests {
     fn removing_roads_leaves_other_tiles_alone() {
         let mut w = grass_world(6);
         let mut sim = Sim::new(&w, 1);
-        let mut roads = Roads::new(6, 6);
+        let mut roads = Layer::new(6, 6);
+        let mut rails = Layer::new(6, 6);
         roads.set(2, 2, crate::roads::E | crate::roads::W);
-        let changes = sim.clear(&mut w, &mut roads, (0, 0), (5, 5), Clear::Roads);
+        rails.set(4, 4, crate::rails::X);
+        let changes = sim.clear(&mut w, &mut roads, &mut rails, (0, 0), (5, 5), Clear::Roads);
         assert_eq!(changes.infra, vec![(2, 2)]);
         assert_eq!(changes.terrain, vec![(2, 2)]);
         assert_eq!(roads.get(2, 2), 0);
+        assert_eq!(rails.get(4, 4), crate::rails::X, "track is left alone");
         assert_eq!(w.top_block(3, 3).unwrap().1.material, Material::Grass);
     }
 }

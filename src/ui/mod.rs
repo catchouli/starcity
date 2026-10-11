@@ -32,11 +32,11 @@ impl Tool {
     pub fn hint(self) -> &'static str {
         match self {
             Tool::Pointer => "Drag to pan, right-drag to rotate, scroll to zoom",
-            Tool::Road => "Drag along an axis or at 45° to draw road. Red pieces can't be built (water or slope).",
+            Tool::Road => "Drag along an axis or at 45° to draw road. Red means it can't be built there.",
             Tool::RemoveRoad => "Click or drag a rectangle to remove road",
-            Tool::Rail => "Drag along an axis or a 45° diagonal to lay track (coming soon)",
+            Tool::Rail => "Drag along an axis or at 45° to lay track. Red means it can't be built there.",
             Tool::Signal => "Click track to place a signal (coming soon)",
-            Tool::RemoveRail => "Drag over track to remove it (coming soon)",
+            Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
         }
     }

@@ -4,7 +4,9 @@ mod clouds;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
 mod input;
+mod network;
 mod picking;
+mod rails;
 mod render;
 mod roads;
 #[cfg(test)]

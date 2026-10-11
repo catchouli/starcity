@@ -143,6 +143,8 @@ pub struct SceneRenderer {
     cloud_field: f32,
     target: Option<Target>,
     pub stats: RenderStats,
+    /// Whether the drag preview shows track (true) or road pieces.
+    pub preview_is_rail: bool,
 }
 
 impl SceneRenderer {
@@ -247,6 +249,7 @@ impl SceneRenderer {
             chunks: Vec::new(),
             target: None,
             stats: RenderStats::default(),
+            preview_is_rail: false,
         }
     }
 
@@ -404,7 +407,7 @@ impl SceneRenderer {
             options: [
                 if settings.wireframe_only { 1.0 } else { 0.0 },
                 highlight.map_or(0.0, |h| h.kind as u8 as f32),
-                0.0,
+                if self.preview_is_rail { 1.0 } else { 0.0 },
                 0.0,
             ],
             clouds: [clouds.altitude, self.cloud_field, clouds.opacity, 0.0],

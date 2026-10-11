@@ -69,13 +69,16 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Two-way**: one tile holds a lane in each direction, so cars can pass each other.
 - **Pieces**: each tile has 8 road bits. Four *halves* join the tile centre to an edge midpoint, and combine into straights, bends, T-junctions and crossroads. Four *diagonals* join two adjacent edge midpoints across a corner, and a 45° road is a staircase of them. Pieces meet at edge midpoints, which later forms the graph cars drive on.
 - **Drawing**: drag from a tile; mostly along an axis gives a straight road, nearer 45° gives a diagonal. The end tiles get the half pointing inwards, plus the outward half if a road already reaches that edge. That gives T-junctions, bends and continuations without special cases.
-- **Fit rules (v1)**: anything on flat ground; on a slope only straight pieces running up the slope; diagonals need flat ground; nothing on water. Pieces that don't fit show red in the preview and aren't built.
+- **Diagonals off existing road**: dragging diagonally from a dead end turns that last tile into a diagonal piece, so the road bends 45° where it enters the tile and carries straight on. From a through road or junction, the road continues to the tile's far edge along its own axis, then turns 45°. A diagonal leaving through a dead end's open edge replaces the stub. From an empty tile there are two possible 45° lines; the planner picks the one that joins up at the far end.
+- **Fit rules (v1)**: anything on flat ground; on a slope only straight pieces running up the slope; diagonals need flat ground; nothing on water. **All or nothing**: if any piece doesn't fit, the whole preview turns red, the status bar says why, and nothing is built.
 - **Rendering**: roads are drawn by the terrain shader from a per-tile `Rgba8Uint` texture (r = roads, g = rails, b/a = drag preview), as a distance field around the pieces. They follow slopes exactly, cost no extra geometry, and placing one rewrites a single texel.
 - Towns are made of the same roads the player builds.
 
 ### 4.2 Railways
 
 - One track segment takes a whole tile, **with borders on each side** (ballast/fence).
+- **Pieces** (TTD-style): every piece joins two edge midpoints. There are two straights and four corner diagonals, so no 90° turns and nothing stops at a tile's centre. Junctions (switches) are pieces sharing an edge midpoint.
+- **Drawing** follows the road rules: drag straight or at 45°, all or nothing. A diagonal off a straight starts at the edge the straight leads to; from an existing diagonal it carries on along the same line. A diagonal arriving where track already reaches its entry edge joins there. Track is drawn by the shader (ballast, sleepers, rails) from the `g` channel of the infrastructure texture. Roads and track can't share a tile yet (level crossings later).
 - **Single track per tile.** Trains can run either way along it. A double-track line is two parallel rail tiles that the player links with junctions.
 - **Collisions are real.** If two trains meet head-on on unsignalled track, they crash. Safety is the player's job.
 - **Diagonal pieces**: a 45° drag builds dedicated diagonal track (TTD-style half-tile pieces running corner to corner), not a staircase of straight tiles.
@@ -203,7 +206,7 @@ Terrain generation was never really started: it only produced random noise for o
 - Win95 egui theme and top toolbar (§8). ✅
 - Tile picking (mouse ray → tile/corner) and a hover highlight.
 - Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles. ✅ Remove-road tool ✅.
-- Rail tool: drag to draw track, and place signals.
+- Rail tool: drag to draw track ✅, and place signals (next).
 - Bulldoze tool and grass regrowth (first use of the fixed-tick simulation). ✅
 - Tile picking and hover/drag highlight ✅. Loading dialog with download progress ✅.
 - Incremental re-meshing of edited chunks.

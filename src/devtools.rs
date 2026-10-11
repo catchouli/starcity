@@ -3,7 +3,8 @@
 //! - `STARCITY_SCREENSHOT=out.png`: render a few frames, save a screenshot, exit.
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
-//! - `STARCITY_ZOOM=30`: initial zoom (visible width in tiles).
+//! - `STARCITY_ZOOM=30`: initial zoom (visible height in tiles at the focus).
+//! - `STARCITY_FOCUS=dx,dz`: move the camera focus from the map centre.
 
 use eframe::egui;
 

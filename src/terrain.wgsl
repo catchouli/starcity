@@ -11,7 +11,8 @@ struct Globals {
     sun_dir: vec4<f32>,
     // x = block height, y = grid strength, z = texture repeats per tile, w = wireframe (0/1)
     params: vec4<f32>,
-    // x = wireframe only (hide shading), y = highlight kind (0 none, 1 cursor, 2 bulldoze)
+    // x = wireframe only (hide shading), y = highlight kind (0 none, 1 cursor, 2 bulldoze),
+    // z = drag preview shows track (1) or road (0) pieces
     options: vec4<f32>,
     // Highlighted tile rectangle: min x, min z, max x, max z (world units).
     highlight: vec4<f32>,
@@ -154,8 +155,56 @@ fn pieces(p: vec2<f32>, o: vec2<f32>, bits: u32) -> vec2<f32> {
     return best;
 }
 
+// Track pieces join edge midpoints: bit 0 west-east, bit 1 north-south,
+// bits 2-5 the corner diagonals N-E, E-S, S-W, W-N.
+const RAIL_HALF_WIDTH: f32 = 0.3;
+
+// Like `segment`, plus the distance with flat ends (z): rails and sleepers
+// stop square at the end of the track, while the ballast keeps a round end.
+fn rail_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> vec3<f32> {
+    let ab = b - a;
+    let t_raw = dot(p - a, ab) / dot(ab, ab);
+    let t = clamp(t_raw, 0.0, 1.0);
+    let d = length(p - (a + ab * t));
+    let flat_d = select(1e6, d, t_raw == t);
+    return vec3<f32>(d, t * length(ab), flat_d);
+}
+
+fn nearest_rail(best: vec3<f32>, candidate: vec3<f32>) -> vec3<f32> {
+    let pick = select(best, candidate, candidate.x < best.x);
+    return vec3<f32>(pick.xy, min(best.z, candidate.z));
+}
+
+// Nearest track piece: (distance, distance along, flat-ended distance).
+fn rail_pieces(p: vec2<f32>, o: vec2<f32>, bits: u32) -> vec3<f32> {
+    var best = vec3<f32>(1e6, 0.0, 1e6);
+    if bits == 0u {
+        return best;
+    }
+    let n = o + vec2<f32>(0.5, 0.0);
+    let e = o + vec2<f32>(1.0, 0.5);
+    let s = o + vec2<f32>(0.5, 1.0);
+    let w = o + vec2<f32>(0.0, 0.5);
+    if (bits & 1u) != 0u { best = nearest_rail(best, rail_segment(p, w, e)); }
+    if (bits & 2u) != 0u { best = nearest_rail(best, rail_segment(p, n, s)); }
+    if (bits & 4u) != 0u { best = nearest_rail(best, rail_segment(p, n, e)); }
+    if (bits & 8u) != 0u { best = nearest_rail(best, rail_segment(p, e, s)); }
+    if (bits & 16u) != 0u { best = nearest_rail(best, rail_segment(p, s, w)); }
+    if (bits & 32u) != 0u { best = nearest_rail(best, rail_segment(p, w, n)); }
+    return best;
+}
+
+// Preview pieces use the road or track layout depending on the tool.
+fn preview_pieces(p: vec2<f32>, o: vec2<f32>, bits: u32) -> vec2<f32> {
+    if g.options.z > 0.5 {
+        return rail_pieces(p, o, bits).xy;
+    }
+    return pieces(p, o, bits);
+}
+
 struct Infra {
     road: vec2<f32>,
+    rail: vec3<f32>,
     preview: f32,
     blocked: f32,
 };
@@ -163,7 +212,7 @@ struct Infra {
 // Note: branches on texture data, so call it after anything that needs
 // derivatives or implicit-LOD sampling.
 fn infra_at(p: vec2<f32>) -> Infra {
-    var out = Infra(vec2<f32>(1e6, 0.0), 1e6, 1e6);
+    var out = Infra(vec2<f32>(1e6, 0.0), vec3<f32>(1e6, 0.0, 1e6), 1e6, 1e6);
     let tile = vec2<i32>(floor(p));
     let dims = vec2<i32>(textureDimensions(infra));
     for (var dz = -1; dz <= 1; dz++) {
@@ -173,13 +222,14 @@ fn infra_at(p: vec2<f32>) -> Infra {
                 continue;
             }
             let bits = textureLoad(infra, t, 0);
-            if (bits.r | bits.b | bits.a) == 0u {
+            if (bits.r | bits.g | bits.b | bits.a) == 0u {
                 continue;
             }
             let o = vec2<f32>(t);
             out.road = nearest(out.road, pieces(p, o, bits.r));
-            out.preview = min(out.preview, pieces(p, o, bits.b).x);
-            out.blocked = min(out.blocked, pieces(p, o, bits.a).x);
+            out.rail = nearest_rail(out.rail, rail_pieces(p, o, bits.g));
+            out.preview = min(out.preview, preview_pieces(p, o, bits.b).x);
+            out.blocked = min(out.blocked, preview_pieces(p, o, bits.a).x);
         }
     }
     return out;
@@ -236,10 +286,24 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     asphalt = mix(asphalt, vec3<f32>(0.9, 0.85, 0.6), dash);
     color = mix(color, asphalt * light, road);
 
-    // Drag preview: a pale ghost road where it fits, red where it doesn't.
-    let preview = (1.0 - smoothstep(hw - px, hw + px, inf.preview)) * top;
+    // Track: a ballast bed with darker borders, sleepers and two steel rails.
+    let rhw = RAIL_HALF_WIDTH;
+    let rd = inf.rail.x;
+    let bed = (1.0 - smoothstep(rhw - px, rhw + px, rd)) * top;
+    var ballast = vec3<f32>(0.45, 0.41, 0.36) * (0.7 + dot(rock, vec3<f32>(0.3, 0.5, 0.2)) * 0.7);
+    ballast = mix(ballast, ballast * 0.6, smoothstep(rhw - 0.06, rhw - 0.03, rd));
+    let fd = inf.rail.z;
+    let sleeper = (1.0 - smoothstep(0.2, 0.2 + px, fd)) * step(fract(inf.rail.y * 5.0), 0.4) * detail;
+    ballast = mix(ballast, vec3<f32>(0.3, 0.2, 0.13), sleeper);
+    let rail_line = (1.0 - smoothstep(0.014, 0.014 + px, abs(fd - 0.1))) * max(detail, 0.5);
+    ballast = mix(ballast, vec3<f32>(0.58, 0.59, 0.62), rail_line);
+    color = mix(color, ballast * light, bed);
+
+    // Drag preview: a pale ghost where it fits, red where it doesn't.
+    let phw = select(hw, rhw, g.options.z > 0.5);
+    let preview = (1.0 - smoothstep(phw - px, phw + px, inf.preview)) * top;
     color = mix(color, vec3<f32>(0.85, 0.88, 0.9) * light, preview * 0.65);
-    let blocked = (1.0 - smoothstep(hw - px, hw + px, inf.blocked)) * top;
+    let blocked = (1.0 - smoothstep(phw - px, phw + px, inf.blocked)) * top;
     color = mix(color, vec3<f32>(0.9, 0.15, 0.1), blocked * 0.7);
 
     color = highlight(color, in.world, px);
