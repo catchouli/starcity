@@ -128,8 +128,8 @@ impl Signals {
 }
 
 /// Whether a tile could hold these track pieces.
-pub fn check(world: &World, roads: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
-    if roads.get(x, z) != 0 {
+pub fn check(world: &World, roads: &Layer, buildings: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
+    if roads.get(x, z) != 0 || buildings.get(x, z) != 0 {
         return Err(Blocked::Occupied);
     }
     network::slope_check(world, x, z, bits & X != 0, bits & Y != 0, bits & DIAGONALS != 0)
@@ -137,7 +137,15 @@ pub fn check(world: &World, roads: &Layer, x: i32, z: i32, bits: u8) -> Result<(
 
 /// Plans track dragged from tile `a` to tile `b`: straight along an axis, or
 /// diagonal when the drag is nearer 45°.
-pub fn plan(world: &World, rails: &Layer, roads: &Layer, signals: &Signals, a: (i32, i32), b: (i32, i32)) -> Plan {
+pub fn plan(
+    world: &World,
+    rails: &Layer,
+    roads: &Layer,
+    buildings: &Layer,
+    signals: &Signals,
+    a: (i32, i32),
+    b: (i32, i32),
+) -> Plan {
     let (dx, dz) = (b.0 - a.0, b.1 - a.1);
     let pieces = if dx == 0 && dz == 0 {
         Vec::new()
@@ -157,7 +165,7 @@ pub fn plan(world: &World, rails: &Layer, roads: &Layer, signals: &Signals, a: (
             plan.blocked = Some(Blocked::Signal);
             break;
         }
-        if let Err(why) = check(world, roads, t.0, t.1, bits) {
+        if let Err(why) = check(world, roads, buildings, t.0, t.1, bits) {
             plan.blocked = Some(why);
             break;
         }
@@ -250,7 +258,15 @@ mod tests {
     }
 
     fn build(w: &World, r: &mut Layer, a: (i32, i32), b: (i32, i32)) {
-        let p = plan(w, r, &Layer::new(r.size_x, r.size_z), &Signals::default(), a, b);
+        let p = plan(
+            w,
+            r,
+            &Layer::new(r.size_x, r.size_z),
+            &Layer::new(64, 64),
+            &Signals::default(),
+            a,
+            b,
+        );
         assert!(p.blocked.is_none(), "{a:?} -> {b:?} blocked: {:?}", p.blocked);
         p.build(r);
     }
@@ -311,12 +327,20 @@ mod tests {
             },
         );
         let mut r = Layer::new(8, 8);
-        let p = plan(&w, &r, &Layer::new(8, 8), &Signals::default(), (1, 2), (7, 2));
+        let p = plan(
+            &w,
+            &r,
+            &Layer::new(8, 8),
+            &Layer::new(64, 64),
+            &Signals::default(),
+            (1, 2),
+            (7, 2),
+        );
         assert_eq!(p.blocked, Some(Blocked::Slope));
         assert!(p.build(&mut r).is_empty());
         let mut roads = Layer::new(8, 8);
         roads.set(2, 5, 1);
-        let p = plan(&w, &r, &roads, &Signals::default(), (0, 5), (5, 5));
+        let p = plan(&w, &r, &roads, &Layer::new(64, 64), &Signals::default(), (0, 5), (5, 5));
         assert_eq!(p.blocked, Some(Blocked::Occupied));
     }
 
@@ -355,12 +379,12 @@ mod tests {
         sigs.click(&r, (4, 2), true);
         // A branch dragged from (3, 2) starts on (4, 2), which would make the
         // signal's tile a junction; one from (5, 2) is clear of it.
-        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (3, 2), (6, 5));
+        let p = plan(&w, &r, &Layer::new(12, 12), &Layer::new(64, 64), &sigs, (3, 2), (6, 5));
         assert_eq!(p.blocked, Some(Blocked::Signal));
-        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (5, 2), (8, 5));
+        let p = plan(&w, &r, &Layer::new(12, 12), &Layer::new(64, 64), &sigs, (5, 2), (8, 5));
         assert_eq!(p.blocked, None);
         // A north-south line crossing the signal's tile would change it.
-        let p = plan(&w, &r, &Layer::new(12, 12), &sigs, (4, 0), (4, 5));
+        let p = plan(&w, &r, &Layer::new(12, 12), &Layer::new(64, 64), &sigs, (4, 0), (4, 5));
         assert_eq!(p.blocked, Some(Blocked::Signal));
         r.set(4, 2, 0);
         assert!(sigs.prune(&r));

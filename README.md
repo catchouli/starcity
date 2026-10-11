@@ -42,7 +42,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | Signal tool | Click track to place a signal facing you, click again to turn it round, right-click to remove |
 | Station tool | Drag along straight track or flat ground to build platforms |
 | Train tool | Click plain track to place a train heading away from you |
-| Pointer click | Open a train (orders, stop/go) or a station (rename) |
+| Pointer click | Open a train (orders, stop/go), a station or a town |
 | Space | Pause / resume trains |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
 
@@ -66,6 +66,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/roads.rs`, `src/rails.rs`: road and track pieces, drag planning, signals
 - `src/trains.rs`: train movement, routing, path-signal reservations, crashes
 - `src/stations.rs`: stations and platform planning
+- `src/towns.rs`: town founding, names, growth, buildings, catchment
 - `src/clouds.rs`: tiling voxel cloud field
 - `loader.mjs`: download progress for the loading dialog in `index.html`
 - `tools/process_textures.sh`: downscales source textures into `assets/`

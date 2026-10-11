@@ -11,6 +11,8 @@ pub struct Station {
     pub id: StationId,
     pub name: String,
     pub tiles: Vec<(i32, i32)>,
+    /// Passengers waiting for a train (fractional while they trickle in).
+    pub waiting: f32,
 }
 
 impl Station {
@@ -58,6 +60,7 @@ impl Stations {
         world: &World,
         rails_layer: &Layer,
         roads: &Layer,
+        buildings: &Layer,
         signals: &Signals,
         a: (i32, i32),
         b: (i32, i32),
@@ -83,7 +86,7 @@ impl Stations {
         };
         for &(x, z) in &plan.tiles {
             let existing = rails_layer.get(x, z);
-            let why = if roads.get(x, z) != 0 || (existing != 0 && existing != piece) {
+            let why = if roads.get(x, z) != 0 || buildings.get(x, z) != 0 || (existing != 0 && existing != piece) {
                 Some(Blocked::Occupied)
             } else if signals.by_tile.contains_key(&(x, z)) {
                 Some(Blocked::Signal)
@@ -124,6 +127,7 @@ impl Stations {
                     id,
                     name: format!("Station {}", id + 1),
                     tiles: Vec::new(),
+                    waiting: 0.0,
                 },
             );
             id
@@ -187,19 +191,19 @@ mod tests {
         let roads = Layer::new(16, 16);
         let sigs = Signals::default();
         let mut st = Stations::default();
-        let p = st.plan(&w, &r, &roads, &sigs, (2, 3), (5, 4));
+        let p = st.plan(&w, &r, &roads, &Layer::new(16, 16), &sigs, (2, 3), (5, 4));
         assert_eq!(p.tiles.len(), 4, "a mostly-x drag runs along x");
         assert_eq!(p.piece, rails::X);
         st.build(&p, &mut r);
         assert_eq!(r.get(4, 3), rails::X);
         let id = st.at((2, 3)).unwrap();
         // Extending the platform joins the same station.
-        let p = st.plan(&w, &r, &roads, &sigs, (6, 3), (7, 3));
+        let p = st.plan(&w, &r, &roads, &Layer::new(16, 16), &sigs, (6, 3), (7, 3));
         st.build(&p, &mut r);
         assert_eq!(st.at((7, 3)), Some(id));
         assert_eq!(st.get(id).unwrap().tiles.len(), 6);
         // Somewhere else is a new station.
-        let p = st.plan(&w, &r, &roads, &sigs, (2, 10), (5, 10));
+        let p = st.plan(&w, &r, &roads, &Layer::new(16, 16), &sigs, (2, 10), (5, 10));
         st.build(&p, &mut r);
         assert_ne!(st.at((3, 10)), Some(id));
         assert_eq!(st.list.len(), 2);
@@ -220,10 +224,10 @@ mod tests {
         let mut r = Layer::new(16, 16);
         let sigs = Signals::default();
         let st = Stations::default();
-        let p = st.plan(&w, &r, &Layer::new(16, 16), &sigs, (2, 3), (6, 3));
+        let p = st.plan(&w, &r, &Layer::new(16, 16), &Layer::new(16, 16), &sigs, (2, 3), (6, 3));
         assert_eq!(p.blocked, Some(Blocked::Slope));
         r.set(3, 8, rails::Y);
-        let p = st.plan(&w, &r, &Layer::new(16, 16), &sigs, (1, 8), (5, 8));
+        let p = st.plan(&w, &r, &Layer::new(16, 16), &Layer::new(16, 16), &sigs, (1, 8), (5, 8));
         assert_eq!(p.blocked, Some(Blocked::Occupied), "crossing track the other way");
     }
 
@@ -232,7 +236,15 @@ mod tests {
         let w = flat_world(16);
         let mut r = Layer::new(16, 16);
         let mut st = Stations::default();
-        let p = st.plan(&w, &r, &Layer::new(16, 16), &Signals::default(), (2, 3), (3, 3));
+        let p = st.plan(
+            &w,
+            &r,
+            &Layer::new(16, 16),
+            &Layer::new(16, 16),
+            &Signals::default(),
+            (2, 3),
+            (3, 3),
+        );
         st.build(&p, &mut r);
         r.set(2, 3, 0);
         assert!(st.prune(&r).is_empty());

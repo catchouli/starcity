@@ -155,6 +155,7 @@ pub struct Train {
     pub loading: Option<f32>,
     /// Told to stop by the player.
     pub stopped: bool,
+    pub passengers: u32,
     /// Distance to the target station from each segment, and the target and
     /// track version it was computed for.
     routing: Option<Routing>,
@@ -167,6 +168,11 @@ struct Routing {
 }
 
 impl Train {
+    /// Passenger seats: every car but the locomotive.
+    pub fn capacity(&self) -> u32 {
+        self.cars.saturating_sub(1) * 30
+    }
+
     pub fn length(&self) -> f32 {
         self.cars as f32 * CAR_LENGTH + (self.cars.saturating_sub(1)) as f32 * CAR_GAP
     }
@@ -291,6 +297,9 @@ pub enum SpawnError {
 #[derive(Default)]
 pub struct Trains {
     pub list: Vec<Train>,
+    /// Trains that have just stopped at a station, for the caller to load
+    /// and unload: (train, station).
+    pub arrivals: Vec<(u32, StationId)>,
     owner: HashMap<PieceKey, u32>,
     next_id: u32,
     rng: u64,
@@ -364,6 +373,7 @@ impl Trains {
             order: 0,
             loading: None,
             stopped: false,
+            passengers: 0,
             routing: None,
         });
         Ok(id)
@@ -709,6 +719,10 @@ impl Trains {
         let t = self.train(id);
         t.loading = Some(LOADING_SECONDS);
         t.speed = 0.0;
+        if let Some(station) = t.target() {
+            self.arrivals.push((id, station));
+        }
+        let t = self.train(id);
         let ahead: Vec<Entry> = t.route.drain(t.head + 1..).collect();
         for e in ahead.into_iter().filter(|e| e.claimed) {
             if self.owner.get(&e.seg.key()) == Some(&id) {
@@ -931,9 +945,9 @@ mod tests {
         let mut stations = Stations::default();
         let none = Layer::new(32, 8);
         let sigs = Signals::default();
-        let a = stations.plan(&w, &r, &none, &sigs, (2, 2), (5, 2));
+        let a = stations.plan(&w, &r, &none, &none, &sigs, (2, 2), (5, 2));
         stations.build(&a, &mut r);
-        let b = stations.plan(&w, &r, &none, &sigs, (18, 2), (21, 2));
+        let b = stations.plan(&w, &r, &none, &none, &sigs, (18, 2), (21, 2));
         stations.build(&b, &mut r);
         let (sa, sb) = (stations.at((3, 2)).unwrap(), stations.at((19, 2)).unwrap());
 

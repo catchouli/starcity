@@ -44,8 +44,8 @@ fn dead_end(bits: u8) -> Option<u8> {
 }
 
 /// Whether a tile could hold these road pieces.
-pub fn check(world: &World, rails: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
-    if rails.get(x, z) != 0 {
+pub fn check(world: &World, rails: &Layer, buildings: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
+    if rails.get(x, z) != 0 || buildings.get(x, z) != 0 {
         return Err(Blocked::Occupied);
     }
     network::slope_check(
@@ -60,7 +60,7 @@ pub fn check(world: &World, rails: &Layer, x: i32, z: i32, bits: u8) -> Result<(
 
 /// Plans a road dragged from tile `a` to tile `b`. A drag mostly along one axis
 /// gives a straight road along that axis; a drag closer to 45° gives a diagonal.
-pub fn plan(world: &World, roads: &Layer, rails: &Layer, a: (i32, i32), b: (i32, i32)) -> Plan {
+pub fn plan(world: &World, roads: &Layer, rails: &Layer, buildings: &Layer, a: (i32, i32), b: (i32, i32)) -> Plan {
     let (dx, dz) = (b.0 - a.0, b.1 - a.1);
     let pieces = if dx == 0 && dz == 0 {
         Vec::new()
@@ -76,7 +76,7 @@ pub fn plan(world: &World, roads: &Layer, rails: &Layer, a: (i32, i32), b: (i32,
     let tiles: Vec<_> = plan.tiles().collect();
     for t in tiles {
         let bits = plan.result(roads, t).unwrap();
-        if let Err(why) = check(world, rails, t.0, t.1, bits) {
+        if let Err(why) = check(world, rails, buildings, t.0, t.1, bits) {
             plan.blocked = Some(why);
             break;
         }
@@ -213,7 +213,7 @@ mod tests {
     }
 
     fn build(w: &World, r: &mut Layer, a: (i32, i32), b: (i32, i32)) {
-        let p = plan(w, r, &Layer::new(r.size_x, r.size_z), a, b);
+        let p = plan(w, r, &Layer::new(r.size_x, r.size_z), &Layer::new(64, 64), a, b);
         assert!(p.blocked.is_none(), "{a:?} -> {b:?} blocked: {:?}", p.blocked);
         p.build(r);
     }
@@ -226,7 +226,7 @@ mod tests {
     fn straight_road_has_half_pieces_at_the_ends() {
         let w = flat_world(8);
         let r = Layer::new(8, 8);
-        let p = plan(&w, &r, &Layer::new(8, 8), (1, 2), (4, 2));
+        let p = plan(&w, &r, &Layer::new(8, 8), &Layer::new(64, 64), (1, 2), (4, 2));
         assert_eq!(
             adds(&p),
             vec![((1, 2), E), ((2, 2), E | W), ((3, 2), E | W), ((4, 2), W)]
@@ -250,7 +250,7 @@ mod tests {
     fn diagonal_is_a_connected_staircase() {
         let w = flat_world(8);
         let r = Layer::new(8, 8);
-        let p = plan(&w, &r, &Layer::new(8, 8), (1, 1), (3, 3));
+        let p = plan(&w, &r, &Layer::new(8, 8), &Layer::new(64, 64), (1, 1), (3, 3));
         assert_eq!(
             adds(&p),
             vec![((1, 1), NE), ((2, 1), SW), ((2, 2), NE), ((3, 2), SW), ((3, 3), NE)]
@@ -325,12 +325,12 @@ mod tests {
             },
         );
         let mut r = Layer::new(8, 8);
-        let p = plan(&w, &r, &Layer::new(8, 8), (1, 2), (7, 2));
+        let p = plan(&w, &r, &Layer::new(8, 8), &Layer::new(64, 64), (1, 2), (7, 2));
         assert_eq!(p.blocked, Some(Blocked::Slope));
         assert!(p.build(&mut r).is_empty());
         assert_eq!(r.get(2, 2), 0, "nothing is built");
         // Running up the slope is fine.
-        let p = plan(&w, &r, &Layer::new(8, 8), (4, 0), (4, 5));
+        let p = plan(&w, &r, &Layer::new(8, 8), &Layer::new(64, 64), (4, 0), (4, 5));
         assert_eq!(p.blocked, None);
     }
 
@@ -339,10 +339,17 @@ mod tests {
         let mut w = flat_world(4);
         let mut rails = Layer::new(4, 4);
         rails.set(2, 1, 1);
-        let p = plan(&w, &Layer::new(4, 4), &rails, (0, 1), (3, 1));
+        let p = plan(&w, &Layer::new(4, 4), &rails, &Layer::new(64, 64), (0, 1), (3, 1));
         assert_eq!(p.blocked, Some(Blocked::Occupied));
         w.sea_level = 5;
-        let p = plan(&w, &Layer::new(4, 4), &Layer::new(4, 4), (0, 0), (2, 0));
+        let p = plan(
+            &w,
+            &Layer::new(4, 4),
+            &Layer::new(4, 4),
+            &Layer::new(64, 64),
+            (0, 0),
+            (2, 0),
+        );
         assert_eq!(p.blocked, Some(Blocked::Water));
     }
 }

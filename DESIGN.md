@@ -101,10 +101,12 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 
 ## 5. Settlements
 
-- A settlement is **seeded** at a point with a name. **The name belongs to that origin point.** There's no fixed town boundary.
-- Growth: new roads extend from the existing road network and buildings fill the plots beside roads. Density and building size go up near the centre over time.
-- **Merging:** when two settlements grow into each other, their road networks connect and they effectively become one conurbation. Each original name still marks its own district (like London boroughs).
-- **Growth rate** depends on local economic activity: passengers carried, goods delivered, nearby industry production and station service quality. Well-connected towns boom.
+- **Founding** ✅: at map generation, towns are placed on the flattest dry land, spaced apart (about one per 9,000 tiles²), with generated English-style names (prefix + suffix: Ashford, Kingsley, Thornbury…). Each starts as a crossroads and gets a head start of 30–120 growth steps. The name belongs to that founding point, shown as a label with the population.
+- **Growth** ✅: each step a town does one of the following: extends a road from its network (using the same road planner as the player, keeping a one-tile gap from parallel roads so houses fit between), builds a house on a free flat tile beside a road, or adds a floor to a building near its centre (the floor limit rises with population, so centres get taller). The town's reach grows with its population. Because towns use the shared road layer, they join up with player roads and, as they grow, with each other into larger conurbations.
+- **Buildings** ✅: drawn as boxes with roofs in a few colour schemes; buildings of four or more floors become grey-blue offices. Buildings block player roads, track and stations; bulldozing removes them.
+- **Growth rate** ✅: a slow base rate plus a boost from recent passenger service (passengers delivered to the town's stations, decaying over time).
+- **Passengers** ✅: buildings within 4 tiles of a station's platforms generate waiting passengers there (about one trip per person per 100 s, capped). Trains unload everyone at each stop (crediting the nearest town) and load up to their capacity (30 per carriage). New stations take the nearest town's name, with a compass point if it's taken.
+- Later: passengers with destinations, station ratings, mail, town zoning (shops and industry), and towns building their own stations.
 
 ## 6. Industries & economy
 
@@ -215,8 +217,8 @@ Terrain generation was never really started: it only produced random noise for o
 **M4 — Terraforming**
 - Raise, lower, level, dig and fill.
 
-**M5 — Settlements**
-- Settlement seeding and naming, basic outward growth along roads.
+**M5 — Settlements** ✅
+- Town founding and naming, growth along roads, buildings, passengers and service-driven growth (§5).
 
 **M6 — Trains & stations**
 - Trains ✅: placed with the train tool; follow the track graph (edge midpoints, at most 45° per step); accelerate and brake to stop points; reverse at dead ends; reserve paths through path signals and wait when blocked; crash head-on on unsignalled track; wrecks are cleared after a few seconds. Space pauses. They wander (random at junctions) until stations and orders exist.

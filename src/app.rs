@@ -8,6 +8,7 @@ use crate::sim::{self, Changes, Clear, Sim};
 use crate::stations::{StationId, Stations};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
+use crate::towns::{TownId, Towns};
 use crate::trains::{SpawnError, Trains};
 use crate::ui::{self, Tool, UiState, win95};
 use crate::{rails, roads};
@@ -55,6 +56,10 @@ pub struct StarcityApp {
     signals: rails::Signals,
     trains: Trains,
     stations: Stations,
+    towns: Towns,
+    selected_town: Option<TownId>,
+    /// Seconds since the last town and passenger update.
+    town_clock: f32,
     /// Bumped whenever track changes, so trains re-plan their routes.
     track_version: u64,
     selected_train: Option<u32>,
@@ -127,6 +132,9 @@ impl StarcityApp {
             signals: rails::Signals::default(),
             trains: Trains::new(1),
             stations: Stations::default(),
+            towns: Towns::empty(1, 1),
+            selected_town: None,
+            town_clock: 0.0,
             track_version: 0,
             selected_train: None,
             selected_station: None,
@@ -168,6 +176,13 @@ impl StarcityApp {
             self.camera.focus.x += dx;
             self.camera.focus.z += dz;
         }
+        if DevTools::demo().as_deref() == Some("towns") {
+            // Look at the biggest town.
+            if let Some(town) = self.towns.list.iter().max_by_key(|t| self.towns.population(t.id)) {
+                self.camera.focus.x = town.centre.0 as f32 + 0.5;
+                self.camera.focus.z = town.centre.1 as f32 + 0.5;
+            }
+        }
         if DevTools::demo().as_deref() == Some("roads") {
             let mut built = Vec::new();
             for (a, b) in [
@@ -179,7 +194,7 @@ impl StarcityApp {
                 ((c - 4, c - 6), (c + 1, c - 11)),
                 ((c + 1, c - 11), (c + 6, c - 11)),
             ] {
-                let plan = roads::plan(&self.world, &self.roads, &self.rails, a, b);
+                let plan = roads::plan(&self.world, &self.roads, &self.rails, &self.towns.occupied, a, b);
                 if let Some(why) = plan.blocked {
                     eprintln!("demo road {a:?} -> {b:?} blocked: {why:?}");
                 }
@@ -191,7 +206,15 @@ impl StarcityApp {
                 ((c - 6, c + 14), (c, c + 20)),
                 ((c - 12, c + 17), (c - 6, c + 17)),
             ] {
-                let plan = rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let plan = rails::plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                );
                 if let Some(why) = plan.blocked {
                     eprintln!("demo track {a:?} -> {b:?} blocked: {why:?}");
                 }
@@ -208,9 +231,15 @@ impl StarcityApp {
             // Two stations on the long line, and a train running between them.
             let mut station_ids = Vec::new();
             for (a, b) in [((c - 12, c + 14), (c - 10, c + 14)), ((c - 1, c + 14), (c + 1, c + 14))] {
-                let plan = self
-                    .stations
-                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let plan = self.stations.plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                );
                 if let Some(why) = plan.blocked {
                     eprintln!("demo station {a:?} blocked: {why:?}");
                 }
@@ -258,12 +287,16 @@ impl StarcityApp {
         self.stations = Stations::default();
         self.selected_train = None;
         self.selected_station = None;
+        self.selected_town = None;
+        self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed);
         self.props_changed = true;
         self.plan = Plan::default();
-        self.infra_dirty = None;
         self.drag_start = None;
         self.renderer
             .resize_infra(&rs.device, self.world.size_x as u32, self.world.size_z as u32);
+        // Towns come with roads: upload the whole infrastructure layer.
+        let last = self.world.size_x as i32 - 1;
+        self.infra_dirty = Some([0, 0, last, self.world.size_z as i32 - 1]);
         let block = crate::terrain::BLOCK_HEIGHT;
         let size = self.world.size_x as f32;
         self.renderer.ocean = [
@@ -396,15 +429,32 @@ impl StarcityApp {
         }
 
         let (plan, network) = match (tool, self.drag_start, self.last_hover_tile) {
-            (Tool::Road, Some(a), Some(b)) => (roads::plan(&self.world, &self.roads, &self.rails, a, b), Network::Road),
+            (Tool::Road, Some(a), Some(b)) => (
+                roads::plan(&self.world, &self.roads, &self.rails, &self.towns.occupied, a, b),
+                Network::Road,
+            ),
             (Tool::Rail, Some(a), Some(b)) => (
-                rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b),
+                rails::plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                ),
                 Network::Rail,
             ),
             (Tool::Station, Some(a), Some(b)) => {
-                let sp = self
-                    .stations
-                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let sp = self.stations.plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                );
                 let pieces = sp
                     .tiles
                     .iter()
@@ -474,10 +524,16 @@ impl StarcityApp {
             }
         }
         self.selected_train = best.map(|(_, id)| id);
-        self.selected_station = match best {
-            Some(_) => None,
-            None => self.hover_tile.and_then(|t| self.stations.at(t)),
-        };
+        self.selected_station = None;
+        self.selected_town = None;
+        if best.is_none() {
+            if let Some(t) = self.hover_tile {
+                self.selected_station = self.stations.at(t);
+                if self.selected_station.is_none() {
+                    self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
+                }
+            }
+        }
     }
 
     /// Applies the active tool to a dragged-out span of tiles.
@@ -487,30 +543,56 @@ impl StarcityApp {
             Tool::RemoveRoad => self.clear(a, b, Clear::Roads),
             Tool::RemoveRail => self.clear(a, b, Clear::Rails),
             Tool::Road => {
-                let plan = roads::plan(&self.world, &self.roads, &self.rails, a, b);
+                let plan = roads::plan(&self.world, &self.roads, &self.rails, &self.towns.occupied, a, b);
                 Changes {
                     infra: plan.build(&mut self.roads),
                     ..Default::default()
                 }
             }
             Tool::Rail => {
-                let plan = rails::plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let plan = rails::plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                );
                 Changes {
                     infra: plan.build(&mut self.rails),
                     ..Default::default()
                 }
             }
             Tool::Station => {
-                let plan = self
-                    .stations
-                    .plan(&self.world, &self.rails, &self.roads, &self.signals, a, b);
+                let plan = self.stations.plan(
+                    &self.world,
+                    &self.rails,
+                    &self.roads,
+                    &self.towns.occupied,
+                    &self.signals,
+                    a,
+                    b,
+                );
                 if plan.blocked.is_none() {
                     // Platforms on existing track change routing without changing the track.
                     self.track_version += 1;
                     self.props_changed = true;
                 }
+                let before: Vec<StationId> = self.stations.list.keys().copied().collect();
+                let infra = self.stations.build(&plan, &mut self.rails);
+                let new: Vec<StationId> = self
+                    .stations
+                    .list
+                    .keys()
+                    .copied()
+                    .filter(|id| !before.contains(id))
+                    .collect();
+                for id in new {
+                    self.name_station(id);
+                }
                 Changes {
-                    infra: self.stations.build(&plan, &mut self.rails),
+                    infra,
                     ..Default::default()
                 }
             }
@@ -527,7 +609,77 @@ impl StarcityApp {
         if what != Clear::Roads && self.trains.remove_on_tiles(&tiles) {
             self.props_changed = true;
         }
+        if what == Clear::Everything && self.towns.demolish(a, b) {
+            self.props_changed = true;
+        }
         changes
+    }
+
+    /// Names a new station after the nearest town, adding a compass point if
+    /// the town already has a station by that name.
+    fn name_station(&mut self, id: StationId) {
+        let Some(station) = self.stations.get(id) else { return };
+        let (x, z) = station.centre();
+        let Some(town) = self.towns.nearest((x as i32, z as i32), 30) else {
+            return;
+        };
+        let town = &self.towns.list[town as usize];
+        let (dx, dz) = (x - town.centre.0 as f32, z - town.centre.1 as f32);
+        let compass = if dx.abs() > dz.abs() {
+            if dx > 0.0 { "East" } else { "West" }
+        } else if dz > 0.0 {
+            "South"
+        } else {
+            "North"
+        };
+        let taken = |name: &str| self.stations.list.values().any(|s| s.id != id && s.name == name);
+        let candidates = [
+            town.name.clone(),
+            format!("{} {compass}", town.name),
+            format!("{} Central", town.name),
+        ];
+        if let Some(name) = candidates.into_iter().find(|n| !taken(n)) {
+            self.stations.list.get_mut(&id).unwrap().name = name;
+        }
+    }
+
+    /// Once a second: towns grow and stations collect passengers.
+    fn tick_towns(&mut self, dt: f32) {
+        self.town_clock += dt;
+        if self.town_clock < 1.0 {
+            return;
+        }
+        self.town_clock -= 1.0;
+        let (road_tiles, built) = self.towns.update(1.0, &self.world, &mut self.roads, &self.rails);
+        self.mark_infra(&road_tiles);
+        if built {
+            self.props_changed = true;
+        }
+        for station in self.stations.list.values_mut() {
+            // Each person nearby makes about one trip every 100 seconds.
+            let people = self.towns.population_near(&station.tiles) as f32;
+            station.waiting = (station.waiting + people * 0.01).min(500.0);
+        }
+    }
+
+    /// Trains that have just pulled in: unload everyone, then load from the platform.
+    fn handle_arrivals(&mut self) {
+        for (train, station) in std::mem::take(&mut self.trains.arrivals) {
+            let Some(st) = self.stations.list.get_mut(&station) else {
+                continue;
+            };
+            let t = self.trains.train(train);
+            let delivered = std::mem::take(&mut t.passengers);
+            let boarding = (st.waiting as u32).min(t.capacity());
+            t.passengers = boarding;
+            st.waiting -= boarding as f32;
+            let (x, z) = st.centre();
+            if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
+                let town = &mut self.towns.list[town as usize];
+                town.served += delivered as f32;
+                town.delivered += delivered;
+            }
+        }
     }
 
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
@@ -558,6 +710,7 @@ impl StarcityApp {
         if std::mem::take(&mut self.props_changed) {
             let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
             boxes.extend(station_boxes(&self.world, &self.rails, &self.stations));
+            boxes.extend(building_boxes(&self.world, &self.towns));
             boxes.extend(train_boxes(&self.world, &self.trains));
             self.renderer.set_boxes(&rs.device, &rs.queue, &boxes);
             self.scene_dirty = true;
@@ -566,10 +719,30 @@ impl StarcityApp {
 
     /// Win95 tooltip-style name labels floating above stations.
     fn station_labels(&self, ui: &egui::Ui, view_proj: Mat4, rect: egui::Rect) {
+        let painter = ui.painter_at(rect);
+        // Town names (with population) show from further out than station names.
+        if self.camera.view_height < 500.0 {
+            for town in &self.towns.list {
+                let (x, z) = (town.centre.0 as f32 + 0.5, town.centre.1 as f32 + 0.5);
+                let p = Vec3::new(x, self.world.height_at(x, z) + 3.0, z);
+                let Some(at) = project(view_proj, rect, p) else {
+                    continue;
+                };
+                let text = format!("{}\n{}", town.name, self.towns.population(town.id));
+                let galley = painter.layout(
+                    text,
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                );
+                let r = egui::Rect::from_center_size(at, galley.size() + egui::vec2(10.0, 4.0));
+                painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 128, 200));
+                painter.galley(r.min + egui::vec2(5.0, 2.0), galley, egui::Color32::WHITE);
+            }
+        }
         if self.camera.view_height > 150.0 {
             return;
         }
-        let painter = ui.painter_at(rect);
         let font = egui::FontId::proportional(12.0);
         for station in self.stations.list.values() {
             let (x, z) = station.centre();
@@ -614,6 +787,7 @@ impl StarcityApp {
             train.order % orders.len()
         };
         let stopped = train.stopped;
+        let (passengers, capacity) = (train.passengers, train.capacity());
         let name = |sid: StationId| self.stations.get(sid).map_or("?".to_string(), |s| s.name.clone());
         let mut action = None;
         let mut open = true;
@@ -625,6 +799,7 @@ impl StarcityApp {
             |ui| {
                 ui.set_width(240.0);
                 ui.label(status);
+                ui.label(format!("Carrying {} / {} passengers", passengers, capacity));
                 ui.separator();
                 ui.label("Orders:");
                 if orders.is_empty() {
@@ -749,6 +924,11 @@ impl StarcityApp {
                 ui.text_edit_singleline(&mut station.name);
             });
             ui.label(format!("{} platform tiles", station.tiles.len()));
+            ui.label(format!(
+                "{} passengers waiting, {} people nearby",
+                station.waiting as u32,
+                self.towns.population_near(&station.tiles)
+            ));
             ui.label(match calling {
                 0 => "No trains call here yet".to_string(),
                 1 => "1 train calls here".to_string(),
@@ -757,6 +937,37 @@ impl StarcityApp {
         });
         if !open {
             self.selected_station = None;
+        }
+    }
+
+    /// The selected town's window: name, size and how well it's served.
+    fn town_window(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_town else { return };
+        let population = self.towns.population(id);
+        let buildings = self.towns.buildings.values().filter(|b| b.town == id).count();
+        let Some(town) = self.towns.list.get_mut(id as usize) else {
+            self.selected_town = None;
+            return;
+        };
+        let mut open = true;
+        ui::win95::window(ctx, "Town", &mut open, egui::pos2(420.0, 110.0), |ui| {
+            ui.set_width(230.0);
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut town.name);
+            });
+            ui.label(format!("Population {population} in {buildings} buildings"));
+            ui.label(format!("{} passengers delivered by rail", town.delivered));
+            ui.label(if town.served > 50.0 {
+                "Booming thanks to its rail service"
+            } else if town.served > 5.0 {
+                "Growing faster with its rail service"
+            } else {
+                "Growing slowly. A station and trains would help."
+            });
+        });
+        if !open {
+            self.selected_town = None;
         }
     }
 
@@ -1146,6 +1357,10 @@ impl eframe::App for StarcityApp {
         if self.trains_moving {
             self.props_changed = true;
         }
+        self.handle_arrivals();
+        if !self.paused {
+            self.tick_towns(frame_dt);
+        }
         let changed = self.sim.advance(&mut self.world, (now - self.last_time) as f32);
         self.last_time = now;
         self.remesh_tiles(&rs, &changed);
@@ -1156,6 +1371,7 @@ impl eframe::App for StarcityApp {
         }
         ui::about_window(&ctx, &mut self.ui.show_about);
         self.train_window(&ctx);
+        self.town_window(&ctx);
         self.station_window(&ctx);
 
         let mut scene_changed = false;
@@ -1398,6 +1614,39 @@ fn station_boxes(world: &World, rails_layer: &Layer, stations: &Stations) -> Vec
                 ]);
             }
         }
+    }
+    boxes
+}
+
+/// Props for town buildings: walls and a roof, taller with more floors.
+/// Houses come in a few colours; tall buildings are grey-blue offices.
+fn building_boxes(world: &World, towns: &crate::towns::Towns) -> Vec<BoxInstance> {
+    const WALLS: [[u8; 3]; 4] = [[226, 214, 190], [178, 96, 72], [236, 234, 226], [196, 176, 142]];
+    const ROOFS: [[u8; 3]; 4] = [[150, 62, 50], [92, 92, 104], [128, 74, 52], [70, 80, 70]];
+    let mut boxes = Vec::new();
+    for (&(x, z), b) in &towns.buildings {
+        let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+        let ground = world.height_at(cx, cz);
+        let height = 0.32 * b.floors as f32;
+        let office = b.floors >= 4;
+        let (wall, roof) = if office {
+            ([150, 168, 186], [120, 124, 130])
+        } else {
+            (WALLS[b.style as usize % 4], ROOFS[b.style as usize % 4])
+        };
+        let w = if office { 0.38 } else { 0.32 };
+        boxes.push(BoxInstance {
+            center: [cx, ground + height / 2.0, cz],
+            half: [w, height / 2.0, w],
+            yaw: 0.0,
+            color: [wall[0], wall[1], wall[2], 0],
+        });
+        boxes.push(BoxInstance {
+            center: [cx, ground + height + 0.04, cz],
+            half: [w + 0.04, 0.04, w + 0.04],
+            yaw: 0.0,
+            color: [roof[0], roof[1], roof[2], 0],
+        });
     }
     boxes
 }

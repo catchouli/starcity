@@ -14,6 +14,7 @@ mod shader_test;
 mod sim;
 mod stations;
 mod terrain;
+mod towns;
 mod trains;
 mod ui;
 
