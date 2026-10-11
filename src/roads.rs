@@ -17,6 +17,7 @@ pub const NE: u8 = 1 << 4;
 pub const ES: u8 = 1 << 5;
 pub const SW: u8 = 1 << 6;
 pub const WN: u8 = 1 << 7;
+pub const HALVES: u8 = N | E | S | W;
 pub const DIAGONALS: u8 = NE | ES | SW | WN;
 
 /// Pieces that touch each edge's midpoint.
@@ -133,7 +134,7 @@ pub fn plan(world: &World, roads: &Roads, a: (i32, i32), b: (i32, i32)) -> Plan 
         straight(roads, a, (0, dz.signum()), dz.abs())
     } else {
         let n = (dx.abs() + dz.abs() + 1) / 2;
-        diagonal(a, (dx.signum(), dz.signum()), n)
+        diagonal(roads, a, (dx.signum(), dz.signum()), n)
     };
 
     let mut plan = Plan::default();
@@ -171,8 +172,20 @@ fn straight(roads: &Roads, a: (i32, i32), (sx, sz): (i32, i32), len: i32) -> Vec
             if i == len && roads.get(t.0 + sx, t.1 + sz) & touching(back) != 0 {
                 bits |= forward;
             }
+            // An end tile holding only diagonal pieces that already reach the edge
+            // the straight leaves by needs no half: the road joins at that edge.
+            let existing = roads.get(t.0, t.1);
+            if existing & HALVES == 0 {
+                if i == 0 && existing & touching(forward) != 0 {
+                    bits &= !forward;
+                }
+                if i == len && existing & touching(back) != 0 {
+                    bits &= !back;
+                }
+            }
             (t, bits)
         })
+        .filter(|&(_, bits)| bits != 0)
         .collect()
 }
 
@@ -182,10 +195,16 @@ fn straight(roads: &Roads, a: (i32, i32), (sx, sz): (i32, i32), len: i32) -> Vec
 /// of `a`'s edge facing away from the z direction and steps half a tile
 /// diagonally each time. Each pair of consecutive midpoints is one diagonal
 /// piece in the tile between them.
-fn diagonal(a: (i32, i32), (sx, sz): (i32, i32), n: i32) -> Vec<((i32, i32), u8)> {
+///
+/// Straight road ends at a tile's centre, which isn't on any diagonal. So if
+/// an end tile already has straight road, it gets a half from its centre to
+/// the edge where the diagonal leaves (or arrives) instead of a corner piece:
+/// the road runs to the edge and bends 45° there.
+fn diagonal(roads: &Roads, a: (i32, i32), (sx, sz): (i32, i32), n: i32) -> Vec<((i32, i32), u8)> {
     let mut p = (2 * a.0 + 1, 2 * a.1 + 1 - sz);
     let mut pieces = Vec::new();
-    for _ in 0..2 * n + 1 {
+    let segments = 2 * n + 1;
+    for i in 0..segments {
         let q = (p.0 + sx, p.1 + sz);
         let tile = ((p.0 + q.0).div_euclid(4), (p.1 + q.1).div_euclid(4));
         let edge = |pt: (i32, i32)| match (pt.0 - 2 * tile.0, pt.1 - 2 * tile.1) {
@@ -194,11 +213,18 @@ fn diagonal(a: (i32, i32), (sx, sz): (i32, i32), n: i32) -> Vec<((i32, i32), u8)
             (1, 2) => S,
             _ => W,
         };
-        let bit = match edge(p) | edge(q) {
-            x if x == N | E => NE,
-            x if x == E | S => ES,
-            x if x == S | W => SW,
-            _ => WN,
+        let has_straight = roads.get(tile.0, tile.1) & HALVES != 0;
+        let bit = if i == 0 && has_straight {
+            edge(q)
+        } else if i == segments - 1 && has_straight {
+            edge(p)
+        } else {
+            match edge(p) | edge(q) {
+                x if x == N | E => NE,
+                x if x == E | S => ES,
+                x if x == S | W => SW,
+                _ => WN,
+            }
         };
         pieces.push((tile, bit));
         p = q;
@@ -292,5 +318,44 @@ mod tests {
         let p = plan(&w, &Roads::new(4, 4), (0, 0), (2, 0));
         assert!(p.valid.is_empty());
         assert_eq!(p.blocked.len(), 3);
+    }
+
+    #[test]
+    fn diagonal_joins_onto_the_end_of_a_straight() {
+        let w = flat_world(12);
+        let mut r = Roads::new(12, 12);
+        plan(&w, &r, (1, 2), (4, 2)).build(&mut r);
+        assert_eq!(r.get(4, 2), W);
+        // Diagonal heading south-east from the straight road's end tile.
+        plan(&w, &r, (4, 2), (7, 5)).build(&mut r);
+        assert_eq!(r.get(4, 2), W | E, "runs on to the edge instead of cutting the corner");
+        assert_eq!(r.get(5, 2), SW, "then turns 45° from that edge");
+        // And a diagonal that arrives at a straight road's end tile.
+        plan(&w, &r, (1, 8), (4, 8)).build(&mut r);
+        plan(&w, &r, (7, 5), (4, 8)).build(&mut r);
+        assert_eq!(r.get(4, 8) & DIAGONALS, 0, "no corner piece on the straight's end tile");
+        assert_ne!(r.get(4, 8) & !W, 0, "a half joins the diagonal to the centre");
+    }
+
+    #[test]
+    fn continuing_a_diagonal_stays_on_its_line() {
+        let w = flat_world(12);
+        let mut r = Roads::new(12, 12);
+        plan(&w, &r, (1, 1), (3, 3)).build(&mut r);
+        plan(&w, &r, (3, 3), (5, 5)).build(&mut r);
+        assert_eq!(r.get(3, 3), NE);
+        assert_eq!(r.get(4, 3), SW);
+        assert_eq!(r.get(5, 5), NE);
+    }
+
+    #[test]
+    fn straight_leaves_a_diagonal_from_its_edge() {
+        let w = flat_world(12);
+        let mut r = Roads::new(12, 12);
+        plan(&w, &r, (1, 1), (3, 3)).build(&mut r);
+        assert_eq!(r.get(3, 3), NE);
+        plan(&w, &r, (3, 3), (6, 3)).build(&mut r);
+        assert_eq!(r.get(3, 3), NE, "no stub back to the centre");
+        assert_eq!(r.get(4, 3), W | E);
     }
 }

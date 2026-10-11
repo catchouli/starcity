@@ -124,6 +124,8 @@ impl StarcityApp {
                 ((c + 6, c), (c + 6, c - 6)),
                 ((c + 2, c + 2), (c + 8, c + 8)),
                 ((c - 10, c - 6), (c - 4, c - 6)),
+                ((c - 4, c - 6), (c + 1, c - 11)),
+                ((c + 1, c - 11), (c + 6, c - 11)),
             ] {
                 built.extend(roads::plan(&self.world, &self.roads, a, b).build(&mut self.roads));
             }
