@@ -13,6 +13,7 @@ pub enum Tool {
     Rail,
     Signal,
     RemoveRail,
+    Bulldoze,
 }
 
 impl Tool {
@@ -24,6 +25,7 @@ impl Tool {
             Tool::Rail => "Build railway",
             Tool::Signal => "Place signal",
             Tool::RemoveRail => "Remove railway",
+            Tool::Bulldoze => "Bulldoze",
         }
     }
 
@@ -35,6 +37,7 @@ impl Tool {
             Tool::Rail => "Drag along an axis or a 45° diagonal to lay track (coming soon)",
             Tool::Signal => "Click track to place a signal (coming soon)",
             Tool::RemoveRail => "Drag over track to remove it (coming soon)",
+            Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
         }
     }
 
@@ -52,6 +55,7 @@ impl Tool {
                 icon_rail(p, r);
                 icon_cross(p, r);
             }
+            Tool::Bulldoze => icon_bulldozer(p, r),
         }
     }
 }
@@ -104,8 +108,9 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
 
 pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
     const SIZE: f32 = 30.0;
-    let groups: [(&str, &[Tool]); 3] = [
+    let groups: [(&str, &[Tool]); 4] = [
         ("", &[Tool::Pointer]),
+        ("Land", &[Tool::Bulldoze]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad]),
         ("Rail", &[Tool::Rail, Tool::Signal, Tool::RemoveRail]),
     ];
@@ -141,14 +146,10 @@ pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str) {
 }
 
 pub fn about_window(ctx: &egui::Context, open: &mut bool) {
-    egui::Window::new("About Starcity")
-        .open(open)
-        .collapsible(false)
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.label("Starcity: a transport tycoon on voxel terrain.");
-            ui.label("Textures from ambientCG (CC0). See CREDITS.md.");
-        });
+    win95::window(ctx, "About Starcity", open, pos2(200.0, 150.0), |ui| {
+        ui.label("Starcity: a transport tycoon on voxel terrain.");
+        ui.label("Textures from ambientCG (CC0). See CREDITS.md.");
+    });
 }
 
 // Icons, drawn into a ~20px square.
@@ -223,6 +224,35 @@ fn icon_signal(p: &Painter, r: Rect) {
         2.2,
         Color32::from_rgb(0x30, 0xd0, 0x40),
     );
+}
+
+fn icon_bulldozer(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    let yellow = Color32::from_rgb(0xf0, 0xc0, 0x10);
+    let dark = Color32::from_gray(40);
+    // Cab, body, blade and tracks.
+    p.rect_filled(
+        Rect::from_min_max(at(0.35, 0.15), at(0.7, 0.5)),
+        0.0,
+        yellow,
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.42, 0.22), at(0.63, 0.42)),
+        0.0,
+        Color32::from_rgb(0x90, 0xc8, 0xf0),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.2, 0.45), at(0.85, 0.7)),
+        0.0,
+        yellow,
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.35), at(0.12, 0.9)),
+        0.0,
+        Color32::from_gray(110),
+    );
+    p.rect_filled(Rect::from_min_max(at(0.12, 0.62), at(0.22, 0.7)), 0.0, dark);
+    p.rect_filled(Rect::from_min_max(at(0.2, 0.72), at(0.95, 1.0)), 2.0, dark);
 }
 
 fn icon_cross(p: &Painter, r: Rect) {

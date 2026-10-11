@@ -2441,6 +2441,7 @@ dependencies = [
  "env_logger",
  "glam",
  "log",
+ "naga",
  "noise",
  "png",
  "wasm-bindgen-futures",

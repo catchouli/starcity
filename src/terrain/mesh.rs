@@ -60,22 +60,6 @@ impl Builder {
     }
 }
 
-/// The top surface of a column: the floor height of its topmost solid block and
-/// that block's shape, or the top of a full block with a flat (empty) shape.
-fn column_surface(world: &World, x: i32, z: i32) -> Option<(u16, Shape)> {
-    for y in (0..world.height as i32).rev() {
-        let b = world.get(x, y, z);
-        if !b.is_air() {
-            return Some(if b.shape.is_full() {
-                (y as u16 + 1, Shape(0))
-            } else {
-                (y as u16, b.shape)
-            });
-        }
-    }
-    None
-}
-
 pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
     let x0 = cx * CHUNK_SIZE;
     let z0 = cz * CHUNK_SIZE;
@@ -192,7 +176,7 @@ pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
             }
 
             // Water
-            let (base, shape) = column_surface(world, xi, zi).unwrap_or((0, Shape(0)));
+            let (base, shape) = world.surface(xi, zi).unwrap_or((0, Shape(0)));
             if base < sea {
                 water[(z - z0) * CHUNK_SIZE + (x - x0)] = Some((sea, WATER));
                 // At the map edge, close the water off with a side face.
@@ -252,16 +236,11 @@ fn covers(nb: Block, dir: (i32, i32), c: (u16, u16), h: u16) -> bool {
 /// fold in the right place for corner and inner-corner shapes.
 fn top_quad(out: &mut Vec<Vertex>, x: u16, y: u16, z: u16, shape: Shape, data: u16) {
     let p = Shape::CORNERS.map(|(cx, cz)| (x + cx, y + shape.corner(cx, cz), z + cz, false));
-    let raised = shape.0.count_ones();
-    let odd = match raised {
-        1 => Some(shape.0.trailing_zeros()),
-        3 => Some((!shape.0 & 0b1111).trailing_zeros()),
-        _ => None,
-    };
     // Anticlockwise from above is P0, P3, P2, P1; indices (0,2) form the diagonal.
-    let corners = match odd {
-        Some(0) | Some(2) => [p[3], p[2], p[1], p[0]],
-        _ => [p[0], p[3], p[2], p[1]],
+    let corners = if shape.splits_13() {
+        [p[3], p[2], p[1], p[0]]
+    } else {
+        [p[0], p[3], p[2], p[1]]
     };
     Builder::quad(out, corners, data);
 }

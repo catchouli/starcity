@@ -11,8 +11,10 @@ struct Globals {
     sun_dir: vec4<f32>,
     // x = block height, y = grid strength, z = texture repeats per tile, w = wireframe (0/1)
     params: vec4<f32>,
-    // x = wireframe only (hide shading)
+    // x = wireframe only (hide shading), y = highlight kind (0 none, 1 cursor, 2 bulldoze)
     options: vec4<f32>,
+    // Highlighted tile rectangle: min x, min z, max x, max z (world units).
+    highlight: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -83,6 +85,19 @@ fn grid(world: vec3<f32>, n: vec3<f32>) -> f32 {
     return line * fade * step(0.5, n.y);
 }
 
+// Tints the highlighted tile rectangle and outlines its border.
+fn highlight(color: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let h = g.highlight;
+    let inside = step(h.x, world.x) * step(world.x, h.z) * step(h.y, world.z) * step(world.z, h.w);
+    let d = min(min(world.x - h.x, h.z - world.x), min(world.z - h.y, h.w - world.z));
+    let px = max(max(fwidth(world.x), fwidth(world.z)), 1e-5);
+    let border = inside * (1.0 - smoothstep(1.0, 2.5, d / px));
+    let tint = select(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(1.0, 0.2, 0.15), g.options.y > 1.5);
+    let enabled = step(0.5, g.options.y);
+    let c = mix(color, tint, inside * 0.3 * enabled);
+    return mix(c, tint, border * enabled);
+}
+
 fn lighting(n: vec3<f32>) -> f32 {
     let sun = max(dot(n, g.sun_dir.xyz), 0.0);
     let sky = mix(0.40, 0.65, n.y * 0.5 + 0.5);
@@ -113,6 +128,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     var color = mix(base, grass, fringe) * lighting(n);
 
     color = mix(color, color * 0.6, grid(in.world, n) * g.params.y);
+    color = highlight(color, in.world);
 
     let wf = wire(in.quad_uv) * g.params.w;
     let wire_bg = select(color, vec3<f32>(0.08, 0.09, 0.12), g.options.x > 0.5);
@@ -123,7 +139,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let n = flat_normal(in.world);
-    var color = vec3<f32>(0.12, 0.32, 0.45) * lighting(n);
+    var color = highlight(vec3<f32>(0.12, 0.32, 0.45) * lighting(n), in.world);
     var alpha = 0.78;
     let wf = wire(in.quad_uv) * g.params.w;
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);

@@ -57,6 +57,8 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - Dig and fill blocks (tunnels, cuttings, embankments).
 - **Sloped tunnels:** a tunnel can ramp down from the surface (a sloped floor block inside the hill) and then level off underground. Underground blocks are still full cubes; only the ramp blocks have slope shapes. So slope shapes aren't just for the surface: any block whose floor a road or rail runs on can have one.
 - Every edit re-meshes only the affected chunk(s).
+- **Bulldoze**: drag a rectangle (TTD-style) to clear everything in it (roads, track, later buildings) down to bare ground. Cleared grass becomes **dirt**.
+- **Regrowth**: bare dirt slowly turns back into grass from the edges. Each simulation tick, a dirt tile with grass neighbours has a chance to turn to grass, and the chance rises with the number of grass neighbours. A large cleared patch fills in from its borders over a few minutes. Tiles at or below sea level don't regrow.
 
 ## 4. Infrastructure
 
@@ -71,7 +73,7 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - One track segment takes a whole tile, **with borders on each side** (ballast/fence).
 - **Single track per tile.** Trains can run either way along it. A double-track line is two parallel rail tiles that the player links with junctions.
 - **Collisions are real.** If two trains meet head-on on unsignalled track, they crash. Safety is the player's job.
-- Diagonal track? TTD has it. Leave it out for v1 unless it turns out to be needed.
+- **Diagonal pieces**: a 45° drag builds dedicated diagonal track (TTD-style half-tile pieces running corner to corner), not a staircase of straight tiles.
 
 ### 4.3 Signals: block reservation
 
@@ -114,7 +116,8 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Toolbar along the top**, like a Win95 app: a menu bar, then a row of bevelled icon buttons grouped into sections. Picking a tool makes it the active cursor tool; Esc or right-click returns to the pointer.
 - First tool sections:
   - **Roads**: draw road. Drag from a start tile; the road follows a straight line along an axis, or a 45° diagonal, depending on the drag direction. Release to build. Plus a remove-road tool.
-  - **Rail**: draw track (same straight or 45° dragging), place signal, remove.
+  - **Rail**: draw track (same straight or 45° dragging, with dedicated diagonal pieces), place signal, remove.
+  - **Land**: bulldoze (clear a rectangle to bare dirt).
   - Later: terraform (raise, lower, level, dig), stations, demolish.
 - Dialogs and info panels (town info, train orders) are Win95 windows inside the game view.
 - The debug window (F3) stays separate from the game UI.
@@ -192,6 +195,8 @@ Terrain generation was never really started: it only produced random noise for o
 - Tile picking (mouse ray → tile/corner) and a hover highlight.
 - Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles.
 - Rail tool: drag to draw track, and place signals.
+- Bulldoze tool and grass regrowth (first use of the fixed-tick simulation). ✅
+- Tile picking and hover/drag highlight ✅. Loading dialog with download progress ✅.
 - Incremental re-meshing of edited chunks.
 
 **M4 — Terraforming**
@@ -217,4 +222,4 @@ Terrain generation was never really started: it only produced random noise for o
 4. Map size target: 256², 512², 1024² tiles? This affects chunk count and memory on the web.
 5. Visual style: textured blocks like tyke/Minecraft, or flat-shaded low-poly?
 6. Name: "Starcity" is just the directory name for now.
-7. Diagonal roads and rail: a 45° drag could make a staircase of ordinary tiles (zig-zag), or use dedicated diagonal pieces (TTD-style half-tile track). Staircase is simpler and suits auto-connecting roads; true diagonals look nicer for rail.
+7. ~~Diagonal roads and rail~~: dedicated diagonal pieces (§4.2).

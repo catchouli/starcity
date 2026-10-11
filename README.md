@@ -35,6 +35,14 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 | G | Tile grid |
 | F3 | Debug window (stats, render settings, terrain generator) |
 | Esc | Back to the pointer tool |
+| Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
+
+## Development
+
+- `cargo test` runs the unit tests and validates the WGSL shader with naga. A
+  shader error otherwise just leaves the web page blank.
+- `STARCITY_SCREENSHOT=out.png cargo run`: render a few frames natively, save a
+  screenshot and exit. Add `STARCITY_DEBUG=1` to open the debug window.
 
 ## Layout
 
@@ -42,5 +50,8 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 - `src/render.rs`, `src/terrain.wgsl`: wgpu renderer (WebGPU, WebGL2 fallback)
 - `src/camera.rs`: orbit camera with perspective↔ortho dolly zoom
 - `src/app.rs`: eframe app, input and debug UI
-- `src/ui/`: Win95-style theme, menu bar, toolbar and status bar
+- `src/ui/`: Win95-style theme, windows, menu bar, toolbar and status bar
+- `src/picking.rs`: mouse ray to terrain tile
+- `src/sim.rs`: fixed-tick simulation (bulldozing, grass regrowth)
+- `loader.mjs`: download progress for the loading dialog in `index.html`
 - `tools/process_textures.sh`: downscales source textures into `assets/`

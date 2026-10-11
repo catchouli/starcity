@@ -44,6 +44,17 @@ impl Shape {
         self.0 == 0b1111
     }
 
+    /// Whether the top surface is split along the P1-P3 diagonal rather than P0-P2.
+    /// For corner and inner-corner shapes the fold must avoid the odd corner out.
+    pub fn splits_13(self) -> bool {
+        let odd = match self.0.count_ones() {
+            1 => self.0.trailing_zeros(),
+            3 => (!self.0 & 0b1111).trailing_zeros(),
+            _ => return false,
+        };
+        odd == 0 || odd == 2
+    }
+
     /// Height (0 or 1 blocks above the block's floor) of the corner at local (cx, cz).
     pub fn corner(self, cx: u16, cz: u16) -> u16 {
         let bit = match (cx, cz) {
@@ -139,15 +150,35 @@ impl World {
         &self.blocks[start..start + self.height]
     }
 
+    pub fn in_bounds(&self, x: i32, z: i32) -> bool {
+        x >= 0 && z >= 0 && (x as usize) < self.size_x && (z as usize) < self.size_z
+    }
+
+    /// The topmost solid block of a column and its y.
+    pub fn top_block(&self, x: i32, z: i32) -> Option<(usize, Block)> {
+        if !self.in_bounds(x, z) {
+            return None;
+        }
+        let col = self.column(x as usize, z as usize);
+        col.iter().rposition(|b| !b.is_air()).map(|y| (y, col[y]))
+    }
+
+    /// The surface of a column: its floor height in blocks and the shape on top
+    /// of it. A flat top is reported as the full block's top with an empty shape.
+    pub fn surface(&self, x: i32, z: i32) -> Option<(u16, Shape)> {
+        self.top_block(x, z).map(|(y, b)| {
+            if b.shape.is_full() {
+                (y as u16 + 1, Shape(0))
+            } else {
+                (y as u16, b.shape)
+            }
+        })
+    }
+
     /// World-space height of the terrain surface at the centre of a tile.
     pub fn surface_height(&self, x: i32, z: i32) -> f32 {
-        for y in (0..self.height as i32).rev() {
-            let b = self.get(x, y, z);
-            if !b.is_air() {
-                let raised = b.shape.0.count_ones() as f32 / 4.0;
-                return (y as f32 + raised) * BLOCK_HEIGHT;
-            }
-        }
-        0.0
+        self.surface(x, z).map_or(0.0, |(base, shape)| {
+            (base as f32 + shape.0.count_ones() as f32 / 4.0) * BLOCK_HEIGHT
+        })
     }
 }

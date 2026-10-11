@@ -34,8 +34,24 @@ pub struct Globals {
     pub sun_dir: [f32; 4],
     /// Block height, grid strength, texture repeats per tile, wireframe.
     pub params: [f32; 4],
-    /// Wireframe only.
+    /// Wireframe only, highlight kind (0 none, 1 cursor, 2 bulldoze).
     pub options: [f32; 4],
+    /// Highlighted tile rectangle in world x/z: min x, min z, max x, max z.
+    pub highlight: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HighlightKind {
+    Cursor = 1,
+    Bulldoze = 2,
+}
+
+/// A highlighted, inclusive rectangle of tiles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Highlight {
+    pub a: (i32, i32),
+    pub b: (i32, i32),
+    pub kind: HighlightKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -204,14 +220,21 @@ impl SceneRenderer {
 
     /// Replaces all chunk meshes.
     pub fn upload_chunks(&mut self, device: &wgpu::Device, meshes: &[ChunkMesh]) {
-        let max_quads = meshes
-            .iter()
-            .map(|m| (m.terrain.len().max(m.water.len()) / 4) as u32)
-            .max()
-            .unwrap_or(0);
-        if max_quads > self.quad_capacity {
+        self.chunks = meshes.iter().map(|m| self.gpu_chunk(device, m)).collect();
+        self.update_stats();
+    }
+
+    /// Replaces one chunk's mesh (index = cz * chunks_x + cx).
+    pub fn update_chunk(&mut self, device: &wgpu::Device, index: usize, mesh: &ChunkMesh) {
+        self.chunks[index] = self.gpu_chunk(device, mesh);
+        self.update_stats();
+    }
+
+    fn gpu_chunk(&mut self, device: &wgpu::Device, m: &ChunkMesh) -> GpuChunk {
+        let quads = (m.terrain.len().max(m.water.len()) / 4) as u32;
+        if quads > self.quad_capacity {
             (self.quad_indices, self.quad_capacity) =
-                create_quad_indices(device, max_quads.next_power_of_two());
+                create_quad_indices(device, quads.next_power_of_two());
         }
         let upload = |verts: &[Vertex]| {
             (!verts.is_empty()).then(|| {
@@ -223,23 +246,23 @@ impl SceneRenderer {
                 (buf, (verts.len() / 4) as u32)
             })
         };
-        self.chunks = meshes
-            .iter()
-            .map(|m| GpuChunk {
-                terrain: upload(&m.terrain),
-                water: upload(&m.water),
-                min: Vec3::new(
-                    m.min[0] as f32,
-                    m.min[1] as f32 * BLOCK_HEIGHT - 0.1,
-                    m.min[2] as f32,
-                ),
-                max: Vec3::new(
-                    m.max[0] as f32,
-                    m.max[1] as f32 * BLOCK_HEIGHT,
-                    m.max[2] as f32,
-                ),
-            })
-            .collect();
+        GpuChunk {
+            terrain: upload(&m.terrain),
+            water: upload(&m.water),
+            min: Vec3::new(
+                m.min[0] as f32,
+                m.min[1] as f32 * BLOCK_HEIGHT - 0.1,
+                m.min[2] as f32,
+            ),
+            max: Vec3::new(
+                m.max[0] as f32,
+                m.max[1] as f32 * BLOCK_HEIGHT,
+                m.max[2] as f32,
+            ),
+        }
+    }
+
+    fn update_stats(&mut self) {
         self.stats.chunks_total = self.chunks.len() as u32;
         self.stats.quads_total = self
             .chunks
@@ -256,6 +279,7 @@ impl SceneRenderer {
         settings: &RenderSettings,
         view_proj: Mat4,
         camera_pos: Vec4,
+        highlight: Option<Highlight>,
     ) {
         let device = &rs.device;
         let samples = supported_samples(rs, settings.msaa);
@@ -280,10 +304,18 @@ impl SceneRenderer {
             ],
             options: [
                 if settings.wireframe_only { 1.0 } else { 0.0 },
-                0.0,
+                highlight.map_or(0.0, |h| h.kind as u8 as f32),
                 0.0,
                 0.0,
             ],
+            highlight: highlight.map_or([0.0; 4], |h| {
+                [
+                    h.a.0.min(h.b.0) as f32,
+                    h.a.1.min(h.b.1) as f32,
+                    (h.a.0.max(h.b.0) + 1) as f32,
+                    (h.a.1.max(h.b.1) + 1) as f32,
+                ]
+            }),
         };
         rs.queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));

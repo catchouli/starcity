@@ -1,6 +1,12 @@
 mod app;
 mod camera;
+#[cfg(not(target_arch = "wasm32"))]
+mod devtools;
+mod picking;
 mod render;
+#[cfg(test)]
+mod shader_test;
+mod sim;
 mod terrain;
 mod ui;
 
@@ -44,11 +50,15 @@ fn main() {
             )
             .await;
 
-        if let Some(loading) = document.get_element_by_id("loading") {
-            match result {
-                Ok(()) => loading.remove(),
-                Err(e) => {
-                    loading.set_inner_html(&format!("<p>Starcity failed to start: {e:?}</p>"))
+        match result {
+            Ok(()) => {
+                if let Some(loading) = document.get_element_by_id("loading") {
+                    loading.remove();
+                }
+            }
+            Err(e) => {
+                if let Some(label) = document.get_element_by_id("loading-label") {
+                    label.set_text_content(Some(&format!("Starcity failed to start: {e:?}")));
                 }
             }
         }

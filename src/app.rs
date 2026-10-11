@@ -1,11 +1,14 @@
 use crate::camera::Camera;
-use crate::render::{RenderSettings, SceneRenderer};
+use crate::picking;
+use crate::render::{Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::sim::{self, Sim};
 use crate::terrain::generation::{self, GenParams};
-use crate::terrain::{World, mesh};
+use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::ui::{self, Tool, UiState, win95};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
-use glam::Vec3;
+use glam::{Mat4, Vec2, Vec3};
+use std::collections::BTreeSet;
 use web_time::Instant;
 
 pub struct StarcityApp {
@@ -22,6 +25,15 @@ pub struct StarcityApp {
     frame_ms: f32,
     scene_renders: u64,
     ui: UiState,
+    sim: Sim,
+    last_time: f64,
+    /// Tile under the cursor, and the last one seen (kept while dragging off the map).
+    hover_tile: Option<(i32, i32)>,
+    last_hover_tile: Option<(i32, i32)>,
+    drag_start: Option<(i32, i32)>,
+    highlight: Option<Highlight>,
+    #[cfg(not(target_arch = "wasm32"))]
+    devtools: crate::devtools::DevTools,
 }
 
 impl StarcityApp {
@@ -48,9 +60,20 @@ impl StarcityApp {
                 wireframe: false,
                 grid: true,
                 ortho: false,
+                #[cfg(not(target_arch = "wasm32"))]
+                show_debug: crate::devtools::DevTools::show_debug(),
+                #[cfg(target_arch = "wasm32")]
                 show_debug: false,
                 show_about: false,
             },
+            sim: Sim::new(&World::new(1, 1, 1, 0), 0),
+            last_time: 0.0,
+            hover_tile: None,
+            last_hover_tile: None,
+            drag_start: None,
+            highlight: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            devtools: crate::devtools::DevTools::from_env(),
             params,
         };
         app.regenerate(rs);
@@ -73,7 +96,106 @@ impl StarcityApp {
         }
         self.mesh_ms = t.elapsed().as_secs_f32() * 1000.0;
         self.renderer.upload_chunks(&rs.device, &meshes);
+        self.sim = Sim::new(&self.world, self.params.seed as u64);
         self.scene_dirty = true;
+    }
+
+    /// Re-meshes the chunks containing the given tiles. Tiles on a chunk edge
+    /// also re-mesh the neighbouring chunk, since its side faces may change.
+    fn remesh_tiles(&mut self, rs: &RenderState, tiles: &[(i32, i32)]) {
+        if tiles.is_empty() {
+            return;
+        }
+        let (cw, ch) = (self.world.chunks_x() as i32, self.world.chunks_z() as i32);
+        let mut chunks = BTreeSet::new();
+        for &(x, z) in tiles {
+            for (dx, dz) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (cx, cz) = (
+                    (x + dx).div_euclid(CHUNK_SIZE as i32),
+                    (z + dz).div_euclid(CHUNK_SIZE as i32),
+                );
+                if (0..cw).contains(&cx) && (0..ch).contains(&cz) {
+                    chunks.insert((cx as usize, cz as usize));
+                }
+            }
+        }
+        for (cx, cz) in chunks {
+            let mesh = mesh::mesh_chunk(&self.world, cx, cz);
+            self.renderer
+                .update_chunk(&rs.device, cz * cw as usize + cx, &mesh);
+        }
+        self.scene_dirty = true;
+    }
+
+    fn view_proj(&self, size: [u32; 2]) -> Mat4 {
+        let aspect = size[0] as f32 / size[1] as f32;
+        let radius = self.world.size_x as f32 * 1.5 + self.world.height as f32;
+        self.camera.view_proj(aspect, radius)
+    }
+
+    /// Picks the hovered tile and runs the active tool. Returns tiles that changed.
+    fn handle_tool(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        view_proj: Mat4,
+    ) -> Vec<(i32, i32)> {
+        let rect = response.rect;
+        let pointer = ctx
+            .pointer_latest_pos()
+            .filter(|_| response.hovered() || response.dragged());
+        self.hover_tile = pointer.and_then(|pos| {
+            let ndc = Vec2::new(
+                (pos.x - rect.min.x) / rect.width() * 2.0 - 1.0,
+                1.0 - (pos.y - rect.min.y) / rect.height() * 2.0,
+            );
+            picking::pick_tile(&self.world, &picking::screen_ray(view_proj, ndc))
+        });
+        if self.hover_tile.is_some() {
+            self.last_hover_tile = self.hover_tile;
+        }
+
+        let mut changed = Vec::new();
+        let primary = egui::PointerButton::Primary;
+        if self.ui.tool != Tool::Bulldoze {
+            self.drag_start = None;
+        } else if response.drag_started_by(primary) {
+            self.drag_start = self.hover_tile;
+        } else if response.drag_stopped_by(primary) {
+            if let (Some(a), Some(b)) = (self.drag_start.take(), self.last_hover_tile) {
+                changed = self.sim.bulldoze(&mut self.world, a, b);
+            }
+        } else if response.clicked_by(primary) {
+            if let Some(t) = self.hover_tile {
+                changed = self.sim.bulldoze(&mut self.world, t, t);
+            }
+        }
+
+        let highlight = match self.ui.tool {
+            Tool::Pointer => None,
+            Tool::Bulldoze => {
+                let end = if self.drag_start.is_some() {
+                    self.last_hover_tile
+                } else {
+                    self.hover_tile
+                };
+                end.map(|b| Highlight {
+                    a: self.drag_start.unwrap_or(b),
+                    b,
+                    kind: HighlightKind::Bulldoze,
+                })
+            }
+            _ => self.hover_tile.map(|t| Highlight {
+                a: t,
+                b: t,
+                kind: HighlightKind::Cursor,
+            }),
+        };
+        if highlight != self.highlight {
+            self.highlight = highlight;
+            self.scene_dirty = true;
+        }
+        changed
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context, dt: f32) {
@@ -162,10 +284,14 @@ impl StarcityApp {
     fn debug_window(&mut self, ctx: &egui::Context, rs: &RenderState) {
         let mut regen = false;
         let mut open = self.ui.show_debug;
-        egui::Window::new("Debug").open(&mut open).default_width(260.0).show(ctx, |ui| {
+        ui::win95::window(ctx, "Debug", &mut open, egui::pos2(8.0, 90.0), |ui| {
+            ui.set_width(270.0);
             let info = rs.adapter.get_info();
             let s = self.renderer.stats;
-            ui.label(format!("{:.1} ms/frame  ·  {:?}", self.frame_ms, info.backend));
+            ui.label(format!(
+                "{:.1} ms/frame  ·  {:?}",
+                self.frame_ms, info.backend
+            ));
             ui.label(format!("scene renders: {}", self.scene_renders));
             ui.label(format!(
                 "chunks {}/{}  ·  quads {}/{}",
@@ -175,13 +301,26 @@ impl StarcityApp {
                 "vertex memory: {:.1} MB",
                 s.quads_total as f32 * 4.0 * std::mem::size_of::<mesh::Vertex>() as f32 / 1e6
             ));
-            ui.label(format!("generate {:.1} ms  ·  mesh {:.1} ms", self.gen_ms, self.mesh_ms));
+            ui.label(format!(
+                "generate {:.1} ms  ·  mesh {:.1} ms",
+                self.gen_ms, self.mesh_ms
+            ));
 
             ui.collapsing("Camera", |ui| {
                 let c = &self.camera;
-                ui.label(format!("focus ({:.1}, {:.1}, {:.1})", c.focus.x, c.focus.y, c.focus.z));
-                ui.label(format!("yaw {:.2}  pitch {:.2}  width {:.0}", c.yaw, c.pitch, c.screen_width));
-                ui.label(if c.is_ortho() { "orthographic" } else { "perspective" });
+                ui.label(format!(
+                    "focus ({:.1}, {:.1}, {:.1})",
+                    c.focus.x, c.focus.y, c.focus.z
+                ));
+                ui.label(format!(
+                    "yaw {:.2}  pitch {:.2}  width {:.0}",
+                    c.yaw, c.pitch, c.screen_width
+                ));
+                ui.label(if c.is_ortho() {
+                    "orthographic"
+                } else {
+                    "perspective"
+                });
             });
 
             ui.collapsing("Rendering", |ui| {
@@ -197,45 +336,60 @@ impl StarcityApp {
                             ui.selectable_value(&mut self.settings.msaa, n, format!("{n}x"));
                         }
                     });
-                ui.add(egui::Slider::new(&mut self.settings.render_scale, 0.25..=1.0).text("render scale"));
-                ui.add(egui::Slider::new(&mut self.settings.texture_repeat, 0.05..=1.0).text("texture repeat"));
+                ui.add(
+                    egui::Slider::new(&mut self.settings.render_scale, 0.25..=1.0)
+                        .text("render scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.settings.texture_repeat, 0.05..=1.0)
+                        .text("texture repeat"),
+                );
                 if self.settings != before {
                     self.scene_dirty = true;
                 }
             });
 
-            egui::CollapsingHeader::new("Terrain generation").default_open(true).show(ui, |ui| {
-                let p = &mut self.params;
-                let before = p.clone();
-                ui.horizontal(|ui| {
-                    ui.label("seed");
-                    ui.add(egui::DragValue::new(&mut p.seed));
-                    if ui.button("🎲").clicked() {
-                        p.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ p.seed.wrapping_mul(2654435761);
-                    }
-                });
-                egui::ComboBox::from_label("map size")
-                    .selected_text(format!("{0}×{0}", p.size))
-                    .show_ui(ui, |ui| {
-                        for n in [128, 256, 512, 1024] {
-                            ui.selectable_value(&mut p.size, n, format!("{n}×{n}"));
+            egui::CollapsingHeader::new("Terrain generation")
+                .default_open(true)
+                .show(ui, |ui| {
+                    let p = &mut self.params;
+                    let before = p.clone();
+                    ui.horizontal(|ui| {
+                        ui.label("seed");
+                        ui.add(egui::DragValue::new(&mut p.seed));
+                        if ui.button("🎲").clicked() {
+                            p.seed = (ui.input(|i| i.time) * 1e6) as u32
+                                ^ p.seed.wrapping_mul(2654435761);
                         }
                     });
-                ui.add(egui::Slider::new(&mut p.max_height, 8..=120).text("max height"));
-                ui.add(egui::Slider::new(&mut p.sea_level, 0..=40).text("sea level"));
-                ui.add(egui::Slider::new(&mut p.hill_scale, 30.0..=500.0).text("hill scale"));
-                ui.add(egui::Slider::new(&mut p.octaves, 1..=6).text("octaves"));
-                ui.add(egui::Slider::new(&mut p.persistence, 0.1..=0.7).text("roughness"));
-                ui.add(egui::Slider::new(&mut p.warp, 0.0..=100.0).text("warp"));
-                ui.add(egui::Slider::new(&mut p.valley_exponent, 0.5..=3.0).text("valley flattening"));
-                ui.add(egui::Slider::new(&mut p.flatness, 0.0..=1.0).text("plateaus"));
-                ui.add(egui::Slider::new(&mut p.terrace_step, 2.0..=12.0).text("terrace step"));
-                regen = *p != before;
-                if ui.button("Reset").clicked() {
-                    *p = GenParams { seed: p.seed, ..Default::default() };
-                    regen = true;
-                }
-            });
+                    egui::ComboBox::from_label("map size")
+                        .selected_text(format!("{0}×{0}", p.size))
+                        .show_ui(ui, |ui| {
+                            for n in [128, 256, 512, 1024] {
+                                ui.selectable_value(&mut p.size, n, format!("{n}×{n}"));
+                            }
+                        });
+                    ui.add(egui::Slider::new(&mut p.max_height, 8..=120).text("max height"));
+                    ui.add(egui::Slider::new(&mut p.sea_level, 0..=40).text("sea level"));
+                    ui.add(egui::Slider::new(&mut p.hill_scale, 30.0..=500.0).text("hill scale"));
+                    ui.add(egui::Slider::new(&mut p.octaves, 1..=6).text("octaves"));
+                    ui.add(egui::Slider::new(&mut p.persistence, 0.1..=0.7).text("roughness"));
+                    ui.add(egui::Slider::new(&mut p.warp, 0.0..=100.0).text("warp"));
+                    ui.add(
+                        egui::Slider::new(&mut p.valley_exponent, 0.5..=3.0)
+                            .text("valley flattening"),
+                    );
+                    ui.add(egui::Slider::new(&mut p.flatness, 0.0..=1.0).text("plateaus"));
+                    ui.add(egui::Slider::new(&mut p.terrace_step, 2.0..=12.0).text("terrace step"));
+                    regen = *p != before;
+                    if ui.button("Reset").clicked() {
+                        *p = GenParams {
+                            seed: p.seed,
+                            ..Default::default()
+                        };
+                        regen = true;
+                    }
+                });
 
             ui.separator();
             ui.small("WASD/arrows or left-drag: pan · Q/E or right-drag: rotate\nscroll: zoom · R: ortho/perspective · F1: wireframe · G: grid\nEsc: pointer tool · F3: this window");
@@ -260,11 +414,13 @@ impl StarcityApp {
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
             .show(ui, |ui| ui::toolbar(ui, &mut self.ui));
-        let c = &self.camera;
-        let status = format!(
-            "({:.0}, {:.0})  zoom {:.0}",
-            c.focus.x, c.focus.z, c.screen_width
-        );
+        let status = match self.hover_tile {
+            Some((x, z)) => {
+                let h = self.world.surface(x, z).map_or(0, |(base, _)| base);
+                format!("Tile ({x}, {z})  height {h}")
+            }
+            None => format!("Zoom {:.0}", self.camera.screen_width),
+        };
         egui::Panel::bottom("status_bar")
             .frame(panel)
             .show(ui, |ui| ui::status_bar(ui, &self.ui, &status));
@@ -298,6 +454,13 @@ impl eframe::App for StarcityApp {
         }
         self.settle_focus(dt);
 
+        let now = ctx.input(|i| i.time);
+        let changed = self
+            .sim
+            .advance(&mut self.world, (now - self.last_time) as f32);
+        self.last_time = now;
+        self.remesh_tiles(&rs, &changed);
+
         self.game_ui(ui, &rs);
         if self.ui.show_debug {
             self.debug_window(&ctx, &rs);
@@ -310,13 +473,15 @@ impl eframe::App for StarcityApp {
             .show(ui, |ui| {
                 let rect = ui.max_rect();
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                self.handle_mouse(ui, &response);
-
                 let scale = ctx.pixels_per_point() * self.settings.render_scale;
                 let size = [
                     (rect.width() * scale).max(1.0) as u32,
                     (rect.height() * scale).max(1.0) as u32,
                 ];
+                let changed = self.handle_tool(&ctx, &response, self.view_proj(size));
+                self.remesh_tiles(&rs, &changed);
+                self.handle_mouse(ui, &response);
+
                 if size != self.last_size {
                     self.last_size = size;
                     self.scene_dirty = true;
@@ -324,16 +489,20 @@ impl eframe::App for StarcityApp {
 
                 if self.scene_dirty {
                     scene_changed = true;
-                    let aspect = size[0] as f32 / size[1] as f32;
-                    let radius = self.world.size_x as f32 * 1.5 + self.world.height as f32;
-                    let view_proj = self.camera.view_proj(aspect, radius);
+                    let view_proj = self.view_proj(size);
                     let camera_pos = if self.camera.is_ortho() {
                         (-self.camera.forward()).extend(0.0)
                     } else {
                         self.camera.eye().extend(1.0)
                     };
-                    self.renderer
-                        .render(&rs, size, &self.settings, view_proj, camera_pos);
+                    self.renderer.render(
+                        &rs,
+                        size,
+                        &self.settings,
+                        view_proj,
+                        camera_pos,
+                        self.highlight,
+                    );
                     self.scene_renders += 1;
                     self.scene_dirty = false;
                 }
@@ -348,7 +517,11 @@ impl eframe::App for StarcityApp {
         let keys_held = ctx.input(|i| !i.keys_down.is_empty());
         if keys_held || scene_changed || self.scene_dirty {
             ctx.request_repaint();
+        } else if self.sim.is_active() {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f32(sim::TICK_SECONDS));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.devtools.update(&ctx);
         let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         self.frame_ms = self.frame_ms * 0.9 + ms * 0.1;
     }

@@ -16,7 +16,7 @@ pub fn apply(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         let v = &mut style.visuals;
         *v = egui::Visuals::light();
-        v.override_text_color = Some(Color32::BLACK);
+        v.override_text_color = None;
         v.panel_fill = FACE;
         v.window_fill = FACE;
         v.window_stroke = Stroke::new(1.0, DARK);
@@ -48,15 +48,112 @@ pub fn apply(ctx: &egui::Context) {
             wv.expansion = 0.0;
         }
         w.noninteractive.bg_stroke = Stroke::new(1.0, SHADOW);
+        // bg_fill is used for slider grooves and checkbox boxes, which are white
+        // in Win95; buttons use weak_bg_fill and stay grey.
+        for wv in [&mut w.inactive, &mut w.hovered, &mut w.active] {
+            wv.bg_fill = Color32::WHITE;
+        }
         w.hovered.weak_bg_fill = LIGHT;
         w.active.weak_bg_fill = SHADOW;
+        // Open menus and selected items: white on navy, like Win95 menus.
         w.open.weak_bg_fill = NAVY;
+        w.open.bg_fill = NAVY;
         w.open.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+        v.weak_text_color = Some(SHADOW);
 
         style.spacing.window_margin = egui::Margin::same(6);
         style.spacing.button_padding = vec2(8.0, 3.0);
         style.spacing.menu_margin = egui::Margin::same(2);
     });
+}
+
+/// A Win95 window: bevelled grey frame, navy gradient title bar with white
+/// bold text and a bevelled close button. Drag the title bar (or any empty
+/// part of the window) to move it.
+pub fn window<R>(
+    ctx: &egui::Context,
+    title: &str,
+    open: &mut bool,
+    default_pos: egui::Pos2,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    if !*open {
+        return None;
+    }
+    let mut close = false;
+    let frame = egui::Frame::NONE
+        .fill(FACE)
+        .inner_margin(egui::Margin::same(4));
+    let response = egui::Window::new(title)
+        .title_bar(false)
+        .frame(frame)
+        .fade_in(false)
+        .fade_out(false)
+        .default_pos(default_pos)
+        .show(ctx, |ui| {
+            close = title_bar(ui, title);
+            ui.add_space(4.0);
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(4, 0))
+                .show(ui, add_contents)
+                .inner
+        });
+    let response = response?;
+    bevel(
+        &ctx.layer_painter(response.response.layer_id),
+        response.response.rect,
+        true,
+    );
+    if close {
+        *open = false;
+    }
+    response.inner
+}
+
+/// Paints a title bar across the top of a window. Returns true if the close button was clicked.
+fn title_bar(ui: &mut Ui, title: &str) -> bool {
+    let height = 20.0;
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width().max(160.0), height),
+        Sense::hover(),
+    );
+    let p = ui.painter();
+    // Navy to blue gradient, as drawn by Win95 Plus! / Win98 title bars.
+    let mut mesh = egui::Mesh::default();
+    let (left, right) = (NAVY, Color32::from_rgb(0x10, 0x84, 0xd0));
+    mesh.colored_vertex(rect.left_top(), left);
+    mesh.colored_vertex(rect.right_top(), right);
+    mesh.colored_vertex(rect.right_bottom(), right);
+    mesh.colored_vertex(rect.left_bottom(), left);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    p.add(egui::Shape::mesh(mesh));
+    p.text(
+        pos2(rect.min.x + 5.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(13.0),
+        Color32::WHITE,
+    );
+    // Bold by overdrawing one pixel to the right.
+    p.text(
+        pos2(rect.min.x + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(13.0),
+        Color32::WHITE,
+    );
+
+    let button = Rect::from_min_size(pos2(rect.max.x - 18.0, rect.min.y + 2.0), vec2(16.0, 14.0));
+    let response = ui.interact(button, ui.id().with("close"), Sense::click());
+    let pressed = response.is_pointer_button_down_on();
+    p.rect_filled(button, 0.0, FACE);
+    bevel(p, button, !pressed);
+    let c = button.center() + if pressed { vec2(1.0, 1.0) } else { Vec2::ZERO };
+    let s = Stroke::new(1.5, Color32::BLACK);
+    p.line_segment([c + vec2(-3.5, -3.0), c + vec2(3.5, 3.0)], s);
+    p.line_segment([c + vec2(3.5, -3.0), c + vec2(-3.5, 3.0)], s);
+    response.clicked()
 }
 
 /// Draws a two-pixel Win95 bevel inside `rect`. Raised for buttons and windows,
