@@ -25,11 +25,13 @@ Pushing to `main` builds the static site and deploys it to GitHub Pages
 
 ## Controls
 
+Movement keys go by physical position, so WASD/QE stay in the same place on Dvorak, AZERTY and so on. Letter shortcuts (R, G, C) follow the letter on the key.
+
 | Input | Action |
 |---|---|
 | WASD / arrows, left-drag | Pan |
 | Q / E, right-drag | Rotate (right-drag also tilts) |
-| Scroll | Zoom |
+| Scroll | Zoom towards the cursor |
 | R | Toggle perspective / orthographic |
 | F1 | Wireframe (shows the greedy-meshed quads) |
 | G | Tile grid |

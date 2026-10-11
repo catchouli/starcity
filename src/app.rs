@@ -1,5 +1,6 @@
 use crate::camera::Camera;
 use crate::clouds;
+use crate::input::PhysicalKeys;
 use crate::picking;
 use crate::render::{CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
 use crate::roads::{self, Roads};
@@ -32,6 +33,7 @@ pub struct StarcityApp {
     frame_ms: f32,
     scene_renders: u64,
     ui: UiState,
+    physical_keys: PhysicalKeys,
     sim: Sim,
     last_time: f64,
     /// Tile under the cursor, and the last one seen (kept while dragging off the map).
@@ -84,6 +86,7 @@ impl StarcityApp {
                 show_debug: false,
                 show_about: false,
             },
+            physical_keys: PhysicalKeys::default(),
             sim: Sim::new(&World::new(1, 1, 1, 0), 0),
             last_time: 0.0,
             hover_tile: None,
@@ -357,6 +360,8 @@ impl StarcityApp {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context, dt: f32) {
+        // Track physical keys even while a text field has focus, so releases aren't missed.
+        ctx.input(|i| self.physical_keys.update(i));
         if ctx.egui_wants_keyboard_input() {
             return;
         }
@@ -381,8 +386,11 @@ impl StarcityApp {
                 self.ui.tool = Tool::Pointer;
             }
 
+            // Movement keys go by physical position, so WASD/QE stay put on any layout.
+            // (Letter shortcuts above use the logical key, matching the letter on the keycap.)
+            let keys = &self.physical_keys;
             let axis = |neg: &[Key], pos: &[Key]| {
-                let down = |keys: &[Key]| keys.iter().any(|&k| i.key_down(k));
+                let down = |ks: &[Key]| ks.iter().any(|&k| keys.down(k) || (is_arrow(k) && i.key_down(k)));
                 down(pos) as i32 as f32 - down(neg) as i32 as f32
             };
             let right = axis(&[Key::A, Key::ArrowLeft], &[Key::D, Key::ArrowRight]);
@@ -703,7 +711,7 @@ impl eframe::App for StarcityApp {
 
         // Keep frames coming only while something is moving (including egui's
         // smoothed scrolling, which spreads one wheel tick over several frames).
-        let keys_held = ctx.input(|i| !i.keys_down.is_empty());
+        let keys_held = self.physical_keys.any_down() || ctx.input(|i| !i.keys_down.is_empty());
         if keys_held || scene_changed || self.scene_dirty {
             ctx.request_repaint();
         } else if clouds_visible {
@@ -716,4 +724,9 @@ impl eframe::App for StarcityApp {
         let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         self.frame_ms = self.frame_ms * 0.9 + ms * 0.1;
     }
+}
+
+fn is_arrow(key: egui::Key) -> bool {
+    use egui::Key::*;
+    matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown)
 }
