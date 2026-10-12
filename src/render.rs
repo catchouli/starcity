@@ -22,6 +22,11 @@ const TEXTURES: [&[u8]; 5] = [
     include_bytes!("../assets/textures/sand.png"),
 ];
 
+/// How far (tiles) the see-through bubble reaches round what it reveals, and how far in front of
+/// the centre things have to be to fade.
+const REVEAL_RADIUS: f32 = 5.0;
+const REVEAL_MARGIN: f32 = 0.8;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Globals {
@@ -49,6 +54,9 @@ pub struct Globals {
     pub ambient: [f32; 4],
     /// Era: how chrome roads and track look (x).
     pub era: [f32; 4],
+    /// See-through bubble: centre pixels, radius pixels, margin; and its world centre with an on flag.
+    pub reveal: [f32; 4],
+    pub reveal_world: [f32; 4],
 }
 
 /// One placed model: where it stands, which way it faces, how big it is, and
@@ -79,6 +87,12 @@ impl ModelInstance {
 
     pub fn tinted(mut self, rgb: [u8; 3]) -> ModelInstance {
         self.tint = [rgb[0], rgb[1], rgb[2], self.tint[3]];
+        self
+    }
+
+    /// Marks the model as the thing the see-through bubble reveals: it is never faded itself.
+    pub fn revealed(mut self) -> ModelInstance {
+        self.tint[3] = 253;
         self
     }
 
@@ -193,6 +207,9 @@ pub struct SceneRenderer {
     pub ocean: [f32; 4],
     /// How chrome roads and track look, 0 to 1 (see `era.rs`).
     pub era_chrome: f32,
+    /// A spot to keep visible through whatever stands in front of it (world position), such as the
+    /// headquarters: buildings between it and the camera fade to a dither inside a bubble.
+    pub reveal: Option<Vec3>,
     /// Every model's mesh, in one vertex and one index buffer.
     model_vertices: Option<wgpu::Buffer>,
     model_indices: Option<wgpu::Buffer>,
@@ -324,6 +341,7 @@ impl SceneRenderer {
             preview_is_rail: false,
             ocean: [0.0; 4],
             era_chrome: 0.0,
+            reveal: None,
             model_vertices: None,
             model_indices: None,
             model_ranges: Vec::new(),
@@ -543,6 +561,28 @@ impl SceneRenderer {
         self.ensure_target(rs, size, samples);
         let target = self.target.as_ref().unwrap();
 
+        // The bubble's centre and size on screen: project the centre and a point a few tiles to its side.
+        let (reveal, reveal_world) = match self.reveal {
+            Some(c) => {
+                let project = |p: Vec3| {
+                    let clip = view_proj * p.extend(1.0);
+                    (clip.w > 0.0).then(|| {
+                        Vec2::new(
+                            (clip.x / clip.w * 0.5 + 0.5) * size[0] as f32,
+                            (0.5 - clip.y / clip.w * 0.5) * size[1] as f32,
+                        )
+                    })
+                };
+                let right = Vec3::new(view_proj.x_axis.x, view_proj.y_axis.x, view_proj.z_axis.x).normalize_or_zero();
+                match (project(c), project(c + right * REVEAL_RADIUS)) {
+                    (Some(p0), Some(p1)) if (p1 - p0).length() > 8.0 => {
+                        ([p0.x, p0.y, (p1 - p0).length(), REVEAL_MARGIN], [c.x, c.y, c.z, 1.0])
+                    }
+                    _ => ([0.0; 4], [0.0; 4]),
+                }
+            }
+            None => ([0.0; 4], [0.0; 4]),
+        };
         let sun = Vec3::from(light.dir);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
@@ -578,6 +618,8 @@ impl SceneRenderer {
             sun_color: [light.sun[0], light.sun[1], light.sun[2], 0.0],
             ambient: [light.ambient[0], light.ambient[1], light.ambient[2], 0.0],
             era: [self.era_chrome, 0.0, 0.0, 0.0],
+            reveal,
+            reveal_world,
         };
         rs.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 

@@ -131,6 +131,10 @@ pub struct StarcityApp {
     contract_towns: Vec<(TownId, TownId)>,
     /// Seconds since the people near each station were last counted.
     catchment_age: u32,
+    /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
+    proj_morph: f32,
+    /// Picking a new site for the headquarters.
+    relocating: bool,
     /// Road pieces the player has built (towns' own roads don't cost upkeep).
     player_roads: u32,
     assets_version: u64,
@@ -246,6 +250,8 @@ impl StarcityApp {
             contract_towns: Vec::new(),
             player_roads: 0,
             catchment_age: 0,
+            proj_morph: 0.0,
+            relocating: false,
             assets_version: u64::MAX,
             resume_speed: Speed::X1,
             light: daylight::NOON,
@@ -670,6 +676,10 @@ impl StarcityApp {
             self.last_hover_tile = self.hover_tile;
         }
 
+        if self.relocating {
+            self.relocation_tool(response, ctx.input(|i| i.time));
+            return Changes::default();
+        }
         // Every building tool works by dragging from a start tile to the cursor.
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
@@ -1499,6 +1509,7 @@ impl StarcityApp {
             }
             if i.key_pressed(Key::Escape) {
                 self.ui.tool = Tool::Pointer;
+                self.relocating = false;
             }
 
             // Movement keys go by physical position, so WASD/QE stay put on any layout.
@@ -1738,6 +1749,38 @@ impl StarcityApp {
 }
 
 impl StarcityApp {
+    /// The perspective/orthographic switch in the bottom right of the view: a globe that
+    /// unwraps into a flat map.
+    fn projection_button(&mut self, ctx: &egui::Context, area: egui::Rect, dt: f32) {
+        // Ease the icon towards the state the camera is going to.
+        let target = if self.ui.ortho { 1.0 } else { 0.0 };
+        let step = dt / 0.35;
+        let animating = (self.proj_morph - target).abs() > 0.001;
+        if animating {
+            self.proj_morph += (target - self.proj_morph).clamp(-step, step);
+            ctx.request_repaint();
+        }
+        let flat = self.proj_morph;
+        let size = 40.0;
+        let pos = egui::pos2(area.right() - size - 12.0, area.bottom() - size - 12.0);
+        egui::Area::new(egui::Id::new("projection_button"))
+            .fixed_pos(pos)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let response = win95::tool_button_ex(ui, size, false, true, false, |p, r| {
+                    ui::icon_projection(p, r.expand(3.0), flat)
+                });
+                if response.clicked() {
+                    self.ui.ortho = !self.ui.ortho;
+                }
+                response.on_hover_text(if self.ui.ortho {
+                    "Flat map view. Click for perspective (R)"
+                } else {
+                    "Perspective view. Click for flat map view (R)"
+                });
+            });
+    }
+
     /// Menu bar, toolbar and status bar around the 3D view.
     fn game_ui(&mut self, ui: &mut egui::Ui, rs: &RenderState) {
         let panel = egui::Frame::NONE
@@ -1808,6 +1851,8 @@ impl StarcityApp {
                     "No way through: water or buildings are in the way. Try a different spot.".to_string()
                 }
             }
+        } else if let (true, Some(hint)) = (self.relocating, self.site_hint.as_ref()) {
+            hint.clone()
         } else if let Some((text, _)) = self.message.as_ref().filter(|(_, until)| *until > ui.input(|i| i.time)) {
             text.clone()
         } else if self.ui.speed == Speed::Paused {
@@ -1847,6 +1892,14 @@ impl StarcityApp {
             self.scene_dirty = true;
         }
         self.camera.want_ortho = self.ui.ortho;
+        let reveal = self.hq.map(|h| {
+            let (x, z) = h.centre();
+            Vec3::new(x, self.world.height_at(x, z) + 0.5, z)
+        });
+        if reveal != self.renderer.reveal {
+            self.renderer.reveal = reveal;
+            self.scene_dirty = true;
+        }
         if self.ui.clouds != self.clouds_shown {
             self.clouds_shown = self.ui.clouds;
             self.scene_dirty = true;
@@ -1948,6 +2001,7 @@ impl eframe::App for StarcityApp {
         let mut scene_changed = false;
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
+            self.projection_button(&ctx, rect, dt);
             let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
             let scale = ctx.pixels_per_point() * self.settings.render_scale;
             let size = [

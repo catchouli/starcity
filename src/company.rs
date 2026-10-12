@@ -197,6 +197,19 @@ pub const LEVELS: [Level; 3] = [
 pub const LATER_LEVELS: &str =
     "Corporate tower, Data campus, Glass spire and the AI Citadel come with the systems they unlock.";
 
+/// What moving the headquarters costs: a flat fee and half of what the building has cost so far.
+/// Only from the Regional office on, so it is a late choice and never the first thing to try.
+pub fn relocation_cost(level: u8) -> u32 {
+    10_000
+        + (1..=level as usize)
+            .filter_map(|l| LEVELS.get(l))
+            .map(|l| l.cost / 2)
+            .sum::<u32>()
+}
+
+/// The first level that may be moved.
+pub const RELOCATE_FROM: u8 = 2;
+
 pub fn level(n: u8) -> &'static Level {
     &LEVELS[(n as usize).min(LEVELS.len() - 1)]
 }

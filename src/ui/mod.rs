@@ -524,6 +524,64 @@ fn icon_train(p: &Painter, r: Rect) {
     }
 }
 
+/// The projection button: a globe (perspective) that unwraps into a flat square map (orthographic).
+/// `flat` runs from 0 (globe) to 1 (map).
+pub fn icon_projection(p: &Painter, r: Rect, flat: f32) {
+    let c = r.center();
+    let rad = r.width().min(r.height()) / 2.0;
+    let at = |x: f32, y: f32| pos2(c.x + x * rad, c.y + y * rad);
+    let ocean = Color32::from_rgb(0x2a, 0x6c, 0xb8);
+    let sea_flat = Color32::from_rgb(0x4a, 0x84, 0xc4);
+    let fill = Color32::from_rgb(
+        (ocean.r() as f32 + (sea_flat.r() as f32 - ocean.r() as f32) * flat) as u8,
+        (ocean.g() as f32 + (sea_flat.g() as f32 - ocean.g() as f32) * flat) as u8,
+        (ocean.b() as f32 + (sea_flat.b() as f32 - ocean.b() as f32) * flat) as u8,
+    );
+    // Outline: a circle that squares off as it unwraps.
+    let n = 48;
+    let outline: Vec<_> = (0..n)
+        .map(|i| {
+            let a = i as f32 * std::f32::consts::TAU / n as f32;
+            let (cx, sy) = (a.cos(), a.sin());
+            let square = 1.0 / cx.abs().max(sy.abs());
+            let k = 1.0 + (square - 1.0) * flat;
+            at(cx * k * 0.95, sy * k * 0.95)
+        })
+        .collect();
+    p.add(egui::Shape::convex_polygon(
+        outline,
+        fill,
+        Stroke::new(1.0, Color32::BLACK),
+    ));
+    // Land: a couple of patches that stretch with the map.
+    let land = Color32::from_rgb(0x4a, 0xa0, 0x3a);
+    let width = 1.0 + 0.0 * flat;
+    let stretch = 0.82 + 0.18 * flat;
+    for (x, y, w, h) in [(-0.3, -0.25, 0.34, 0.26), (0.28, 0.2, 0.3, 0.3)] {
+        let pts: Vec<_> = (0..14)
+            .map(|i| {
+                let a = i as f32 * std::f32::consts::TAU / 14.0;
+                at((x + a.cos() * w * 0.8) * stretch * width, y + a.sin() * h * 0.8)
+            })
+            .collect();
+        p.add(egui::Shape::convex_polygon(pts, land, Stroke::NONE));
+    }
+    // Meridians and parallels: curves on the globe, straight lines on the map.
+    let line = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
+    let lerp = |a: f32, b: f32| a + (b - a) * flat;
+    for k in [-0.55f32, 0.0, 0.55] {
+        let pts: Vec<_> = (0..=16)
+            .map(|i| {
+                let y = -0.95 + 1.9 * i as f32 / 16.0;
+                at(k * lerp((1.0 - y * y).max(0.0).sqrt(), 1.0) * 0.95, y)
+            })
+            .collect();
+        p.add(egui::Shape::line(pts, line));
+        let w = lerp((1.0 - k * k).sqrt(), 1.0) * 0.95;
+        p.line_segment([at(-w, k * 0.95), at(w, k * 0.95)], line);
+    }
+}
+
 fn icon_island(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
     p.rect_filled(r, 0.0, Color32::from_rgb(0x30, 0x70, 0xb0));

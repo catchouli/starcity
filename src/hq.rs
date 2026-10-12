@@ -65,25 +65,31 @@ pub fn choose_town(towns: &Towns) -> Option<TownId> {
 
 /// Finds flat, clear ground for the plot close to the town centre, clears any
 /// houses on it, and reserves it. `None` if the town has no room.
+/// Whether a plot with this north-west tile is flat, dry and clear (houses are fine: they get
+/// cleared; roads, track, ports and airports aren't).
+pub fn plot_fits(world: &World, towns: &Towns, roads: &Layer, rails: &Layer, ax: i32, az: i32) -> bool {
+    let Some((level, _)) = world.surface(ax, az) else {
+        return false;
+    };
+    (0..PLOT).all(|dz| {
+        (0..PLOT).all(|dx| {
+            let (x, z) = (ax + dx, az + dz);
+            world
+                .surface(x, z)
+                .is_some_and(|(base, shape)| shape.0 == 0 && base == level && base > world.sea_level)
+                && roads.get(x, z) == 0
+                && rails.get(x, z) == 0
+                // 1 is a house (cleared when built); anything else is a port or airport.
+                && towns.occupied.get(x, z) <= 1
+        })
+    })
+}
+
+/// Finds flat, clear ground for the plot close to the town centre, clears any
+/// houses on it, and reserves it. `None` if the town has no room.
 pub fn place(world: &World, towns: &mut Towns, roads: &Layer, rails: &Layer, town: TownId) -> Option<Hq> {
     let centre = towns.list.get(town as usize)?.centre;
-    let fits = |ax: i32, az: i32, towns: &Towns| -> bool {
-        let Some((level, _)) = world.surface(ax, az) else {
-            return false;
-        };
-        (0..PLOT).all(|dz| {
-            (0..PLOT).all(|dx| {
-                let (x, z) = (ax + dx, az + dz);
-                world
-                    .surface(x, z)
-                    .is_some_and(|(base, shape)| shape.0 == 0 && base == level && base > world.sea_level)
-                    && roads.get(x, z) == 0
-                    && rails.get(x, z) == 0
-                    // 1 is a house (cleared below); anything else is a port or airport.
-                    && towns.occupied.get(x, z) <= 1
-            })
-        })
-    };
+    let fits = |ax: i32, az: i32, towns: &Towns| plot_fits(world, towns, roads, rails, ax, az);
     // Square rings around the centre, nearest first.
     for ring in 0..40i32 {
         let mut best: Option<((i32, i32), i32)> = None;
@@ -116,6 +122,20 @@ pub fn place(world: &World, towns: &mut Towns, roads: &Layer, rails: &Layer, tow
         }
     }
     None
+}
+
+/// Moves the headquarters to a new plot: the old ground is freed, the new plot cleared of houses
+/// and reserved. The caller has checked `plot_fits` and that a town is near.
+pub fn relocate(towns: &mut Towns, old: &Hq, anchor: (i32, i32), town: TownId) -> Hq {
+    for (x, z) in old.tiles() {
+        towns.occupied.set(x, z, 0);
+    }
+    let hq = Hq { anchor, town };
+    towns.demolish(anchor, (anchor.0 + PLOT - 1, anchor.1 + PLOT - 1));
+    for (x, z) in hq.tiles() {
+        towns.occupied.set(x, z, 2);
+    }
+    hq
 }
 
 #[cfg(test)]
@@ -231,5 +251,31 @@ mod tests {
             let _ = &mut world;
         }
         assert!(tried >= 5 && ok * 10 >= tried * 8, "{ok} of {tried}");
+    }
+
+    #[test]
+    fn moving_the_headquarters_frees_the_old_plot_and_clears_the_new_one() {
+        let (world, mut towns, roads, rails) = generated(42);
+        let town = choose_town(&towns).unwrap();
+        let old = place(&world, &mut towns, &roads, &rails, town).unwrap();
+        // Another town with room.
+        let other = towns.list.iter().map(|t| t.id).find(|&t| t != town).unwrap();
+        let spot = {
+            let mut probe = generated(42).1;
+            place(&world, &mut probe, &roads, &rails, other).unwrap().anchor
+        };
+        assert!(plot_fits(&world, &towns, &roads, &rails, spot.0, spot.1));
+        let new = relocate(&mut towns, &old, spot, other);
+        for t in old.tiles() {
+            assert_eq!(towns.occupied.get(t.0, t.1), 0, "the old plot is free again");
+        }
+        for t in new.tiles() {
+            assert_eq!(towns.occupied.get(t.0, t.1), 2);
+            assert!(!towns.buildings.contains_key(&t));
+        }
+        assert_eq!(new.town, other);
+        // Its own plot can't be built on twice.
+        assert!(!plot_fits(&world, &towns, &roads, &rails, spot.0, spot.1));
+        assert!(crate::company::relocation_cost(2) > crate::company::relocation_cost(1));
     }
 }

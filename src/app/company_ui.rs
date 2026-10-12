@@ -102,6 +102,71 @@ impl StarcityApp {
         }
     }
 
+    /// Where the headquarters could go if the cursor tile is the middle of its plot.
+    fn relocation_site(&self, centre: (i32, i32)) -> Result<((i32, i32), TownId), &'static str> {
+        let anchor = (centre.0 - hq::PLOT / 2, centre.1 - hq::PLOT / 2);
+        if !hq::plot_fits(&self.world, &self.towns, &self.roads, &self.rails, anchor.0, anchor.1) {
+            return Err("The headquarters needs flat, clear ground (no roads or track)");
+        }
+        let (cx, cz) = (anchor.0 + hq::PLOT / 2, anchor.1 + hq::PLOT / 2);
+        match self.towns.nearest((cx, cz), 20) {
+            Some(town) => Ok((anchor, town)),
+            None => Err("Put it in a town: there's none near here"),
+        }
+    }
+
+    /// Choosing a new place for the headquarters: a plot follows the cursor, green if it fits,
+    /// and a click pays for the move.
+    pub(super) fn relocation_tool(&mut self, response: &egui::Response, now: f64) {
+        let cost = company::relocation_cost(self.company.hq_level);
+        let site = self.hover_tile.map(|t| self.relocation_site(t));
+        let highlight = self.hover_tile.map(|t| {
+            let a = (t.0 - hq::PLOT / 2, t.1 - hq::PLOT / 2);
+            crate::render::Highlight {
+                a,
+                b: (a.0 + hq::PLOT - 1, a.1 + hq::PLOT - 1),
+                kind: if matches!(site, Some(Ok(_))) {
+                    crate::render::HighlightKind::Cursor
+                } else {
+                    crate::render::HighlightKind::Bulldoze
+                },
+            }
+        });
+        if highlight != self.highlight {
+            self.highlight = highlight;
+            self.scene_dirty = true;
+        }
+        self.site_hint = Some(match &site {
+            Some(Ok(_)) if self.company.can_afford(cost) => {
+                format!(
+                    "Move the headquarters here: {} (click, Esc to cancel)",
+                    money(cost as i64)
+                )
+            }
+            Some(Ok(_)) => format!("Moving costs {}: not enough money", money(cost as i64)),
+            Some(Err(why)) => why.to_string(),
+            None => "Click a spot in a town for the headquarters (Esc to cancel)".to_string(),
+        });
+        if !response.clicked_by(egui::PointerButton::Primary) {
+            return;
+        }
+        let (Some(Ok((anchor, town))), Some(old)) = (site, self.hq) else {
+            return;
+        };
+        if !self.pay(Item::Headquarters, cost) {
+            return;
+        }
+        self.hq = Some(hq::relocate(&mut self.towns, &old, anchor, town));
+        self.relocating = false;
+        self.highlight = None;
+        self.site_hint = None;
+        self.static_changed = true;
+        self.plan_epoch += 1;
+        self.scene_dirty = true;
+        let name = self.towns.list[town as usize].name.clone();
+        self.show_message(&format!("Your headquarters has moved to {name}"), now);
+    }
+
     /// Points the camera at the headquarters.
     pub(super) fn look_at_hq(&mut self) {
         if let Some(hq) = self.hq {
@@ -328,7 +393,8 @@ impl StarcityApp {
             .get(hq.town as usize)
             .map(|t| t.name.clone())
             .unwrap_or_default();
-        let (mut upgrade, mut look) = (false, false);
+        let (mut upgrade, mut look, mut relocate) = (false, false, false);
+        let sandbox = self.company.sandbox;
         win95::window(ctx, "Headquarters", &mut open, egui::pos2(220.0, 130.0), |ui| {
             ui.set_width(330.0);
             let current = company::level(level);
@@ -359,9 +425,24 @@ impl StarcityApp {
                 }
             }
             ui.add_space(4.0);
-            look = ui.button("Look at it").clicked();
+            ui.horizontal(|ui| {
+                look = ui.button("Look at it").clicked();
+                if level >= company::RELOCATE_FROM || sandbox {
+                    relocate = ui
+                        .button(format!("Move it… ({})", money(company::relocation_cost(level) as i64)))
+                        .on_hover_text("Choose another town for your headquarters. It costs money, so think about where you want to focus.")
+                        .clicked();
+                } else {
+                    ui.weak("It can be moved from the Regional office.");
+                }
+            });
         });
         self.ui.show_hq = open;
+        if relocate {
+            self.relocating = true;
+            self.ui.tool = crate::ui::Tool::Pointer;
+            self.ui.show_hq = false;
+        }
         if look {
             self.look_at_hq();
         }

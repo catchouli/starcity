@@ -142,7 +142,7 @@ pub fn hq(models: &Models, world: &World, hq: &crate::hq::Hq, level: u8) -> Plac
         .rev()
         .find_map(|l| models.pick(Role::Hq, &format!("hq_{l}"), 2000, 0));
     model
-        .map(|m| (m, ModelInstance::at([cx, world.height_at(cx, cz), cz], 0.0)))
+        .map(|m| (m, ModelInstance::at([cx, world.height_at(cx, cz), cz], 0.0).revealed()))
         .into_iter()
         .collect()
 }

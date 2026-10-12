@@ -30,6 +30,11 @@ struct Globals {
     ambient: vec4<f32>,
     // Era: x = how chrome roads and track look (0 to 1).
     era: vec4<f32>,
+    // See-through bubble round something you need to see (the headquarters): centre in
+    // render-target pixels (xy), radius in pixels (z), how far in front of the centre
+    // things must be to fade (w). reveal_world: the centre in the world, w = 1 if on.
+    reveal: vec4<f32>,
+    reveal_world: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -516,14 +521,41 @@ fn vs_model(
     return out;
 }
 
+// 4 x 4 ordered dither, 0..1.
+fn bayer(p: vec2<f32>) -> f32 {
+    var m = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    let x = u32(p.x) % 4u;
+    let y = u32(p.y) % 4u;
+    return (m[y * 4u + x] + 0.5) / 16.0;
+}
+
 @fragment
 fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
+    // Things between the camera and the revealed spot thin out, so it can be seen and clicked.
+    if g.reveal_world.w > 0.5 {
+        let c = g.reveal_world.xyz;
+        var toward = g.camera_pos.xyz;
+        if g.camera_pos.w > 0.5 {
+            toward = normalize(g.camera_pos.xyz - c);
+        }
+        // (Alpha 253 marks the revealed object itself, which never fades.)
+        let is_revealed = in.tint.a > 0.98 && in.tint.a < 0.995;
+        if !is_revealed && dot(in.world - c, toward) > g.reveal.w {
+            let d = length(in.clip.xy - g.reveal.xy);
+            if d < g.reveal.z {
+                let keep = 0.12 + 0.88 * smoothstep(0.5 * g.reveal.z, g.reveal.z, d);
+                if bayer(in.clip.xy) > keep {
+                    discard;
+                }
+            }
+        }
+    }
     let n = normalize(in.normal);
     var albedo = in.color.rgb;
     // "Paint" materials take the instance's tint (an sRGB byte colour).
     albedo = select(albedo, albedo * pow(in.tint.rgb, vec3<f32>(2.2)), in.material.w > 0.5);
     // A wreck: dark and burnt.
-    albedo = albedo * (1.0 - 0.8 * in.tint.a);
+    albedo = albedo * (1.0 - 0.8 * step(0.995, in.tint.a));
     let metallic = in.material.x;
     let rough = in.material.y;
     let glow = in.material.z * 2.0;
