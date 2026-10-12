@@ -58,7 +58,7 @@ Three systems carry the twist. They are built on things that already exist (the 
 
 **Charters: the governor's verbs (§1.2).** A policy sheet with a few sliders that agents obey.
 
-**The Rival.** The demo mode's scripted builder (`scenario.rs`) already knows how to plan rail lines, pick big towns and run services. Run it, tuned and budgeted, as an **autonomous competitor** on the same map from the start, a slower, dumber one in 2000 and a smart one by the 2030s (it too gets compute and agents). It competes for the same industries, spaceports and power, and in the late game it is the other intelligence you are racing to the singularity. Players can ally with it (merge and share a grid) or buy it out. This also solves "an empty map in a sandbox": the world is alive when you arrive, and the demo mode is no longer a separate thing but the rival with the player's hand off the controls.
+**The Rival (parked).** *Decision: on the back burner until the core gameplay is solid; nothing else depends on it.* The demo mode's scripted builder (`scenario.rs`) already knows how to plan rail lines, pick big towns and run services. Run it, tuned and budgeted, as an **autonomous competitor** on the same map from the start, a slower, dumber one in 2000 and a smart one by the 2030s (it too gets compute and agents). It competes for the same industries, spaceports and power, and in the late game it is the other intelligence you are racing to the singularity. Players can ally with it (merge and share a grid) or buy it out. This also solves "an empty map in a sandbox": the world is alive when you arrive, and the demo mode is no longer a separate thing but the rival with the player's hand off the controls.
 
 ### 1.2 Charters and the two ledgers
 
@@ -714,7 +714,7 @@ What the player meets along the way. Years are when a thing first appears, with 
 
 "Whoa, I'm on the moon." The space chain (§10.4) starts as a few rockets leaving the map. Then, around 2038, a new button appears. The player should be genuinely surprised at how much more game there is.
 
-**The moon (playable from about 2038).** The moon is a second map of the same kind (voxel terrain, no water, no weather), reached by rocket. Switching maps is a button on the status bar, the lunar and Earth economies run side by side, and the same company owns both. Play there is a different flavour of the same game:
+**The moon (playable from about 2038).** The moon is a second map of the same kind (voxel terrain, no water, no weather), reached by rocket. Switching maps is a button on the status bar (§10.13), the lunar and Earth economies run side by side, and the same company owns both. Play there is a different flavour of the same game:
 - **Domes.** Nothing outside a dome supports people. A **dome** claims an area (12×12 and up), seals it and costs power and water; inside it towns grow as on Earth, in the style of the era. **Sealed tunnels and maglev** link domes (built like rails); vehicles outside run in vacuum and fast, in low gravity.
 - **Lunar industry.** The moon's regolith, Helium-3 and Water ice (from the polar craters) become **real mines on the lunar map**, replacing the virtual off-map base of §10.4. It consumes Earth's goods, people and Nano-goods through the **orbital lift** (a rocket route, later a space elevator). Domes want Lunar glass, compute wants power, and the sun on the moon is a two-week day.
 - **Look.** A black sky with Earth in it and no atmosphere haze. `daylight.rs` is a pure function, so a lunar light is one new function.
@@ -730,13 +730,28 @@ What the player meets along the way. Years are when a thing first appears, with 
 The final surprise. After the singularity (2050), the system view zooms out again, and the map becomes the galaxy. This is deliberately open-ended and not for the first release, but the design must make it a *continuation*, not a different game.
 
 - **Seed ships.** The player builds slow **interstellar vessels** that carry a seed (a small self-sufficient factory plus a library of the company's designs). It takes years of game time to reach another star; on arrival it builds a dome-and-industry outpost and the player may switch to a new system map. Each system is a new map (see Level, §11).
-- **Purpose, not paperclips.** What makes this interesting and not a "turn everything into one thing" game: **seed ships carry the charter** (§1.2). A fleet launched under *Profit* behaves differently from one under *People*: Profit-minded seeds strip-mine and move on; People-minded seeds build gardens and slowly grow; Planet-minded seeds avoid inhabited or living worlds. The player sees, a hundred game years later, the effect of the values they wrote down. The **Rival** (§1.1) is the cautionary mirror, a maximiser which converts what it finds into more of itself. Meeting it is the late-game conflict, and it is optional to win.
+- **Purpose, not paperclips.** What makes this interesting and not a "turn everything into one thing" game: **seed ships carry the charter** (§1.2). A fleet launched under *Profit* behaves differently from one under *People*: Profit-minded seeds strip-mine and move on; People-minded seeds build gardens and slowly grow; Planet-minded seeds avoid inhabited or living worlds. The player sees, a hundred game years later, the effect of the values they wrote down. The parked **Rival** (§1.1) would be the cautionary mirror, a maximiser which converts what it finds into more of itself. If the Rival is built (it is parked), meeting it is the late-game conflict, and it is optional to win.
 - **No unbounded replication.** Seed ships can build one more ship per year per system at most, and every colony has an upkeep: expansion is a managed network, not a plague.
 - **The galaxy view** is a stylised star map (a few hundred systems), each simulated in a cheap abstract mode (a handful of numbers) while the player is elsewhere.
 
 ### 10.12 The globe: dominating the map
 
 On Earth the 512² map is a region. When regions become the unit, the game gets a **globe layer**: a strategic view of many regions (continents, islands), each its own `Level`, joined by **trunk lines**: hyper expressways, vactrains, skylanes and sea lanes (§7.6) that cross the map edge. The player starts in one region and the others are partly built by the Rival and by the world. "Dominating the globe" is taking over these regions' power, ports and cities, and tying them with ultra-high-speed networks. Unviewed regions simulate in a cheap economy-only mode (monthly numbers, no vehicles), so the web build pays for one fully simulated map at a time.
+
+### 10.13 Moving on: a choice, with an invitation
+
+Each new stage (the moon, Mars, the system map, the galaxy, the globe) is **the player's choice**. The game never forces the jump, but it is designed to *lead* the player there, because the point of the game is the distant endgame. And the choice is **not one-way**: the player can switch between stages at any time, and everything keeps running.
+
+**The invitation.** Tools of persuasion, in order of subtlety:
+- **A sight line.** Rockets leave the map from the 2020s, a lunar base glows on the moon in the sky from 2031 and a station ring appears overhead. The player sees where they could go for years before they can.
+- **Dangled rewards.** Each stage needs a visible, specific thing the old stage can't provide: lunar glass for chrome cities, Helium-3 for fusion, Rare metals for Nano-goods. The industry windows show them as locked inputs ("Needs Rare metals: asteroid mining 2040").
+- **Pressure from success.** The ceilings of the Earth economy are real: grid power, land and heat cap compute (§5.9), and the news ticker says so ("*Ashford's grid is at its limit*"). The easiest way to keep the number growing is up.
+- **The banner.** The first time the prerequisite is met, a single pop-up: "**The lunar landing site is ready**: go there?" with a button. It never nags afterwards.
+- **A small head start.** The first build on a new map is cheap and its first deliveries pay a bonus, so trying it is rewarded, not punished.
+
+**Staying and returning.** The Earth map keeps simulating while the player is away, in a **cheap abstract mode** (monthly economy only, no vehicles moving; §12 globe notes) when it isn't on screen, and the vehicle and train positions are restored on return. A single status-bar switcher (Earth · Moon · Mars · System · Galaxy) goes anywhere already unlocked, and the company's totals (money, compute, charter) are shared. A player who hates the moon can play Earth for 50 years and still see the singularity; a player who loves it can leave Earth on autopilot (agents), a design in itself.
+
+**What stays gated.** Only *timeline* things: a stage can't be entered before its technology year (§10.1), and the endgame (galaxy) needs the Convergence Array (§10.5). Within those limits, every jump is free.
 
 ## 11. Implementation plan and next steps
 
@@ -763,7 +778,7 @@ Each phase is playable and testable on its own; later phases lean on earlier one
 
 **Phase 9 — Data centres and compute.** *Start with the meter:* the Compute meter, rate and log sparkline in the toolbar, driven by the formula of §5.9 with the Servers-era numbers, so the idle-game feel is there before the economy is.  The silica → chips → data-centre chain (§5.8) as ordinary industries; `compute.rs` with the CU pool (decay, allocation sliders) and the Compute window; first programs (hosting, analytics, forecasting, fleet optimiser); the Tech Pace meter shifting introduction years. *Test:* compute pays; brownouts cut CU; the allocation of a program changes its effect with diminishing returns. Later programs (autonomy, generative design, agents, synthesis) are added one at a time as the systems they touch arrive.
 
-**Phase 9b — Forecast and the Rival.** `forecast.rs`: clone the simulation state, run it N years headless in budgeted slices (so the web UI stays responsive), render ghost lines and a projected-income chart; `scenario.rs` becomes `rival.rs`, a budgeted autonomous company that uses the same costs and the same industries as the player. *Test:* a forecast of an idle company matches the real run within tolerance; the rival makes a profit on generated maps.
+**Phase 9b — Forecast.** `forecast.rs`: clone the simulation state, run it N years headless in budgeted slices (so the web UI stays responsive), render ghost lines and a projected-income chart. *Test:* a forecast of an idle company matches the real run within tolerance. (The Rival, `scenario.rs` grown into `rival.rs`, is **parked** until the core game is solid; see §1.1 and §12.)
 
 **Phase 10a — Agents, charters and the two ledgers.** Agents (§5.8) that build and run lines through the same `Plan` API the player uses; the four-slider charter window; the Wellbeing score from town and grid data; the endings (§1.2). *Test:* charters change what agents build in a seeded scenario, deterministically.
 
@@ -829,8 +844,8 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 7. **Are orbs gated by lunar glass?** §10.4 makes supplied towns redevelop faster; a stricter version would make orbs impossible without it. Visually that risks cities that never go chrome, so the proposed rule is a bonus, not a gate.
 8. **Power grid:** radius pooling first, pylons later. Is that enough, or do pylons belong in the first version?
 9. **Scale of the numbers.** Everything in §3–8 and §10.4 should be tuned against headless tests once money exists, not by hand.
-10. **Is the Rival the maximiser?** §10.11 casts it as the cautionary mirror. It's neat but means the Rival must behave visibly differently in the 2030s (a design burden for `rival.rs`).
-11. **Compute scale:** eleven orders of magnitude in one number is the game's best joke and its biggest tuning risk: is the unit-change spectacle (kCU → Brim) worth the confusion? A log axis meter option would help.
+10. **The Rival (parked).** Kept in the design (§1.1, §10.11) but deliberately not scheduled: revisit once money, industries, compute and agents work. If revived, it's the cautionary maximiser mirror; the galaxy section reads fine without it.
+11. ~~**Compute scale.**~~ Decided: keep the unit-change spectacle (kCU → ... → Brim), as idle-game players already read it. A log-axis meter option stays a cheap fallback if playtests find it confusing.
 12. **How far to take the twist?** Charters and endings (§1.2) assume the agents' behaviour can be steered and tested; the first version could ship with two ledgers and three endings, with agents as hand-written heuristics. Is that enough, or should agents be more surprising (they have a mind of their own)?
 13. **Revisions:** rewinding is powerful, and might undermine consequence. Limited use (three per game) and a heavy compute price are the proposal.
-14. **The moon and the globe:** a separate scenario or the continuation of the same save? (§10.10 now assumes the same save, from about 2038; §10.12 adds the globe layer.)
+14. ~~**The moon and the globe: same save?**~~ Decided: same save, optional, and reversible (§10.13).
