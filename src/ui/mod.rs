@@ -17,6 +17,10 @@ pub enum Tool {
     Station,
     RemoveRail,
     Bulldoze,
+    Port,
+    Boat,
+    Airport,
+    Plane,
 }
 
 impl Tool {
@@ -31,6 +35,10 @@ impl Tool {
             Tool::Station => "Build station",
             Tool::RemoveRail => "Remove railway",
             Tool::Bulldoze => "Bulldoze",
+            Tool::Port => "Build port",
+            Tool::Boat => "Place ferry",
+            Tool::Airport => "Build airport",
+            Tool::Plane => "Place plane",
         }
     }
 
@@ -49,6 +57,10 @@ impl Tool {
             }
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
+            Tool::Port => "Click flat coastal land to build a port. Ferries tie up in the water beside it.",
+            Tool::Boat => "Click water to place a ferry, then click it to give it ports to visit.",
+            Tool::Airport => "Click to build an airport (O turns the runway). It levels the ground for a price.",
+            Tool::Plane => "Click an airport to park a plane there, then click the plane to give it airports to visit.",
         }
     }
 
@@ -69,6 +81,10 @@ impl Tool {
                 icon_cross(p, r);
             }
             Tool::Bulldoze => icon_bulldozer(p, r),
+            Tool::Port => icon_port(p, r),
+            Tool::Boat => icon_boat(p, r),
+            Tool::Airport => icon_airport(p, r),
+            Tool::Plane => icon_plane(p, r),
         }
     }
 }
@@ -134,7 +150,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
 
 pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
     const SIZE: f32 = 30.0;
-    let groups: [(&str, &[Tool]); 4] = [
+    let groups: [(&str, &[Tool]); 5] = [
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad]),
@@ -142,6 +158,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
             "Rail",
             &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
         ),
+        ("Sea & air", &[Tool::Port, Tool::Boat, Tool::Airport, Tool::Plane]),
     ];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -189,7 +206,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
 pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str, clock: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let (right_width, clock_width) = (180.0, 150.0);
+        let (right_width, clock_width) = (230.0, 150.0);
         let left = (ui.available_width() - right_width - clock_width - 4.0).max(50.0);
         win95::status_pane(ui, left, s.tool.hint());
         win95::status_pane(ui, right_width, right);
@@ -205,6 +222,107 @@ pub fn about_window(ctx: &egui::Context, open: &mut bool) {
 }
 
 // Icons, drawn into a ~20px square.
+
+fn icon_port(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    // Water, a quay with a crane over it.
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.6), at(1.0, 1.0)),
+        0.0,
+        Color32::from_rgb(0x2a, 0x6a, 0x9c),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.5), at(0.55, 0.65)),
+        0.0,
+        Color32::from_gray(0x90),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.1, 0.25), at(0.3, 0.5)),
+        0.0,
+        Color32::from_rgb(0xa8, 0x80, 0x5c),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.42, 0.05), at(0.5, 0.5)),
+        0.0,
+        Color32::from_rgb(0xc8, 0x78, 0x28),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.42, 0.05), at(0.95, 0.12)),
+        0.0,
+        Color32::from_rgb(0xc8, 0x78, 0x28),
+    );
+    p.line_segment([at(0.85, 0.12), at(0.85, 0.45)], Stroke::new(1.0, Color32::BLACK));
+}
+
+fn icon_boat(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.7), at(1.0, 1.0)),
+        0.0,
+        Color32::from_rgb(0x2a, 0x6a, 0x9c),
+    );
+    p.add(egui::Shape::convex_polygon(
+        vec![at(0.05, 0.5), at(0.95, 0.5), at(0.78, 0.8), at(0.2, 0.8)],
+        Color32::from_rgb(0x1e, 0x34, 0x5c),
+        Stroke::NONE,
+    ));
+    p.rect_filled(
+        Rect::from_min_max(at(0.3, 0.28), at(0.65, 0.5)),
+        0.0,
+        Color32::from_gray(0xee),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.42, 0.08), at(0.52, 0.28)),
+        0.0,
+        Color32::from_rgb(0xbe, 0x34, 0x2a),
+    );
+}
+
+fn icon_airport(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(r, 0.0, Color32::from_rgb(0x3a, 0x8c, 0x2f));
+    // A runway with a dashed centre line, and a tower.
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.55), at(1.0, 0.85)),
+        0.0,
+        Color32::from_gray(0x3e),
+    );
+    for x in [0.08, 0.34, 0.6, 0.86] {
+        p.rect_filled(Rect::from_min_max(at(x, 0.69), at(x + 0.12, 0.72)), 0.0, Color32::WHITE);
+    }
+    p.rect_filled(
+        Rect::from_min_max(at(0.6, 0.25), at(0.7, 0.55)),
+        0.0,
+        Color32::from_gray(0xc8),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.55, 0.12), at(0.75, 0.25)),
+        0.0,
+        Color32::from_rgb(0x3c, 0x5a, 0x78),
+    );
+}
+
+fn icon_plane(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(r, 0.0, Color32::from_rgb(0x7f, 0xb2, 0xd9));
+    let body = Color32::from_gray(0xf0);
+    p.rect_filled(Rect::from_min_max(at(0.1, 0.44), at(0.92, 0.58)), 0.0, body);
+    p.add(egui::Shape::convex_polygon(
+        vec![at(0.42, 0.5), at(0.62, 0.5), at(0.48, 0.08), at(0.38, 0.08)],
+        Color32::from_gray(0xc8),
+        Stroke::NONE,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        vec![at(0.42, 0.52), at(0.62, 0.52), at(0.48, 0.92), at(0.38, 0.92)],
+        Color32::from_gray(0xc8),
+        Stroke::NONE,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        vec![at(0.1, 0.46), at(0.22, 0.46), at(0.12, 0.26), at(0.06, 0.26)],
+        Color32::from_rgb(0xbe, 0x34, 0x2a),
+        Stroke::NONE,
+    ));
+}
 
 fn icon_speed(p: &Painter, r: Rect, speed: Speed) {
     if speed == Speed::Paused {

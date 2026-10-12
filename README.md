@@ -20,7 +20,7 @@ trunk serve --release     # http://127.0.0.1:8080
 trunk build --release     # static site in dist/
 ```
 
-Demo mode builds rail lines between neighbouring towns, with a train on each:
+Demo mode builds rail lines between neighbouring towns, ferry lines between ports and flights between the biggest cities, with vehicles on each:
 `cargo run --release -- --demo`, or add `?demo` to the web URL.
 
 Pushing to `main` builds the static site and deploys it to GitHub Pages
@@ -44,6 +44,10 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | Home / island button | Centre the view on the island |
 | Signal tool | Click track to place a signal facing you, click again to turn it round, right-click to remove |
 | Rail tool | Drag to lay track. Ground with the wrong slope is levelled for an extra cost (shown in the status bar) unless it's too steep |
+| Port tool | Click flat coastal land to build a port |
+| Ferry tool | Click water to place a ferry; click it to give it ports to visit |
+| Airport tool | Click to build an airport (levels the ground for a price); O turns the runway |
+| Plane tool | Click an airport to park a plane; click it to give it airports to visit |
 | Station tool | Drag along straight track or flat ground to build platforms |
 | Train tool | Click plain track to place a train heading away from you |
 | Pointer click | Open a train (orders, stop/go), a station or a town |
@@ -75,6 +79,10 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/trains.rs`: train movement, routing, path-signal reservations, crashes
 - `src/vehicles.rs`: cars, buses and trucks on the road graph
 - `src/scenario.rs`: demo rail lines between towns (`--demo` / `?demo`)
+- `src/terminals.rs`: ports and airports, orders
+- `src/sea.rs`: water grid and boat pathfinding
+- `src/boats.rs`, `src/planes.rs`: ferries and planes
+- `src/app/craft.rs`: tools, windows, props and demo for ports, airports, ferries, planes
 - `src/stations.rs`: stations and platform planning
 - `src/towns.rs`: town founding, names, growth, buildings, catchment
 - `src/clouds.rs`: tiling voxel cloud field

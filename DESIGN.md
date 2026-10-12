@@ -22,8 +22,8 @@ It's written in **Rust**. It compiles to **WebAssembly** and runs fast in the br
 
 - The world is a 3D grid of blocks. The horizontal **tile** (x, z) is the unit everything is built on: one road, one track piece, one building footprint.
 - The world is stored in **chunks** (e.g. 32×32 columns × N height) so meshing, saving and editing all work chunk by chunk.
-- **The map is an island**: open sea all round the border. Generation sinks the terrain below sea level in a band near the edges, using a noise-wobbled distance so the coastline is irregular, with beaches where the land meets the water. The sea ring is navigable, so later **boats** can sail round the coast between ports (ports work like stations). The sea is **endless**: beyond the map, a sea surface and sandy seabed are drawn by the shader (generated from the vertex index, no stored geometry) and fade into the sky with distance, so the world has no visible edge. The camera can wander a map's width out to sea, and Home (or the island button) brings it back. Beaches and the seabed use sand.
-- **Water**: a global sea level for now. Every tile whose surface is below it shows water, so a pit dug inland below sea level fills instantly, even if it doesn't connect to the sea. Planned: a per-tile water level filled by **flood fill from the sea** (and from generated lakes). Each terrain edit re-runs a local fill, so a channel dug from the coast floods while a sealed pit stays dry (until we add rain). Rivers come later.
+- **The map is an island**: open sea all round the border. Generation sinks the terrain below sea level in a band near the edges, using a noise-wobbled distance so the coastline is irregular, with beaches where the land meets the water. The sea ring is navigable: **boats** sail round the coast between ports (§4a). The sea is **endless**: beyond the map, a sea surface and sandy seabed are drawn by the shader (generated from the vertex index, no stored geometry) and fade into the sky with distance, so the world has no visible edge. The camera can wander a map's width out to sea, and Home (or the island button) brings it back. Beaches and the seabed use sand.
+- **Water**: a global sea level for now (boats sail on it, §4a). Every tile whose surface is below it shows water, so a pit dug inland below sea level fills instantly, even if it doesn't connect to the sea. Planned: a per-tile water level filled by **flood fill from the sea** (and from generated lakes). Each terrain edit re-runs a local fill, so a channel dug from the coast floods while a sealed pit stays dry (until we add rain). Rivers come later.
 
 ### 3.2 Slopes (the big difference from tyke/Minecraft)
 
@@ -99,6 +99,22 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Orders** ✅: each train has a list of stations to visit in turn. Click a train with the pointer to open its window: status, orders (add, reorder, delete), stop/go, find and remove.
 - **Routing** ✅: a train computes a shortest-distance map to its next station over the track graph (reverse Dijkstra), rebuilt when its target or the track changes. Its choices at junctions, both on open track and when reserving paths through signals, follow that map. It brakes so its head stops at the far end of the platform, loads for a few seconds, then heads for the next order. A path reservation for a station-bound train ends at the platform end. If the next stop is only reachable behind it, the train turns round at the station (so terminus stations work). A train with no orders wanders.
 - Later: loading and unloading actual passengers and cargo, conditional orders, timetables.
+
+## 4a. Ports, airports, boats and planes
+
+Simple vehicles that follow a list of stops, as a base for the different models in GAME-DESIGN.md §7. Ports and airports are both **terminals** (`terminals.rs`): named, with passengers waiting, served by a catchment of 4 tiles like stations, and visited in order by whatever has them in its **orders**. Passenger loading works as for trains: everyone unloads (crediting the nearest town) and up to the capacity boards.
+
+- **Ports** ✅: the port tool needs a flat, free coastal land tile with a berth in the water beside it, in a body of water of at least 200 tiles (no ponds). £2,500. Drawn as a quay, warehouse, crane and a pier into the berth.
+- **Ferries** ✅ (`boats.rs`): placed on water with the ferry tool, 40 passengers, 2.5 tiles/s. A ferry sails a route found by A* over the water grid, ties up for 4 s, then heads for its next port. Position follows the route exactly (so it never crosses land) while the hull swings round at a limited turn rate. It tells you when no sea route exists ("No way to reach X by sea") and retries if the terrain changes. Ferries don't collide.
+- **Airports** ✅: a 10 × 3 tile strip: a runway with a dashed line, an apron, a terminal building and a control tower. £8,000 plus levelling the ground under it (the same corner-height machinery as track, so it's refused where the ground is too steep or something is in the way). Click to build, **O** turns the runway; the preview shows the footprint and the price.
+- **Planes** ✅ (`planes.rs`): placed on an airport with the plane tool, 40 passengers, cruising at 9 tiles/s. Each leg is a precomputed list of waypoints: taxi to the runway end that points at the destination, roll and lift off, climb out, cruise, descend along an approach that lines up with the destination runway (landing from the side facing where it came from), roll out and taxi to the apron. Cruise height is above the highest terrain, and waypoints are lifted to stay clear of hills. Planes don't see each other. A shadow on the ground shows where they are.
+- **Orders** ✅: click a ferry or plane for a window like the train's: status, load, add/reorder/delete stops, stop/go, find, remove. Click a port or airport to rename it and see who's waiting. Bulldozing a terminal removes it; parked planes go with it and others divert or are lost.
+
+**Cost on the web** (measured natively, so allow two to three times that in wasm):
+- The water grid (`sea.rs`) is built on first use, about 7 ms, and patched where terrain edits change a tile (it relabels connected bodies of water, which also makes "can a boat get there at all?" a lookup, so no search ever runs for an impossible route).
+- Route searches run a fixed 3,000 node expansions per frame at most (a map-spanning route takes about 5 ms in total over several frames, 0.5 ms per call), and routes are cached per pair of berths (reversed for the way back), so a ferry line searches once.
+- 200 ferries cost 36 µs a frame and 200 planes 20 µs (`two_hundred_boats_are_cheap`, `two_hundred_planes_are_cheap`). Their props (a few boxes each) go in the dynamic box buffer; ports and airports in the static one.
+- Nothing here runs when nothing sails or flies, apart from the clock.
 
 ## 5. Settlements
 
@@ -253,22 +269,23 @@ Terrain generation was never really started: it only produced random noise for o
 
 ## 13. Hand-off: where things stand (2026-10-12)
 
-### Done in the latest session
-- **Demo mode wired up** (`src/scenario.rs`, `StarcityApp::start_demo`): `--demo` natively, `?demo` on the web. It builds up to 12 rail lines between neighbouring towns, each with a 3-car train shuttling between its two stations, and the status bar says "Demo: N lines, M trains". The old fixed straight/45°/straight track shape never fitted the hills (every candidate hit a slope), so lines are now routed tile by tile with an A* over (tile, heading) using straights and curves (`scenario::route`). On the default 512 map it builds about 4 lines (each town gets at most one, 13 towns, spacing and slopes limit it). There's a test for that, which also runs the trains for two minutes.
-- **Terraforming for rail** (§4.2 "Levelling"): `src/terrain/edit.rs` (`Corners` overlay, `apply`), `rails::plan_terraforming`, `Plan::{terraform, terraform_steps, cost}`. Tested on a generated map (levelled ground takes the track and stays consistent) and on a uniform steep ramp (refused).
-- Notes corrected: the 512 map founds ~13 towns, not 29 (the cap of 24 and the spacing of size/5 apply).
+### Done in the latest sessions
+- **Demo mode** (`--demo` / `?demo`, `scenario.rs`, `StarcityApp::start_demo`): rail lines between neighbouring towns (A* routed round hills), ferry lines between coastal towns (a ferry at each end), and flights between the biggest cities (airports levelled flat beside them, a plane at each end of each route). On the default map: about 4 rail lines, 8 ferries, 10 planes.
+- **Terraforming for rail** (§4.2 "Levelling"): `terrain/edit.rs` (corner overlay, `apply`), `rails::plan_terraforming`, `Plan::cost`. Airports use it too.
+- **Clock, speed and day/night** (§7b): `clock.rs`, `daylight.rs`.
+- **Ports, ferries, airports and planes** (§4a): `terminals.rs`, `sea.rs`, `boats.rs`, `planes.rs`, and `app/craft.rs` for the tools, windows, props and demo.
+- **GAME-DESIGN.md**: the money game: costs, cargo, industries and supply chains, vehicle models in cheap/fast tiers, goals, and the implementation order. Written but not built.
 
 ### Next steps, in order
-1. **Money** (M7 start). Costs already exist (`Plan::cost`) and are shown, but nothing is charged: add a balance in the status bar, charge on build, passenger income by distance, loans. Then give roads the same levelling (`roads::plan` has the same per-tile check) and let stations level their platforms.
-2. **Check road vehicles visually** (native screenshot with `STARCITY_DEMO=towns`), and tune sizes, speeds and colours. Possible follow-ups: buses running between bus stops, trucks to industries, and despawning vehicles that wander far from home. Screenshots in demo mode centre on the biggest town; use `STARCITY_FOCUS` to look at a line.
-3. **Check performance on the web at 512²** with the demo and hundreds of vehicles. The whole scene redraws every frame while anything moves. Look at generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
-4. **Not yet verified live**: passenger loading and unloading (`StarcityApp::handle_arrivals` has no test), the train, station and town windows, the station and train tools in the browser, and the new levelling in the browser (it's only covered by unit tests; terrain re-meshing after a plan goes through `Changes::terrain`).
-5. **Industries and cargo** (M7): coal mines and power stations etc., freight wagons, catchment for cargo.
-6. **Terraforming tools** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1). `terrain::edit::Corners::level` is the building block.
-7. Smaller items: cars and trains tilting on slopes, cloud shadows, settlement-site overlay (M2), save/load.
+1. **Money** (GAME-DESIGN.md §2–3 and plan step 1). Costs already exist (`Plan::cost`, `SitePlan::cost`, shown in the status bar) but nothing is charged: add the balance, charge on build, income by distance for passengers, loans. Roads and stations should level slopes like rail and airports do.
+2. **Cargo and stations**, then **industries** (GAME-DESIGN.md plan steps 2–3), then the **vehicle catalogue**: the ferry, plane, train and road vehicle become the first tier of each mode.
+3. **Check performance on the web** at 512² with the demo, hundreds of vehicles, boats, planes and the day/night cycle, in a real browser. Everything above is measured natively only. The whole scene redraws every frame while anything moves, so watch generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
+4. **Not yet verified live in a browser**: passenger loading and unloading (`handle_arrivals`, `handle_craft_arrivals` have no tests), the train, station, town, ferry, plane and terminal windows, and the station, train, port, airport, ferry and plane tools.
+5. **Terraforming tools** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1). `terrain::edit::Corners::level` is the building block; `Sea::refresh` already follows terrain edits.
+6. Smaller items: cars and trains tilting on slopes, cloud shadows, lit windows at night, planes and ferries avoiding each other, bridges, settlement-site overlay (M2), save/load.
 
 ### Working notes
 - `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page.
-- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_HOUR=22` (start hour), `STARCITY_DEMO=roads|towns`; pass `--demo` for the rail-line scenario.
-- `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, and screenshot runs sometimes take 30 s or more of wall time even though the app only uses about 2 s of CPU, so give them time.
-- Generated seabed at height 0 has no blocks at all, so `World::surface` can return `None` for in-bounds sea tiles; `terrain::edit` treats those as flat at height 0.
+- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_HOUR=22` (start hour), `STARCITY_DEMO=roads|towns`; pass `--demo` for the demo scenario. With `STARCITY_DEMO=towns` the camera centres on the biggest town, which is where the demo's first airport and port are.
+- `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, and screenshot runs sometimes take 30 s or more of wall time even though the app only uses about 2 s of CPU, so give them time (large `STARCITY_SHOT_FRAME` values can take minutes).
+- Generated seabed at height 0 has no blocks at all, so `World::surface` can return `None` for in-bounds sea tiles; `terrain::edit` and `sea` treat those as flat at height 0 / water.

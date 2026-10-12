@@ -1,4 +1,3 @@
-#![allow(dead_code)] // Wired up when boats land.
 //! The sea as a navigation grid, and the pathfinding boats use on it.
 //!
 //! A tile is water if its surface is below sea level. [`Sea`] keeps one flag
@@ -225,10 +224,6 @@ impl Pathfinder {
             return;
         }
         self.queue.push_back(key);
-    }
-
-    pub fn is_idle(&self) -> bool {
-        self.job.is_none() && self.queue.is_empty()
     }
 
     pub fn pending(&self) -> usize {

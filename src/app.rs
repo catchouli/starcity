@@ -1,3 +1,6 @@
+mod craft;
+
+use crate::boats::Boats;
 use crate::camera::Camera;
 use crate::clock::{Clock, Speed};
 use crate::clouds;
@@ -5,9 +8,12 @@ use crate::daylight::{self, Light};
 use crate::input::PhysicalKeys;
 use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
+use crate::planes::Planes;
 use crate::render::{BoxInstance, BoxLayer, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::sea::Sea;
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::stations::{StationId, Stations};
+use crate::terminals::{TerminalId, Terminals};
 use crate::terrain::generation::{self, GenParams};
 use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::towns::{TownId, Towns};
@@ -15,10 +21,11 @@ use crate::trains::{SpawnError, Trains};
 use crate::ui::{self, Tool, UiState, win95};
 use crate::vehicles::{Kind, Vehicles};
 use crate::{rails, roads};
+use craft::Craft;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use glam::{Mat4, Vec2, Vec3};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use web_time::Instant;
 
 /// Wind speed and direction, in tiles per second.
@@ -67,6 +74,21 @@ pub struct StarcityApp {
     towns: Towns,
     vehicles: Vehicles,
     vehicles_moving: bool,
+    /// The water grid; built the first time boats or ports need it.
+    sea: Option<Sea>,
+    sea_ms: f32,
+    terminals: Terminals,
+    boats: Boats,
+    planes: Planes,
+    selected_craft: Option<Craft>,
+    selected_terminal: Option<TerminalId>,
+    craft_moving: bool,
+    /// Which way the airport tool lays its runway (O toggles).
+    runway_along_x: bool,
+    /// Price or reason shown in the status bar for the port, airport, boat and plane tools.
+    site_hint: Option<String>,
+    /// Terrain tiles levelled before the first frame (demo airports), to re-mesh.
+    demo_levelled: Vec<(i32, i32)>,
     /// Buildings or stations changed, so the static prop boxes need rebuilding.
     static_changed: bool,
     selected_town: Option<TownId>,
@@ -156,6 +178,17 @@ impl StarcityApp {
             towns: Towns::empty(1, 1),
             vehicles: Vehicles::new(1),
             vehicles_moving: false,
+            sea: None,
+            sea_ms: 0.0,
+            terminals: Terminals::default(),
+            boats: Boats::default(),
+            planes: Planes::default(),
+            selected_craft: None,
+            selected_terminal: None,
+            craft_moving: false,
+            runway_along_x: true,
+            site_hint: None,
+            demo_levelled: Vec::new(),
             static_changed: false,
             selected_town: None,
             town_clock: 0.0,
@@ -185,6 +218,11 @@ impl StarcityApp {
         app.regenerate(rs);
         if demo {
             app.start_demo();
+            let tiles = std::mem::take(&mut app.demo_levelled);
+            app.remesh_tiles(rs, &tiles);
+            if let Some(sea) = &mut app.sea {
+                sea.refresh(&app.world, &tiles);
+            }
         }
         let c = app.params.size as f32 / 2.0;
         app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
@@ -216,6 +254,9 @@ impl StarcityApp {
                 self.camera.focus.x = town.centre.0 as f32 + 0.5;
                 self.camera.focus.z = town.centre.1 as f32 + 0.5;
             }
+        }
+        if DevTools::demo().as_deref() == Some("tools") {
+            self.dev_try_sea_tools();
         }
         if DevTools::demo().as_deref() == Some("roads") {
             let mut built = Vec::new();
@@ -328,7 +369,72 @@ impl StarcityApp {
         self.static_changed = true;
         self.props_changed = true;
         self.track_version += 1;
-        self.message = Some((format!("Demo: {} lines, {running} trains", lines.len()), 10.0));
+        let (ports, boats, airports, planes) = self.demo_sea_and_air();
+        log::info!(
+            "demo: {ports} ports, {} boats, {airports} airports, {} planes",
+            self.boats.list.len(),
+            self.planes.list.len()
+        );
+        self.message = Some((
+            format!("Demo: {} rail, {boats} ferries, {planes} planes", lines.len()),
+            10.0,
+        ));
+        let _ = running;
+    }
+
+    /// Dev check: drives the port, airport, ferry and plane tools the way the
+    /// mouse would, and prints what they said.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn dev_try_sea_tools(&mut self) {
+        let mut done = Vec::new();
+        for tool in [Tool::Port, Tool::Airport, Tool::Boat, Tool::Plane] {
+            // Hover across the map until the tool is happy, then click.
+            'scan: for z in (8..self.world.size_z as i32 - 8).step_by(3) {
+                for x in (8..self.world.size_x as i32 - 8).step_by(3) {
+                    let tile = (x, z);
+                    self.hover_tile = Some(tile);
+                    let before = (self.terminals.list.len(), self.boats.list.len(), self.planes.list.len());
+                    let hover = self.sea_tool_hover(tool);
+                    let hint = self.site_hint.clone().unwrap_or_default();
+                    if hover.is_some_and(|h| h.kind == HighlightKind::Cursor) {
+                        let terrain = self.sea_tool_click(tool, tile, 0.0);
+                        let after = (self.terminals.list.len(), self.boats.list.len(), self.planes.list.len());
+                        if after != before {
+                            let line = format!(
+                                "{tool:?} at {tile:?}: \"{hint}\" -> {after:?}, levelled {} tiles",
+                                terrain.len()
+                            );
+                            done.push(line);
+                            self.demo_levelled.extend(terrain);
+                            break 'scan;
+                        }
+                    }
+                }
+            }
+        }
+        // Give the new ferry and plane orders, as the window would.
+        if let (Some(b), Some(p)) = (
+            self.boats.list.first().map(|b| b.id),
+            self.planes.list.first().map(|p| p.id),
+        ) {
+            let ports: Vec<_> = self
+                .terminals
+                .of_kind(crate::terminals::Kind::Port)
+                .map(|t| t.id)
+                .collect();
+            let airports: Vec<_> = self
+                .terminals
+                .of_kind(crate::terminals::Kind::Airport)
+                .map(|t| t.id)
+                .collect();
+            self.boats.set_orders(b, crate::terminals::Orders::new(ports));
+            self.planes.set_orders(p, crate::terminals::Orders::new(airports));
+        }
+        for line in &done {
+            eprintln!("tools: {line}");
+        }
+        let names: Vec<_> = self.terminals.list.values().map(|t| t.name.clone()).collect();
+        eprintln!("tools: {} of 4 tools worked; terminals: {names:?}", done.len());
     }
 
     fn regenerate(&mut self, rs: &RenderState) {
@@ -356,6 +462,12 @@ impl StarcityApp {
         self.selected_town = None;
         self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed);
         self.vehicles = Vehicles::new(self.params.seed as u64);
+        self.sea = None;
+        self.terminals = Terminals::default();
+        self.boats = Boats::default();
+        self.planes = Planes::default();
+        self.selected_craft = None;
+        self.selected_terminal = None;
         self.props_changed = true;
         self.static_changed = true;
         self.plan = Plan::default();
@@ -479,6 +591,15 @@ impl StarcityApp {
                 self.props_changed |= self.signals.remove(t);
             }
         }
+        let mut sea_terrain = Vec::new();
+        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane) {
+            if let (Some(t), true) = (self.hover_tile, response.clicked_by(primary)) {
+                let now = ctx.input(|i| i.time);
+                sea_terrain = self.sea_tool_click(tool, t, now);
+            }
+        } else {
+            self.site_hint = None;
+        }
         if !matches!(
             tool,
             Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail | Tool::Station
@@ -495,6 +616,8 @@ impl StarcityApp {
                 changes = self.apply_tool(t, t);
             }
         }
+
+        changes.terrain.extend(sea_terrain);
 
         let (plan, network) = match (tool, self.drag_start, self.last_hover_tile) {
             (Tool::Road, Some(a), Some(b)) => (
@@ -563,6 +686,7 @@ impl StarcityApp {
             }
             // While dragging a road or track, the preview shows where it goes.
             Tool::Road | Tool::Rail | Tool::Station if self.drag_start.is_some() => None,
+            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane => self.sea_tool_hover(tool),
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -595,11 +719,19 @@ impl StarcityApp {
         self.selected_train = best.map(|(_, id)| id);
         self.selected_station = None;
         self.selected_town = None;
+        self.selected_craft = None;
+        self.selected_terminal = None;
         if best.is_none() {
+            self.selected_craft = self.pick_craft(view_proj, rect, pos);
+        }
+        if best.is_none() && self.selected_craft.is_none() {
             if let Some(t) = self.hover_tile {
-                self.selected_station = self.stations.at(t);
-                if self.selected_station.is_none() {
-                    self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
+                self.selected_terminal = self.terminals.at(t);
+                if self.selected_terminal.is_none() {
+                    self.selected_station = self.stations.at(t);
+                    if self.selected_station.is_none() {
+                        self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
+                    }
                 }
             }
         }
@@ -688,8 +820,11 @@ impl StarcityApp {
         if what != Clear::Roads && self.trains.remove_on_tiles(&tiles) {
             self.props_changed = true;
         }
-        if what == Clear::Everything && self.towns.demolish(a, b) {
-            self.static_changed = true;
+        if what == Clear::Everything {
+            if self.towns.demolish(a, b) {
+                self.static_changed = true;
+            }
+            self.remove_terminals(a, b);
         }
         changes
     }
@@ -739,6 +874,7 @@ impl StarcityApp {
             let people = self.towns.population_near(&station.tiles) as f32;
             station.waiting = (station.waiting + people * 0.01).min(500.0);
         }
+        self.tick_terminals();
     }
 
     /// Trains that have just pulled in: unload everyone, then load from the platform.
@@ -766,6 +902,9 @@ impl StarcityApp {
             self.track_version += 1;
         }
         self.remesh_tiles(rs, &changes.terrain);
+        if let Some(sea) = &mut self.sea {
+            sea.refresh(&self.world, &changes.terrain);
+        }
         self.mark_infra(&changes.infra);
         self.update_props(rs);
     }
@@ -789,6 +928,7 @@ impl StarcityApp {
         if std::mem::take(&mut self.static_changed) {
             let mut boxes = station_boxes(&self.world, &self.rails, &self.stations);
             boxes.extend(building_boxes(&self.world, &self.towns));
+            boxes.extend(craft::terminal_boxes(&self.world, &self.terminals));
             self.renderer.set_boxes(&rs.device, &rs.queue, BoxLayer::Static, &boxes);
             self.scene_dirty = true;
         }
@@ -796,6 +936,8 @@ impl StarcityApp {
             let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
             boxes.extend(train_boxes(&self.world, &self.trains));
             boxes.extend(vehicle_boxes(&self.world, &self.vehicles));
+            boxes.extend(craft::boat_boxes(&self.world, &self.boats));
+            boxes.extend(craft::plane_boxes(&self.world, &self.planes));
             self.renderer
                 .set_boxes(&rs.device, &rs.queue, BoxLayer::Dynamic, &boxes);
             self.scene_dirty = true;
@@ -846,6 +988,7 @@ impl StarcityApp {
             );
             painter.galley(r.min + egui::vec2(4.0, 2.0), galley, egui::Color32::BLACK);
         }
+        self.terminal_labels(&painter, view_proj, rect);
     }
 
     /// The selected train's window: status, orders, stop/go and remove.
@@ -1150,6 +1293,9 @@ impl StarcityApp {
             if i.key_pressed(Key::G) {
                 self.ui.grid = !self.ui.grid;
             }
+            if i.key_pressed(Key::O) {
+                self.runway_along_x = !self.runway_along_x;
+            }
             if i.key_pressed(Key::N) {
                 self.ui.day_night = !self.ui.day_night;
             }
@@ -1270,6 +1416,15 @@ impl StarcityApp {
             let s = self.renderer.stats;
             ui.label(format!("{:.1} ms/frame  ·  {:?}", self.frame_ms, info.backend));
             ui.label(format!("scene renders: {}", self.scene_renders));
+            ui.label(format!(
+                "boats {} · planes {} · sea grid {:.1} ms · routes cached {} · searches pending {} (last step {} expansions)",
+                self.boats.list.len(),
+                self.planes.list.len(),
+                self.sea_ms,
+                self.boats.cached_routes(),
+                self.boats.searches_pending(),
+                self.boats.last_expansions()
+            ));
             ui.label(format!(
                 "chunks {}/{}  ·  quads {}/{}",
                 s.chunks_drawn, s.chunks_total, s.quads_drawn, s.quads_total
@@ -1398,6 +1553,12 @@ impl StarcityApp {
             text.clone()
         } else if self.ui.speed == Speed::Paused {
             "Paused (Space to resume)".to_string()
+        } else if let Some(hint) = self
+            .site_hint
+            .as_ref()
+            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane))
+        {
+            hint.clone()
         } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {
             "Click plain track to place a train".to_string()
         } else if let (Tool::Signal, Some(t)) = (self.ui.tool, self.hover_tile) {
@@ -1473,7 +1634,7 @@ impl eframe::App for StarcityApp {
         let sim_dt = (frame_dt * self.ui.speed.factor()).min(MAX_SIM_PER_FRAME);
         self.clock.tick(sim_dt);
         let steps = (sim_dt / MAX_SIM_STEP).ceil() as u32;
-        let (mut trains_moved, mut vehicles_moved) = (false, false);
+        let (mut trains_moved, mut vehicles_moved, mut craft_moved) = (false, false, false);
         let mut changed = Vec::new();
         for _ in 0..steps {
             let step = sim_dt / steps as f32;
@@ -1482,15 +1643,18 @@ impl eframe::App for StarcityApp {
                 .update(step, &self.rails, &self.signals, &self.stations, self.track_version);
             self.tick_towns(step);
             vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
+            craft_moved |= self.step_craft(step);
             changed.extend(self.sim.advance(&mut self.world, step));
         }
         self.last_time = now;
         self.trains_moving = trains_moved;
         self.vehicles_moving = vehicles_moved;
-        if self.trains_moving || self.vehicles_moving {
+        self.craft_moving = craft_moved;
+        if self.trains_moving || self.vehicles_moving || self.craft_moving {
             self.props_changed = true;
         }
         self.handle_arrivals();
+        self.handle_craft_arrivals();
         self.remesh_tiles(&rs, &changed);
         self.update_light(now, frame_dt);
 
@@ -1502,6 +1666,8 @@ impl eframe::App for StarcityApp {
         self.train_window(&ctx);
         self.town_window(&ctx);
         self.station_window(&ctx);
+        self.craft_windows(&ctx);
+        self.terminal_window(&ctx);
 
         let mut scene_changed = false;
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -1569,7 +1735,13 @@ impl eframe::App for StarcityApp {
         // Keep frames coming only while something is moving (including egui's
         // smoothed scrolling, which spreads one wheel tick over several frames).
         let keys_held = self.physical_keys.any_down() || ctx.input(|i| !i.keys_down.is_empty());
-        if keys_held || scene_changed || self.scene_dirty || self.trains_moving || self.vehicles_moving {
+        if keys_held
+            || scene_changed
+            || self.scene_dirty
+            || self.trains_moving
+            || self.vehicles_moving
+            || self.craft_moving
+        {
             ctx.request_repaint();
         } else if clouds_visible {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLOUD_FRAME_SECONDS));
