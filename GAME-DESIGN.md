@@ -22,8 +22,9 @@ The tone to aim for is "one more line": simple rules that interlock, never a spr
 
 ## 2. Time and money
 
-- **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000, 08:00. One game hour is 2 seconds of simulation, so at normal speed a day takes 48 s, a week about 5½ minutes, a year about 4¾ hours. The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*, the clock included: at 8× a day is 6 s and a year about 36 minutes. The date and time show in the toolbar beside the speed buttons and drive the day/night light (DESIGN.md §7a).
-- **Economy time is separate from the calendar.** The economy is paid per second of simulated time, so its rules don't care what the calendar says. In this document, *a tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s* (6 minutes at 1×, 45 s at 8×). That's why a year of running costs and a year of income stay in proportion at any game speed, and why the calendar can be long enough for a day/night cycle to look good. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
+- **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000. **One calendar day is one second of simulation**, so at normal speed a month is about 30 s and a year about 6 minutes, and the game runs 2000 to 2050 in about **5 hours at 1×** (about 76 minutes at 4×, 38 at 8×). The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*: the calendar, vehicles, towns, the light.
+- **Time of day is separate from the calendar.** The light (DESIGN.md §7b) cycles once every 120 seconds of simulation, whatever the date: slow enough to look good, and independent of the calendar so the calendar can run at the pace a 50-year game needs. The toolbar shows the date with a sun or moon beside it for the time of day, next to the speed buttons.
+- **The economy uses the same time.** *A tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s*, close to the calendar's own month and year, so "monthly" and "yearly" in this document line up with what the date shows. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
 - **Starting position:** £100,000 cash, a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
 - **Income:** paid on delivery, to the company, when cargo is unloaded at a station that accepts it. See §3.
 - **Expenses:**
@@ -329,13 +330,13 @@ Keying this to the calendar is deliberate. The pace problem it creates is in §1
 
 ### 10.3 Chrome: the look of the future
 
-Visuals shift with a single **era value** from 0 (2000–2025) rising to 1 (2050). A little chrome starts creeping in from 2025, and everything is extremely chrome by 2050.
+The world turns chrome gradually: a little from 2025, extremely by 2050. It's built (✅) from three parts, all driven by data an artist controls.
 
-- **Props** (vehicles, buildings, stations, terminals): boxes already carry a colour; a *gloss* amount joins it (the alpha byte, which today only marks unshaded lamps, becomes lamp bit plus gloss). The shader adds a fake **environment reflection**: look up an analytic sky gradient (horizon to zenith, plus a bright sun streak) with the reflected view direction, mix it in by the gloss and the era, and add a sharp highlight. No textures, no extra passes, only box fragments pay.
-- **Per era:** dot-com boxes are matte (gloss 0); from 2025 new models and tall buildings get a little gloss; by 2040 mirrored glass towers and fully chromed vehicles; the sea gets a brighter sky reflection and the fog/sky palette cools towards steel-blue and white.
-- **The UI follows**: the Win95 theme interpolates through eras by year, like the desktops of the time: grey bevels (2000), a smoother blue-and-green Luna look (2001–2006), glossy glass (2007–2012), flat (2013–2024), then brushed-metal bevels and gradient chrome title bars (2025+), until the whole interface is polished chrome by 2050. Layout never changes, only colours, bevel styles and title bars (`ui/win95.rs` already centralises them), so muscle memory survives.
-- **Day/night** (DESIGN.md §7b) gets chrome too: highlights catch the low sun, and late eras get lit windows and glowing vehicle lines at night.
-- **Cost on the web:** one extra uniform (the era value) and a few lines in the box fragment shader. Terrain, water and clouds are unchanged, so the cost scales with the number of props on screen, which is already budgeted.
+- **Models carry their own look** ✅. Props are glTF models (`assets/models/`, authored in Blender, see `assets/models/README.md`), and a material's standard glTF **metallic** value is what makes it chrome: the shader mirrors the sky gradient (horizon to zenith, ground below, a bright streak where the sun is) in proportion to *metallic*, softened by *roughness*; *emissive* materials glow (windows, lane lights, engine strips); materials named `Paint` take each vehicle's colour. Nothing about chrome is in code: a new generation is a new file whose materials are more metallic. Which generation is in use is by the years written into each file (§10.7).
+- **Roads and track follow a single era value** ✅ (`era::chrome`: 0 until 2025, 1 by 2050): asphalt cools to a glassy steel-blue with white kerbs and glowing cyan lane lines, ballast becomes a pale guideway with glowing magnetic strips. One uniform and a few lines in the terrain shader.
+- **The UI follows** (planned): the Win95 theme interpolates through the desktops of the time: grey bevels (2000), a smoother blue-and-green Luna look (2001–2006), glossy glass (2007–2012), flat (2013–2024), then brushed-metal bevels and gradient chrome title bars (2025+), until the whole interface is polished chrome by 2050. Layout never changes, only colours, bevel styles and title bars (`ui/win95.rs` already centralises them), so muscle memory survives.
+- **Day/night** (DESIGN.md §7b) already shows it: chrome picks up the sunset, emissive strips glow at night, and the sky reflected in a chrome orb changes with the time of day. Later: lit windows on every era's buildings.
+- **Cost on the web:** one extra uniform and a few shader lines; the model fragment shader is a gradient lookup, with no textures, no extra passes and no per-object work. Terrain, water and clouds are unchanged.
 
 ### 10.4 Space
 
@@ -358,10 +359,75 @@ By 2048 a megaproject, the **Convergence Array**, becomes available to build: a 
 
 ### 10.6 Implementation notes
 
-- `clock.rs` already runs from 2000 (`START_YEAR`). Add `year()`, then an `Era` helper mapping a date to the 0–1 chrome value and to the era name shown in the UI.
-- The model table (§7, `Model`) gains `intro: i32`, `retire: i32`, and a per-game `shift: i8`; availability is a pure function of the date.
-- The gloss/era uniform goes in `Globals` next to the light (`daylight::Light` is the model: a pure function of the date, applied in one place).
+- `clock.rs` runs from 2000 and `era.rs` maps a year to the era name and the 0–1 chrome value ✅.
+- Vehicle models for sale (§7) will take their introduction and retirement years from the model files too (`from` / `to`), plus a per-game random shift of ±3 years; availability is a pure function of the date.
+- The era value is a uniform in `Globals` next to the light (`daylight::Light` is the model: a pure function of the date, applied in one place); `era.rs` holds the timeline.
 - Space uses the existing terminal and orders machinery (`terminals.rs`): a `Site::Spaceport`, a `rockets.rs` modelled on `planes.rs` (a precomputed list of waypoints for lift-off and landing, plus a timed absence), and off-map destinations as entries in the industry table with no tile.
+
+### 10.7 Towns that change with the years ✅
+
+Buildings keep the look of the year they were built in, so the old ones stay while new ones go up in the current style, and over time the old stock is replaced. The world is a record of its own history.
+
+- **Every building has a build year.** The towns that exist at the start have grown over the 30 years before 2000, so their buildings span 1970–2000, with the oldest nearest the centre (concrete blocks, brick, flat roofs).
+- **Models are chosen by year, floors and footprint**, from metadata in each file (`from`, `to`, `min_floors`, `max_floors`, `tiles_x`, `tiles_z`; see `assets/models/README.md`). New houses and towers use the current generation. If no model suits (an artist hasn't made a 2031 house yet), the nearest generation is used, so the game never has a hole in it.
+- **Redevelopment:** roughly every building is rebuilt once in 20 years (a steady trickle: a town of 100 buildings has one replaced about every 73 seconds at 1×), but only if the replacement would look different, and only once it's 12 years old. A rebuilt building takes the style of that year.
+- **Merging into megastructures:** once there are models with bigger footprints (2×2 landmark towers and orbs from about 2036, 3×3 orbs from 2042), a tall building can be redeveloped together with its neighbours, as long as the whole area is flat land at one height, with no road or track, and every tile is free or a small building of the same town. Population counts once per building and scales with area (a 3×3 orb with 12 floors houses 864 people), so the late-game cities are dense and tall, with whole districts of massive chrome orbs. Orbs can't cover a road, so cities of orbs form where towns have wide blocks; letting redevelopment close a quiet street is a good later addition.
+- **Each year tall buildings get taller** (the floor limit rises from 8 to 14), and Towns grow faster the better they're served.
+- **Seeking time**: the debug window (F3) has a date slider from 2000 to 2050. Moving it forward plays the years in between (growth, redevelopment, fleets); moving it back re-ages whatever was built later, so the world looks as it did then. Developers can also start at a year with `STARCITY_YEAR=2046`.
+
+### 10.8 Vehicles and buildings by era
+
+Each family shows what real-world designs the placeholders stand for (late 20th century up to now, 2026) and the extrapolation after. Artists replace the placeholder file for the family; suggested extra models are listed so there's more than one look per generation. File names are `assets/models/<folder>/<name>.glb`.
+
+| Family | 1990s (still around in 2000) | 2000s | 2010s | 2020s (to 2026) | 2030s | 2040s |
+|---|---|---|---|---|---|---|
+| **Cars** (`vehicles/car_*`) | Boxy hatchbacks, saloons and estates, mostly in silver, red, blue | Rounder bodies, minivans, the first SUVs | Crossovers, hybrids, LED lights | Electric: smooth, closed grilles, light bars, charging ports | Autonomous pods with glass canopies, no steering wheel | Chrome capsules, glowing underlines, hovering a hand above the road |
+| **Buses** (`vehicles/bus_*`) | Step-entrance single-deckers, bright liveries | Low-floor buses with big windows; bendy buses on trunk routes | Diesel-hybrids with roof battery boxes, double-deckers in cities | Battery-electric with pantograph chargers, destination LEDs | Cab-less autonomous shuttles | Chrome pod-buses with glowing skirts |
+| **Trucks** (`vehicles/truck_*`) | Rigid box lorries and cab-over tractors | Aerodynamic cabs, curtain-siders | Electric delivery vans (the parcels boom) | Electric heavy trucks, platooning convoys | Autonomous haulers with a sensor bar, no cab | Chrome maglev haulers |
+| **Trains** (`trains/loco_*`, `coach_*`) | Diesel-electric locos with yellow noses, push-pull coaches, a diesel high-speed set | Electric multiple units, the first bullet-nose high-speed trains | Sleek 300 km/h electrics, battery-hybrid regional units | Hydrogen trains, driverless metros | Maglev: chrome noses, glowing skirts | Hyperloop pods: chrome capsules in a tube |
+| **Ferries** (`boats/ferry_*`) | Roll-on/roll-off car ferries, hovercraft | Fast catamarans | Hybrid ferries | Battery ferries, the first foiling ones | Hydrofoils, autonomous | Chrome skimmers, autonomous |
+| **Aircraft** (`planes/plane_*`) | Twin turboprop commuters, narrow-body jets | Double-deck giants, regional jets | Composite airliners with raked wingtips | Electric commuters, eVTOL air taxis | Supersonic business jets, blended-wing airliners | Hypersonic chrome planes; the first rockets (§10.4) |
+| **Houses** (`buildings/house_*`, `pod_*`) | Brick semis, flat-roofed bungalows, red-tile suburbia | Pitched-roof estates, conservatories | Cubic white boxes, timber cladding | Solar roofs, charging porches | Rounded pods, green roofs | Chrome domes with glowing doors |
+| **Mid-rise** (`block_*`) | Concrete flats, brutalist blocks | Rendered flats with balconies | White-and-glass blocks, solar trim | Metal-panel blocks | Steel and chrome-trimmed blocks | Chrome blocks with gold trim |
+| **Towers** (`office_*`, `tower_*`) | Steel-and-glass offices | Glass curtain-wall towers | Taller glass towers with rooftop solar | Chrome-shafted towers | Twisted chrome landmarks (2×2) | Round chrome towers with glowing bands, orbs (2×2, 3×3) |
+| **Stations, ports, airports** (`props/station_*`, `terminals/*`) | Brick station buildings, concrete platforms, working cranes | Same, refurbished | Glass canopies | Metal and glass | Chrome terminals with glowing platform edges | Domed chrome terminals |
+
+Suggested models to add (each is one file with its own years): a bendy bus (2002–2018), a double-decker (2005–2030), a minivan (2000–2015), a tram (2010+, once tram track exists), a battery-electric loco with a pantograph (2018–2030), a tilting high-speed train (2005–2020), a container ship and a car carrier (2000+, for the cargo game), an air taxi eVTOL (2028–2045), a rocket (2032+), and for buildings a second and third variant of each generation so streets vary.
+
+### 10.9 Content between 2000 and 2050
+
+What the player meets along the way. Years are when a thing first appears, with a random shift of a few years per game, so the future isn't a calendar to memorise.
+
+**Events** show as Win95-style headline pop-ups ("**Broadband arrives in Ashford**", "**Oil price shock: running costs up for two years**"), each with a simple, visible effect and usually a decision to make:
+
+| When | Event | Effect |
+|---|---|---|
+| 2001 | Dot-com bust | Office demand dips for a year: towers grow more slowly |
+| 2000s | Broadband spreads | Towns with fibre grow a little faster; commuter passengers fall about 5%, goods rise |
+| 2003 | Low-cost airlines | Airport passenger demand up; short flights pay less |
+| 2005–2012 | Fuel price spikes | Diesel and aviation running costs up 30% for a couple of years; nudges players towards electric |
+| 2008 | Financial crisis | All income down 20% for 18 months; loan interest up: a test for over-borrowed players |
+| 2007+ | Smartphones | Journey planners: station ratings up where there is a good service |
+| 2010s | E-commerce | Parcels and mail grow; goods demand up; a new cargo, Parcels |
+| 2020 | The pandemic | Passenger demand falls 60% for a year and recovers to about 90% for good (remote work); freight up 20% |
+| 2020s | Low-emission zones | Diesel vehicles are banned from a town's centre; electric ones aren't |
+| 2024+ | First autonomous pilots | Autonomous road vehicles appear for sale |
+| 2030+ | Sea levels rise | Coasts flood slowly: low coastal tiles become water (the sea grid already follows terrain edits), threatening ports, coastal stations and shore towns; seawalls become a thing to buy |
+| 2030+ | Storms and floods | Random events ground flights, close a route or flood a low station for a month |
+| 2032 | First sub-orbital flights | Spaceports available (§10.4) |
+| 2035 | Fusion pilot plants | A new power industry; towns near it boom |
+| 2038+ | Automation dividend | Running costs fall about 40%; driver-less vehicles; towns shed some commuter traffic |
+| 2045 | "Convergence" announced | The final megaproject opens (§10.5) |
+
+**New industries and cargo along the way** (in addition to §5): *Container port* (2000), *Wind farm* (2005, power), *Biofuel plant* (2008, grain to fuel), *Data centre* (2005+, consumes power, boosts nearby towns), *Logistics hub* (2010+, goods to parcels), *Solar farm* (2012), *Lithium mine and Battery gigafactory* (2015–2020, lithium to batteries, which electric vehicles and the 2030s power industries need), *Hydrogen plant* (2022), *Vertical farm* (2020+, inside towns, food in small amounts), *Fusion plant* (2035), *Nano-fabricator* and the space chain (§10.4, 2038+). New cargo: Containers, Parcels, Lithium, Batteries, Hydrogen.
+
+**Technology and policy:**
+- **Electrification:** electric vehicles need chargers (a charging depot building, cheap, at a stop); electric trains need overhead wire; maglev needs its own track. These are the new things to build each era, so the player is always laying something new.
+- **Subsidies and carbon tax:** from the 2020s the government subsidises electric vehicles in some towns and taxes diesel in others, shifting what pays.
+- **Automation:** autonomous vehicles cost more but need no drivers (lower running costs); an early adopter bonus.
+- **Mega-cities:** from the 2030s merged towns can become a *megacity* (population 20,000+), with its own demands (an orbital link by 2045).
+
+**Look and feel:** the toolbar icons, window chrome and cursor shift through the desktops of the time (§10.3); the news ticker uses period language; the music (later) moves from synth pop through electronic to ambient. Each era has a one-line tagline in the debug window and a small banner on entering it.
 
 ## 11. Implementation plan
 
@@ -407,7 +473,7 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 
 ## 12. Open questions
 
-1. **Pacing of the 50-year arc.** Eras are keyed to the calendar (§10), and the calendar is tied to the day/night cycle: a day is 48 s at 1×, so a year is about 4¾ hours at 1× and about 36 minutes at 8×. Reaching 2050 would take around 30 hours at 8×, far more than a long session (OpenTTD's default is about 13 minutes a year). Options: (a) a shorter calendar year, for example 12 months of 10 days (about 12 minutes a year at 8×, 10 hours to 2050); (b) faster top speeds (16×, 32×) that the day/night cycle already mutes; (c) decouple the visual day/night from the calendar, so the calendar can run at 1 day per 2–3 s while the light cycles over a minute or two; (d) key era progress to the company (value, years of play) not the date. Recommendation: **(c)**, with the clock showing the date only plus a sun/moon indicator, and the year around 8–10 minutes at 1×, which gives 2050 in about 7–8 hours at normal speed and well under that with the speed buttons. This is a decision to make before building eras.
+1. ~~**Pacing of the 50-year arc.**~~ Decided: the calendar runs a day a second and the light cycles separately (§2). A game to 2050 is about 5 hours at normal speed. Still to decide: whether the default speed should be 2× (so a run to 2050 is under 3 hours) and whether to add 16×.
 2. **Eras: all models from day one, or by year?** Settled by §10: by year, with a per-game shift.
 2. **Distance: straight-line or route length?** Straight-line stops players padding routes but rewards the shortest track; route length rewards winding lines. Proposed: straight-line.
 3. **Competing companies.** The market-share split (§5.2) would let AI companies exist; do we want them, or is the split just a rule between a player's own stations?

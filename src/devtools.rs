@@ -5,6 +5,8 @@
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
 //! - `STARCITY_HOUR=22`: the game starts at this hour of the day (default 8).
+//! - `STARCITY_YEAR=2045`: fast-forward the game to this year before the first frame
+//!   (towns grow and get redeveloped, vehicle fleets turn over), to see the future.
 //! - `STARCITY_ZOOM=30`: initial zoom (visible height in tiles at the focus).
 //! - `STARCITY_FOCUS=dx,dz`: move the camera focus from the map centre.
 
@@ -36,6 +38,10 @@ impl DevTools {
 
     pub fn hour() -> Option<f64> {
         std::env::var("STARCITY_HOUR").ok()?.parse().ok()
+    }
+
+    pub fn year() -> Option<i32> {
+        std::env::var("STARCITY_YEAR").ok()?.parse().ok()
     }
 
     pub fn zoom() -> Option<f32> {

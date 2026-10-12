@@ -1,6 +1,7 @@
 //! 3D scene rendering with plain wgpu into an offscreen texture that egui displays.
 
 use crate::daylight::Light;
+use crate::models::{ModelId, ModelVertex, Models};
 use crate::terrain::BLOCK_HEIGHT;
 use crate::terrain::mesh::{ChunkMesh, Vertex};
 use eframe::egui;
@@ -46,18 +47,45 @@ pub struct Globals {
     pub sun_color: [f32; 4],
     /// Ambient light tint.
     pub ambient: [f32; 4],
+    /// Era: how chrome roads and track look (x).
+    pub era: [f32; 4],
 }
 
-/// An instanced box (signals, and later trains and other props).
+/// One placed model: where it stands, which way it faces, how big it is, and
+/// its tint. Drawn with the mesh of the model it's paired with in `set_models`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct BoxInstance {
-    pub center: [f32; 3],
-    pub half: [f32; 3],
-    /// Rotation about the vertical axis, in radians.
+pub struct ModelInstance {
+    /// Origin of the model in the world (x, height, z).
+    pub pos: [f32; 3],
+    /// Rotation about the vertical axis, in radians: `atan2(-dz, dx)` for a
+    /// model whose front is +X to face along (dx, dz).
     pub yaw: f32,
-    /// sRGB colour; alpha 255 marks an unshaded lamp.
-    pub color: [u8; 4],
+    pub scale: f32,
+    /// sRGB tint, applied to the model's "Paint" materials. Alpha 255 darkens
+    /// the whole model (a wreck).
+    pub tint: [u8; 4],
+}
+
+impl ModelInstance {
+    pub fn at(pos: [f32; 3], yaw: f32) -> ModelInstance {
+        ModelInstance {
+            pos,
+            yaw,
+            scale: 1.0,
+            tint: [255, 255, 255, 0],
+        }
+    }
+
+    pub fn tinted(mut self, rgb: [u8; 3]) -> ModelInstance {
+        self.tint = [rgb[0], rgb[1], rgb[2], self.tint[3]];
+        self
+    }
+
+    pub fn wrecked(mut self) -> ModelInstance {
+        self.tint[3] = 255;
+        self
+    }
 }
 
 /// Per-frame cloud state.
@@ -163,15 +191,30 @@ pub struct SceneRenderer {
     pub preview_is_rail: bool,
     /// Endless ocean parameters (see `Globals::ocean`); size 0 hides it.
     pub ocean: [f32; 4],
-    /// Instanced boxes, one buffer per `BoxLayer`.
-    boxes: [Option<(wgpu::Buffer, u32)>; 2],
+    /// How chrome roads and track look, 0 to 1 (see `era.rs`).
+    pub era_chrome: f32,
+    /// Every model's mesh, in one vertex and one index buffer.
+    model_vertices: Option<wgpu::Buffer>,
+    model_indices: Option<wgpu::Buffer>,
+    model_ranges: Vec<ModelRange>,
+    /// Placed models, one instance buffer and draw list per `ModelLayer`.
+    placed: [Option<wgpu::Buffer>; 2],
+    draws: [Vec<(ModelId, u32, u32)>; 2],
 }
 
-/// Boxes that rarely change (buildings, stations) are kept apart from ones
+/// Where a model's triangles are in the shared buffers.
+#[derive(Clone, Copy, Debug)]
+struct ModelRange {
+    first_index: u32,
+    index_count: u32,
+    base_vertex: i32,
+}
+
+/// Models that rarely change (buildings, stations) are kept apart from ones
 /// that move every frame (trains, vehicles, signals), so moving things don't
 /// re-upload the whole town.
 #[derive(Clone, Copy, Debug)]
-pub enum BoxLayer {
+pub enum ModelLayer {
     Static = 0,
     Dynamic = 1,
 }
@@ -280,7 +323,12 @@ impl SceneRenderer {
             stats: RenderStats::default(),
             preview_is_rail: false,
             ocean: [0.0; 4],
-            boxes: [None, None],
+            era_chrome: 0.0,
+            model_vertices: None,
+            model_indices: None,
+            model_ranges: Vec::new(),
+            placed: [None, None],
+            draws: [Vec::new(), Vec::new()],
         }
     }
 
@@ -320,24 +368,73 @@ impl SceneRenderer {
         );
     }
 
-    /// Replaces the set of instanced boxes. Reuses the buffer when it's big
-    /// enough, since trains update this every frame.
-    pub fn set_boxes(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layer: BoxLayer, boxes: &[BoxInstance]) {
-        let slot = &mut self.boxes[layer as usize];
-        let bytes: &[u8] = bytemuck::cast_slice(boxes);
-        let fits = slot.as_ref().is_some_and(|(buf, _)| buf.size() >= bytes.len() as u64);
-        if !fits && !boxes.is_empty() {
-            let buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("boxes"),
-                size: (bytes.len() as u64).next_power_of_two(),
+    /// Uploads every model's mesh. Done once at startup.
+    pub fn upload_models(&mut self, device: &wgpu::Device, models: &Models) {
+        let mut vertices: Vec<ModelVertex> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        self.model_ranges.clear();
+        for mesh in &models.meshes {
+            self.model_ranges.push(ModelRange {
+                first_index: indices.len() as u32,
+                index_count: mesh.indices.len() as u32,
+                base_vertex: vertices.len() as i32,
+            });
+            vertices.extend_from_slice(&mesh.vertices);
+            indices.extend_from_slice(&mesh.indices);
+        }
+        let make = |label, data: &[u8], usage| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: data,
+                usage,
+            })
+        };
+        self.model_vertices = Some(make(
+            "model vertices",
+            bytemuck::cast_slice(&vertices),
+            wgpu::BufferUsages::VERTEX,
+        ));
+        self.model_indices = Some(make(
+            "model indices",
+            bytemuck::cast_slice(&indices),
+            wgpu::BufferUsages::INDEX,
+        ));
+    }
+
+    /// Replaces the set of placed models in a layer. Reuses the buffer when
+    /// it's big enough, since trains update this every frame.
+    pub fn set_models(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layer: ModelLayer,
+        items: &mut [(ModelId, ModelInstance)],
+    ) {
+        // One draw per model: group equal models together.
+        items.sort_by_key(|(id, _)| id.0);
+        let instances: Vec<ModelInstance> = items.iter().map(|(_, i)| *i).collect();
+        let draws = &mut self.draws[layer as usize];
+        draws.clear();
+        let mut start = 0;
+        while start < items.len() {
+            let id = items[start].0;
+            let count = items[start..].iter().take_while(|(m, _)| *m == id).count();
+            draws.push((id, start as u32, count as u32));
+            start += count;
+        }
+        let slot = &mut self.placed[layer as usize];
+        let bytes: &[u8] = bytemuck::cast_slice(&instances);
+        let fits = slot.as_ref().is_some_and(|buf| buf.size() >= bytes.len() as u64);
+        if !fits && !instances.is_empty() {
+            *slot = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("placed models"),
+                size: (bytes.len() as u64).next_power_of_two().max(256),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
-            });
-            *slot = Some((buf, 0));
+            }));
         }
-        if let Some((buf, n)) = slot {
+        if let (Some(buf), false) = (slot.as_ref(), bytes.is_empty()) {
             queue.write_buffer(buf, 0, bytes);
-            *n = boxes.len() as u32;
         }
     }
 
@@ -480,6 +577,7 @@ impl SceneRenderer {
             sky: [light.sky[0], light.sky[1], light.sky[2], light.day],
             sun_color: [light.sun[0], light.sun[1], light.sun[2], 0.0],
             ambient: [light.ambient[0], light.ambient[1], light.ambient[2], 0.0],
+            era: [self.era_chrome, 0.0, 0.0, 0.0],
         };
         rs.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -560,10 +658,24 @@ impl SceneRenderer {
                 pass.set_pipeline(&self.pipelines.ocean_floor);
                 pass.draw(0..6, 0..4);
             }
-            for (buf, n) in self.boxes.iter().flatten().filter(|(_, n)| *n > 0) {
-                pass.set_pipeline(&self.pipelines.boxes);
-                pass.set_vertex_buffer(0, buf.slice(..));
-                pass.draw(0..36, 0..*n);
+            if let (Some(vertices), Some(indices)) = (&self.model_vertices, &self.model_indices) {
+                pass.set_pipeline(&self.pipelines.models);
+                pass.set_vertex_buffer(0, vertices.slice(..));
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                for layer in 0..2 {
+                    let Some(placed) = &self.placed[layer] else { continue };
+                    pass.set_vertex_buffer(1, placed.slice(..));
+                    for &(id, first, count) in &self.draws[layer] {
+                        let range = self.model_ranges[id.0 as usize];
+                        pass.draw_indexed(
+                            range.first_index..range.first_index + range.index_count,
+                            range.base_vertex,
+                            first..first + count,
+                        );
+                    }
+                }
+                // The terrain's shared quad indices again, for the clouds and water.
+                pass.set_index_buffer(self.quad_indices.slice(..), wgpu::IndexFormat::Uint32);
             }
             if !cloud_draws.is_empty() {
                 pass.set_pipeline(&self.pipelines.clouds);
@@ -741,7 +853,7 @@ struct Pipelines {
     water: wgpu::RenderPipeline,
     ocean_floor: wgpu::RenderPipeline,
     ocean_water: wgpu::RenderPipeline,
-    boxes: wgpu::RenderPipeline,
+    models: wgpu::RenderPipeline,
 }
 
 fn create_pipelines(
@@ -810,33 +922,36 @@ fn create_pipelines(
             cache: None,
         })
     };
-    let box_attrs = [
-        wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x3,
-            offset: 0,
-            shader_location: 1,
-        },
-        wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x3,
-            offset: 12,
-            shader_location: 2,
-        },
-        wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32,
-            offset: 24,
-            shader_location: 3,
-        },
-        wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Unorm8x4,
-            offset: 28,
-            shader_location: 4,
-        },
+    use wgpu::VertexFormat as F;
+    let attr = |format, offset, shader_location| wgpu::VertexAttribute {
+        format,
+        offset,
+        shader_location,
+    };
+    let mesh_attrs = [
+        attr(F::Float32x3, 0, 0),
+        attr(F::Float32x3, 12, 1),
+        attr(F::Float32x4, 24, 2),
+        attr(F::Unorm8x4, 40, 3),
     ];
-    let box_buffers = [Some(wgpu::VertexBufferLayout {
-        array_stride: std::mem::size_of::<BoxInstance>() as u64,
-        step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &box_attrs,
-    })];
+    let placed_attrs = [
+        attr(F::Float32x3, 0, 4),
+        attr(F::Float32, 12, 5),
+        attr(F::Float32, 16, 6),
+        attr(F::Unorm8x4, 20, 7),
+    ];
+    let model_buffers = [
+        Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ModelVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &mesh_attrs,
+        }),
+        Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ModelInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &placed_attrs,
+        }),
+    ];
     let terrain_buffers = [Some(vertices.clone())];
     let cloud_buffers = [Some(vertices), Some(offsets)];
     Pipelines {
@@ -851,7 +966,7 @@ fn create_pipelines(
             false,
         ),
         ocean_floor: make("ocean floor", "vs_ocean_floor", "fs_terrain", &[], None, true),
-        boxes: make("boxes", "vs_box", "fs_box", &box_buffers, None, true),
+        models: make("models", "vs_model", "fs_model", &model_buffers, None, true),
         ocean_water: make(
             "ocean water",
             "vs_ocean_water",

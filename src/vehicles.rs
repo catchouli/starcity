@@ -150,6 +150,10 @@ pub struct Vehicle {
     pub pos: f32,
     pub speed: f32,
     pub color: [u8; 3],
+    /// The year it was bought, which decides what it looks like, and the
+    /// year it's scrapped (replaced by a newer model).
+    pub born: i32,
+    pub retire: i32,
     /// Seconds spent stuck behind something, to break rare deadlocks.
     stuck: f32,
 }
@@ -166,6 +170,8 @@ impl Vehicle {
 
 pub struct Vehicles {
     pub list: Vec<Vehicle>,
+    /// The current year; new vehicles are bought in it.
+    pub year: i32,
     rng: u64,
     spawn_clock: f32,
 }
@@ -183,6 +189,7 @@ impl Vehicles {
     pub fn new(seed: u64) -> Vehicles {
         Vehicles {
             list: Vec::new(),
+            year: 2000,
             rng: seed | 1,
             spawn_clock: 0.0,
         }
@@ -197,6 +204,19 @@ impl Vehicles {
 
     fn below(&mut self, n: usize) -> usize {
         (self.next() % n.max(1) as u64) as usize
+    }
+
+    /// Winds the fleet back to `year`: vehicles bought later are re-dated to
+    /// just before it (for seeking back through time when testing).
+    pub fn rewind(&mut self, year: i32) {
+        for i in 0..self.list.len() {
+            if self.list[i].born > year {
+                let (a, b) = (self.below(4) as i32, self.below(11) as i32);
+                self.list[i].born = year - a;
+                self.list[i].retire = year + 8 + b;
+            }
+        }
+        self.year = year;
     }
 
     /// How many of each kind a town of this size runs.
@@ -245,6 +265,8 @@ impl Vehicles {
                 Kind::Bus => [235, 190, 30],
                 Kind::Truck => [[170, 60, 40], [60, 100, 160], [90, 120, 70]][self.below(3)],
             };
+            let born = self.year - self.below(4) as i32;
+            let retire = self.year + 8 + self.below(11) as i32;
             self.list.push(Vehicle {
                 kind,
                 town: town.id,
@@ -252,6 +274,8 @@ impl Vehicles {
                 pos: 0.0,
                 speed: 0.0,
                 color,
+                born,
+                retire,
                 stuck: 0.0,
             });
         }
@@ -262,6 +286,9 @@ impl Vehicles {
         self.spawn_clock += dt;
         if self.spawn_clock >= 1.0 {
             self.spawn_clock -= 1.0;
+            // Old models are scrapped; the fleet tops up with new ones.
+            let year = self.year;
+            self.list.retain(|v| year < v.retire);
             self.top_up(roads, towns);
         }
         // Vehicles whose road has gone disappear.
@@ -398,6 +425,8 @@ mod tests {
                 pos: 0.0,
                 speed: 0.0,
                 color: [0; 3],
+                born: 2000,
+                retire: 2100,
                 stuck: 0.0,
             });
         }

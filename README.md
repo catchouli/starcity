@@ -60,6 +60,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 
 - `cargo test` runs the unit tests and validates the WGSL shader with naga. A
   shader error otherwise just leaves the web page blank.
+- Debug window (F3): a **Date** slider from 2000 to 2050 seeks through time (forward plays the years, back re-ages what was built later). `STARCITY_YEAR=2046 cargo run --release -- --demo` starts in a year.
 - `STARCITY_SCREENSHOT=out.png cargo run`: render a few frames natively, save a
   screenshot and exit. Add `STARCITY_DEBUG=1` to open the debug window.
 
@@ -83,6 +84,8 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/sea.rs`: water grid and boat pathfinding
 - `src/boats.rs`, `src/planes.rs`: ferries and planes
 - `src/app/craft.rs`: tools, windows, props and demo for ports, airports, ferries, planes
+- `src/models.rs`, `src/props.rs`, `src/era.rs`: the glTF model catalog, turning game state into placed models, the eras
+- `assets/models/`: the `.glb` models (placeholders: see its README to replace them); `tools/make_placeholder_models.py` regenerates them
 - `src/stations.rs`: stations and platform planning
 - `src/towns.rs`: town founding, names, growth, buildings, catchment
 - `src/clouds.rs`: tiling voxel cloud field

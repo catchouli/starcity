@@ -6,10 +6,13 @@ mod clouds;
 mod daylight;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
+mod era;
 mod input;
+mod models;
 mod network;
 mod picking;
 mod planes;
+mod props;
 mod rails;
 mod render;
 mod roads;

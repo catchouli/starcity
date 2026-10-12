@@ -49,6 +49,8 @@ enum Stage {
 
 pub struct Plane {
     pub id: u32,
+    /// The year it was built, which decides what it looks like.
+    pub born: i32,
     /// x, height, z in world units.
     pub pos: Vec3,
     /// Rotation for rendering: `atan2(-dz, dx)`.
@@ -88,6 +90,8 @@ impl Plane {
 #[derive(Default)]
 pub struct Planes {
     pub list: Vec<Plane>,
+    /// The current year; new planes are built in it.
+    pub year: i32,
     /// Planes that have just landed and parked: (plane, airport).
     pub arrivals: Vec<(u32, TerminalId)>,
     next_id: u32,
@@ -107,6 +111,7 @@ impl Planes {
         let p = layout.parking();
         self.list.push(Plane {
             id,
+            born: self.year,
             pos: Vec3::new(p.x, layout.ground() + 0.02, p.y),
             yaw: layout.yaw(),
             orders: Orders::default(),

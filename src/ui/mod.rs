@@ -148,7 +148,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
     actions
 }
 
-pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str) {
+pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str, daylight: f32) {
     const SIZE: f32 = 30.0;
     let groups: [(&str, &[Tool]); 5] = [
         ("", &[Tool::Pointer]),
@@ -199,7 +199,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str) {
                 });
             }
             // The date and time, beside the controls that change how fast it runs.
-            win95::status_pane(ui, 172.0, clock);
+            win95::clock_pane(ui, 160.0, clock, daylight);
         });
     });
 }

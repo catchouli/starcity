@@ -57,6 +57,8 @@ enum State {
 
 pub struct Boat {
     pub id: u32,
+    /// The year it was built, which decides what it looks like.
+    pub born: i32,
     pub pos: Vec2,
     /// Rotation for rendering, like the other props: `atan2(-dz, dx)`.
     pub heading: f32,
@@ -94,6 +96,8 @@ impl Boat {
 #[derive(Default)]
 pub struct Boats {
     pub list: Vec<Boat>,
+    /// The current year; new boats are built in it.
+    pub year: i32,
     /// Boats that have just tied up: (boat, port). The app loads and unloads.
     pub arrivals: Vec<(u32, TerminalId)>,
     routes: HashMap<RouteKey, Option<Rc<Route>>>,
@@ -113,6 +117,7 @@ impl Boats {
         self.next_id += 1;
         self.list.push(Boat {
             id,
+            born: self.year,
             pos: centre(tile),
             heading: 0.0,
             orders: Orders::default(),

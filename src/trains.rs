@@ -136,6 +136,8 @@ struct Entry {
 
 pub struct Train {
     pub id: u32,
+    /// The year it was built, which decides what it looks like.
+    pub born: i32,
     pub cars: u32,
     /// Oldest (under the tail) first. `route[head]` holds the head; anything
     /// after it is the path ahead.
@@ -304,6 +306,8 @@ pub enum SpawnError {
 #[derive(Default)]
 pub struct Trains {
     pub list: Vec<Train>,
+    /// The current year; new trains are built in it.
+    pub year: i32,
     /// Trains that have just stopped at a station, for the caller to load
     /// and unload: (train, station).
     pub arrivals: Vec<(u32, StationId)>,
@@ -316,6 +320,7 @@ impl Trains {
     pub fn new(seed: u64) -> Trains {
         Trains {
             rng: seed | 1,
+            year: 2000,
             ..Default::default()
         }
     }
@@ -369,6 +374,7 @@ impl Trains {
         let head = route.len() - 1;
         self.list.push(Train {
             id,
+            born: self.year,
             cars,
             route: route.into_iter().map(|seg| Entry { seg, claimed: true }).collect(),
             head,

@@ -6,10 +6,12 @@ use crate::clock::{Clock, Speed};
 use crate::clouds;
 use crate::daylight::{self, Light};
 use crate::input::PhysicalKeys;
+use crate::models::Models;
 use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
 use crate::planes::Planes;
-use crate::render::{BoxInstance, BoxLayer, CloudState, Highlight, HighlightKind, RenderSettings, SceneRenderer};
+use crate::props;
+use crate::render::{CloudState, Highlight, HighlightKind, ModelLayer, RenderSettings, SceneRenderer};
 use crate::sea::Sea;
 use crate::sim::{self, Changes, Clear, Sim};
 use crate::stations::{StationId, Stations};
@@ -19,7 +21,7 @@ use crate::terrain::{CHUNK_SIZE, World, mesh};
 use crate::towns::{TownId, Towns};
 use crate::trains::{SpawnError, Trains};
 use crate::ui::{self, Tool, UiState, win95};
-use crate::vehicles::{Kind, Vehicles};
+use crate::vehicles::Vehicles;
 use crate::{rails, roads};
 use craft::Craft;
 use eframe::egui;
@@ -74,6 +76,10 @@ pub struct StarcityApp {
     towns: Towns,
     vehicles: Vehicles,
     vehicles_moving: bool,
+    /// Every model there is (assets/models/*.glb).
+    models: Models,
+    /// The calendar year, which decides which models are in use.
+    year: i32,
     /// The water grid; built the first time boats or ports need it.
     sea: Option<Sea>,
     sea_ms: f32,
@@ -137,10 +143,13 @@ impl StarcityApp {
             .expect("starcity requires the wgpu renderer");
         win95::apply(&cc.egui_ctx);
         let params = GenParams::default();
+        let models = Models::load_embedded();
+        let mut renderer = SceneRenderer::new(rs);
+        renderer.upload_models(&rs.device, &models);
         let mut app = StarcityApp {
             world: World::new(1, 1, 1, 0),
             camera: Camera::new(Vec3::ZERO),
-            renderer: SceneRenderer::new(rs),
+            renderer,
             settings: RenderSettings::default(),
             scene_dirty: true,
             last_size: [0, 0],
@@ -178,6 +187,8 @@ impl StarcityApp {
             towns: Towns::empty(1, 1),
             vehicles: Vehicles::new(1),
             vehicles_moving: false,
+            models,
+            year: 2000,
             sea: None,
             sea_ms: 0.0,
             terminals: Terminals::default(),
@@ -235,6 +246,9 @@ impl StarcityApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn dev_setup(&mut self, c: i32) {
         use crate::devtools::DevTools;
+        if let Some(year) = DevTools::year() {
+            self.seek_to(year as f64);
+        }
         if let Some(hour) = DevTools::hour() {
             self.clock = Clock::starting_at(hour);
         }
@@ -437,6 +451,58 @@ impl StarcityApp {
         eprintln!("tools: {} of 4 tools worked; terminals: {names:?}", done.len());
     }
 
+    /// Jumps the game to a date (a year with a fraction: 2025.5 is mid-2025),
+    /// for testing. Going forward plays the years in between (towns grow and
+    /// are redeveloped, fleets turn over); going back re-ages everything built
+    /// later, so the world looks like it did at that date.
+    fn seek_to(&mut self, target: f64) {
+        let year = target.floor() as i32;
+        while self.year < year {
+            let next = self.year + 1;
+            self.clock.set_year_f64(next as f64);
+            self.set_year(next);
+            // A year of town life in 30-second steps, then fleets renew themselves.
+            for _ in 0..12 {
+                self.towns
+                    .update(30.0, &self.world, &mut self.roads, &self.rails, &self.models);
+            }
+            for _ in 0..20 {
+                self.vehicles.update(1.0, &self.roads, &self.towns);
+            }
+        }
+        if year < self.year {
+            self.towns.rewind(year);
+            self.vehicles.rewind(year);
+            for t in &mut self.trains.list {
+                t.born = t.born.min(year);
+            }
+            for b in &mut self.boats.list {
+                b.born = b.born.min(year);
+            }
+            for p in &mut self.planes.list {
+                p.born = p.born.min(year);
+            }
+            self.set_year(year);
+        }
+        self.clock.set_year_f64(target);
+        self.renderer.era_chrome = crate::era::chrome(target);
+        self.static_changed = true;
+        self.props_changed = true;
+        self.scene_dirty = true;
+    }
+
+    /// A new calendar year: new vehicles and buildings take the new look, and
+    /// stations, ports and airports are refurbished to match.
+    fn set_year(&mut self, year: i32) {
+        self.year = year;
+        self.trains.year = year;
+        self.vehicles.year = year;
+        self.boats.year = year;
+        self.planes.year = year;
+        self.towns.year = year;
+        self.static_changed = true;
+    }
+
     fn regenerate(&mut self, rs: &RenderState) {
         let t = Instant::now();
         self.world = generation::generate(&self.params);
@@ -460,7 +526,7 @@ impl StarcityApp {
         self.selected_train = None;
         self.selected_station = None;
         self.selected_town = None;
-        self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed);
+        self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed, self.year);
         self.vehicles = Vehicles::new(self.params.seed as u64);
         self.sea = None;
         self.terminals = Terminals::default();
@@ -468,6 +534,7 @@ impl StarcityApp {
         self.planes = Planes::default();
         self.selected_craft = None;
         self.selected_terminal = None;
+        self.set_year(self.year);
         self.props_changed = true;
         self.static_changed = true;
         self.plan = Plan::default();
@@ -864,7 +931,9 @@ impl StarcityApp {
             return;
         }
         self.town_clock -= 1.0;
-        let (road_tiles, built) = self.towns.update(1.0, &self.world, &mut self.roads, &self.rails);
+        let (road_tiles, built) = self
+            .towns
+            .update(1.0, &self.world, &mut self.roads, &self.rails, &self.models);
         self.mark_infra(&road_tiles);
         if built {
             self.static_changed = true;
@@ -926,20 +995,21 @@ impl StarcityApp {
             self.track_version += 1;
         }
         if std::mem::take(&mut self.static_changed) {
-            let mut boxes = station_boxes(&self.world, &self.rails, &self.stations);
-            boxes.extend(building_boxes(&self.world, &self.towns));
-            boxes.extend(craft::terminal_boxes(&self.world, &self.terminals));
-            self.renderer.set_boxes(&rs.device, &rs.queue, BoxLayer::Static, &boxes);
+            let mut placed = props::stations(&self.models, &self.world, &self.rails, &self.stations, self.year);
+            placed.extend(props::buildings(&self.models, &self.world, &self.towns));
+            placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
+            self.renderer
+                .set_models(&rs.device, &rs.queue, ModelLayer::Static, &mut placed);
             self.scene_dirty = true;
         }
         if std::mem::take(&mut self.props_changed) {
-            let mut boxes = signal_boxes(&self.world, &self.signals, &self.trains);
-            boxes.extend(train_boxes(&self.world, &self.trains));
-            boxes.extend(vehicle_boxes(&self.world, &self.vehicles));
-            boxes.extend(craft::boat_boxes(&self.world, &self.boats));
-            boxes.extend(craft::plane_boxes(&self.world, &self.planes));
+            let mut placed = props::signals(&self.models, &self.world, &self.signals, &self.trains);
+            placed.extend(props::trains(&self.models, &self.world, &self.trains));
+            placed.extend(props::road_vehicles(&self.models, &self.world, &self.vehicles));
+            placed.extend(props::boats(&self.models, &self.world, &self.boats));
+            placed.extend(props::planes(&self.models, &self.world, &self.planes));
             self.renderer
-                .set_boxes(&rs.device, &rs.queue, BoxLayer::Dynamic, &boxes);
+                .set_models(&rs.device, &rs.queue, ModelLayer::Dynamic, &mut placed);
             self.scene_dirty = true;
         }
     }
@@ -1208,7 +1278,7 @@ impl StarcityApp {
         if now - self.last_light_render < LIGHT_FRAME_SECONDS {
             return;
         }
-        let light = Light::at(self.clock.day_fraction(), self.light_strength);
+        let light = Light::at(self.clock.light_phase(), self.light_strength);
         if light.differs(&self.light) {
             self.light = light;
             self.last_light_render = now;
@@ -1415,6 +1485,39 @@ impl StarcityApp {
             let info = rs.adapter.get_info();
             let s = self.renderer.stats;
             ui.label(format!("{:.1} ms/frame  ·  {:?}", self.frame_ms, info.backend));
+            ui.label(format!(
+                "{} ({}) · chrome {:.2} · {} models",
+                self.clock.date().year,
+                crate::era::Era::of(self.year).name(),
+                self.renderer.era_chrome,
+                self.models.len()
+            ));
+            // Seek through time: 2000 on the left, 2050 on the right.
+            let mut when = self.clock.year_f64().clamp(2000.0, 2050.0);
+            let changed = ui
+                .horizontal(|ui| {
+                    ui.label("Date");
+                    ui.spacing_mut().slider_width = 280.0;
+                    let slider = egui::Slider::new(&mut when, 2000.0..=2050.0)
+                        .custom_formatter(|v, _| {
+                            let mut c = Clock::default();
+                            c.set_year_f64(v);
+                            c.date().date_string()
+                        })
+                        .custom_parser(|s| s.trim().parse::<f64>().ok());
+                    let mut changed = ui.add_sized([300.0, 18.0], slider).changed();
+                    for y in [2000.0, 2012.0, 2025.0, 2038.0, 2050.0] {
+                        if ui.small_button(format!("{y:.0}")).clicked() {
+                            when = y;
+                            changed = true;
+                        }
+                    }
+                    changed
+                })
+                .inner;
+            if changed {
+                self.seek_to(when);
+            }
             ui.label(format!("scene renders: {}", self.scene_renders));
             ui.label(format!(
                 "boats {} · planes {} · sea grid {:.1} ms · routes cached {} · searches pending {} (last step {} expansions)",
@@ -1527,11 +1630,10 @@ impl StarcityApp {
             .frame(panel)
             .show(ui, |ui| ui::menu_bar(ui, &mut self.ui))
             .inner;
-        let when = self.clock.date_time();
-        let clock_text = format!("{}  {}", when.date_string(), when.time_string());
+        let clock_text = self.clock.date().date_string();
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
-            .show(ui, |ui| ui::toolbar(ui, &mut self.ui, &clock_text));
+            .show(ui, |ui| ui::toolbar(ui, &mut self.ui, &clock_text, self.light.day));
         let plan = &self.plan;
         let status = if !plan.is_empty() {
             let what = match self.plan_network {
@@ -1633,6 +1735,15 @@ impl eframe::App for StarcityApp {
         // the game slower for a moment instead of falling further behind.
         let sim_dt = (frame_dt * self.ui.speed.factor()).min(MAX_SIM_PER_FRAME);
         self.clock.tick(sim_dt);
+        let year = self.clock.date().year;
+        if year != self.year {
+            self.set_year(year);
+        }
+        let chrome = crate::era::chrome(self.clock.year_f64());
+        if (chrome - self.renderer.era_chrome).abs() > 0.004 {
+            self.renderer.era_chrome = chrome;
+            self.scene_dirty = true;
+        }
         let steps = (sim_dt / MAX_SIM_STEP).ceil() as u32;
         let (mut trains_moved, mut vehicles_moved, mut craft_moved) = (false, false, false);
         let mut changed = Vec::new();
@@ -1754,7 +1865,7 @@ impl eframe::App for StarcityApp {
             let wake = if self.ui.day_night {
                 LIGHT_FRAME_SECONDS as f32
             } else {
-                self.clock.seconds_to_next_display_change(self.ui.speed).max(0.02)
+                self.clock.seconds_to_next_day(self.ui.speed).max(0.02)
             };
             ctx.request_repaint_after(std::time::Duration::from_secs_f32(wake));
         }
@@ -1770,114 +1881,6 @@ fn is_arrow(key: egui::Key) -> bool {
     matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown)
 }
 
-/// Props for the signals: a post beside the track on the right of the way
-/// it faces, a head, and a lamp facing oncoming trains.
-fn signal_boxes(world: &World, signals: &rails::Signals, trains: &Trains) -> Vec<BoxInstance> {
-    let mut boxes = Vec::new();
-    for (&(x, z), sig) in &signals.by_tile {
-        let ((fx, fz), (tx, tz)) = rails::piece_ends(sig.piece);
-        let along = Vec2::new(tx - fx, tz - fz).normalize() * if sig.forward { 1.0 } else { -1.0 };
-        let right = Vec2::new(-along.y, along.x);
-        let mid = Vec2::new(x as f32 + (fx + tx) / 2.0, z as f32 + (fz + tz) / 2.0);
-        let p = mid + right * 0.4;
-        let ground = world.height_at(p.x, p.y);
-        // Local x runs along the track (see vs_box).
-        let yaw = (-along.y).atan2(along.x);
-        let lamp = p - along * 0.065;
-        boxes.extend([
-            BoxInstance {
-                center: [p.x, ground + 0.45, p.y],
-                half: [0.035, 0.45, 0.035],
-                yaw,
-                color: [130, 130, 136, 0],
-            },
-            BoxInstance {
-                center: [p.x, ground + 0.98, p.y],
-                half: [0.06, 0.16, 0.09],
-                yaw,
-                color: [40, 40, 44, 0],
-            },
-            BoxInstance {
-                center: [lamp.x, ground + 1.04, lamp.y],
-                half: [0.012, 0.065, 0.065],
-                yaw,
-                // Red while a train holds the block, green when it's free.
-                color: if trains.is_owned((x, z), sig.piece) {
-                    [240, 50, 40, 255]
-                } else {
-                    [60, 235, 90, 255]
-                },
-            },
-        ]);
-    }
-    boxes
-}
-
-/// Props for the trains: each car is a body on an undercarriage; the
-/// locomotive has a cab and chimney, carriages have a roof. Wrecks go dark.
-fn train_boxes(world: &World, trains: &Trains) -> Vec<BoxInstance> {
-    let mut boxes = Vec::new();
-    for train in &trains.list {
-        let wreck = train.crashed.is_some();
-        let paint = |c: [u8; 3]| if wreck { [55, 50, 46, 0] } else { [c[0], c[1], c[2], 0] };
-        for (i, (front, back)) in train.car_ends().into_iter().enumerate() {
-            let centre = (front + back) / 2.0;
-            let along = (front - back).normalize_or_zero();
-            let yaw = (-along.y).atan2(along.x);
-            let ground = (world.height_at(front.x, front.y) + world.height_at(back.x, back.y)) / 2.0;
-            let at = |offset: f32, y: f32| {
-                let p = centre + along * offset;
-                [p.x, ground + y, p.y]
-            };
-            let half_len = crate::trains::CAR_LENGTH / 2.0;
-            boxes.push(BoxInstance {
-                center: at(0.0, 0.07),
-                half: [half_len - 0.05, 0.04, 0.11],
-                yaw,
-                color: paint([30, 30, 32]),
-            });
-            if i == 0 {
-                boxes.extend([
-                    BoxInstance {
-                        center: at(0.05, 0.22),
-                        half: [half_len - 0.08, 0.11, 0.13],
-                        yaw,
-                        color: paint([35, 105, 60]),
-                    },
-                    BoxInstance {
-                        center: at(-0.24, 0.42),
-                        half: [0.13, 0.1, 0.14],
-                        yaw,
-                        color: paint([25, 75, 45]),
-                    },
-                    BoxInstance {
-                        center: at(0.25, 0.4),
-                        half: [0.04, 0.07, 0.04],
-                        yaw,
-                        color: paint([30, 30, 32]),
-                    },
-                ]);
-            } else {
-                boxes.extend([
-                    BoxInstance {
-                        center: at(0.0, 0.25),
-                        half: [half_len - 0.03, 0.14, 0.14],
-                        yaw,
-                        color: paint([135, 40, 38]),
-                    },
-                    BoxInstance {
-                        center: at(0.0, 0.41),
-                        half: [half_len - 0.03, 0.02, 0.15],
-                        yaw,
-                        color: paint([110, 110, 115]),
-                    },
-                ]);
-            }
-        }
-    }
-    boxes
-}
-
 /// Where a world point lands in the 3D view, if it's in front of the camera.
 fn project(view_proj: Mat4, rect: egui::Rect, p: Vec3) -> Option<egui::Pos2> {
     let clip = view_proj * p.extend(1.0);
@@ -1889,146 +1892,4 @@ fn project(view_proj: Mat4, rect: egui::Rect, p: Vec3) -> Option<egui::Pos2> {
         rect.min.x + (ndc.x + 1.0) / 2.0 * rect.width(),
         rect.min.y + (1.0 - ndc.y) / 2.0 * rect.height(),
     ))
-}
-
-/// Props for stations: platforms either side of the track, and a little
-/// station building beside the first platform tile.
-fn station_boxes(world: &World, rails_layer: &Layer, stations: &Stations) -> Vec<BoxInstance> {
-    let mut boxes = Vec::new();
-    for station in stations.list.values() {
-        for (i, &(x, z)) in station.tiles.iter().enumerate() {
-            let along = if rails_layer.get(x, z) == rails::Y {
-                Vec2::new(0.0, 1.0)
-            } else {
-                Vec2::new(1.0, 0.0)
-            };
-            let side = Vec2::new(-along.y, along.x);
-            let yaw = (-along.y).atan2(along.x);
-            let centre = Vec2::new(x as f32 + 0.5, z as f32 + 0.5);
-            let ground = world.height_at(centre.x, centre.y);
-            for s in [-1.0, 1.0] {
-                let p = centre + side * (0.4 * s);
-                boxes.push(BoxInstance {
-                    center: [p.x, ground + 0.07, p.y],
-                    half: [0.5, 0.07, 0.09],
-                    yaw,
-                    color: [178, 172, 160, 0],
-                });
-            }
-            if i == 0 {
-                let p = centre + side * 0.82;
-                boxes.extend([
-                    BoxInstance {
-                        center: [p.x, ground + 0.3, p.y],
-                        half: [0.42, 0.24, 0.2],
-                        yaw,
-                        color: [222, 205, 165, 0],
-                    },
-                    BoxInstance {
-                        center: [p.x, ground + 0.58, p.y],
-                        half: [0.48, 0.05, 0.26],
-                        yaw,
-                        color: [150, 62, 50, 0],
-                    },
-                ]);
-            }
-        }
-    }
-    boxes
-}
-
-/// Props for town buildings: walls and a roof, taller with more floors.
-/// Houses come in a few colours; tall buildings are grey-blue offices.
-fn building_boxes(world: &World, towns: &crate::towns::Towns) -> Vec<BoxInstance> {
-    const WALLS: [[u8; 3]; 4] = [[226, 214, 190], [178, 96, 72], [236, 234, 226], [196, 176, 142]];
-    const ROOFS: [[u8; 3]; 4] = [[150, 62, 50], [92, 92, 104], [128, 74, 52], [70, 80, 70]];
-    let mut boxes = Vec::new();
-    for (&(x, z), b) in &towns.buildings {
-        let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
-        let ground = world.height_at(cx, cz);
-        let height = 0.32 * b.floors as f32;
-        let office = b.floors >= 4;
-        let (wall, roof) = if office {
-            ([150, 168, 186], [120, 124, 130])
-        } else {
-            (WALLS[b.style as usize % 4], ROOFS[b.style as usize % 4])
-        };
-        let w = if office { 0.38 } else { 0.32 };
-        boxes.push(BoxInstance {
-            center: [cx, ground + height / 2.0, cz],
-            half: [w, height / 2.0, w],
-            yaw: 0.0,
-            color: [wall[0], wall[1], wall[2], 0],
-        });
-        boxes.push(BoxInstance {
-            center: [cx, ground + height + 0.04, cz],
-            half: [w + 0.04, 0.04, w + 0.04],
-            yaw: 0.0,
-            color: [roof[0], roof[1], roof[2], 0],
-        });
-    }
-    boxes
-}
-
-/// Props for road vehicles: cars with a cabin, long buses, and trucks with a
-/// cab and a cargo box.
-fn vehicle_boxes(world: &World, vehicles: &Vehicles) -> Vec<BoxInstance> {
-    let mut boxes = Vec::with_capacity(vehicles.list.len() * 2);
-    for v in &vehicles.list {
-        let (p, dir) = v.placement();
-        let yaw = (-dir.y).atan2(dir.x);
-        let ground = world.height_at(p.x, p.y);
-        let at = |along: f32, y: f32| {
-            let q = p + dir * along;
-            [q.x, ground + y, q.y]
-        };
-        let [r, g, b] = v.color;
-        let body = [r, g, b, 0];
-        let dark = [r / 2, g / 2, b / 2, 0];
-        match v.kind {
-            Kind::Car => boxes.extend([
-                BoxInstance {
-                    center: at(0.0, 0.06),
-                    half: [0.14, 0.045, 0.075],
-                    yaw,
-                    color: body,
-                },
-                BoxInstance {
-                    center: at(-0.02, 0.14),
-                    half: [0.08, 0.04, 0.065],
-                    yaw,
-                    color: [60, 70, 85, 0],
-                },
-            ]),
-            Kind::Bus => boxes.extend([
-                BoxInstance {
-                    center: at(0.0, 0.12),
-                    half: [0.28, 0.1, 0.085],
-                    yaw,
-                    color: body,
-                },
-                BoxInstance {
-                    center: at(0.0, 0.17),
-                    half: [0.26, 0.03, 0.088],
-                    yaw,
-                    color: [70, 80, 95, 0],
-                },
-            ]),
-            Kind::Truck => boxes.extend([
-                BoxInstance {
-                    center: at(0.15, 0.1),
-                    half: [0.08, 0.08, 0.08],
-                    yaw,
-                    color: dark,
-                },
-                BoxInstance {
-                    center: at(-0.07, 0.12),
-                    half: [0.15, 0.1, 0.09],
-                    yaw,
-                    color: body,
-                },
-            ]),
-        }
-    }
-    boxes
 }

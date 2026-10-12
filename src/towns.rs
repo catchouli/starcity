@@ -6,6 +6,7 @@
 //! with player roads and, as they grow, with each other. Passengers delivered
 //! to a town's stations make it grow faster.
 
+use crate::models::Models;
 use crate::network::Layer;
 use crate::roads;
 use crate::terrain::World;
@@ -27,25 +28,47 @@ pub struct Town {
     pub delivered: u32,
 }
 
+/// A building. Big ones (an orb on 3 x 3 tiles) have an entry on every tile
+/// they cover: the north-west tile is the anchor, with `size` set, and the
+/// rest point back at it with `part_of`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Building {
     pub town: TownId,
     pub floors: u8,
-    /// Picks the colours.
+    /// Picks between models of the same kind.
     pub style: u8,
+    /// The year it was built, which decides what it looks like. Old buildings
+    /// are redeveloped now and then, taking the look of the year they're
+    /// rebuilt in.
+    pub year: i32,
+    /// Footprint in tiles (on the anchor).
+    pub size: (u8, u8),
+    pub part_of: Option<(i32, i32)>,
 }
 
 impl Building {
     pub fn population(self) -> u32 {
-        self.floors as u32 * 8
+        if self.part_of.is_some() {
+            return 0;
+        }
+        self.floors as u32 * 8 * self.size.0 as u32 * self.size.1 as u32
     }
 }
+
+/// Buildings last about this many years before they're considered for
+/// redevelopment, and are replaced at about this rate.
+const MIN_AGE: i32 = 12;
+const RENEWAL_SECONDS: f32 = 20.0 * 365.0;
 
 pub struct Towns {
     pub list: Vec<Town>,
     pub buildings: BTreeMap<(i32, i32), Building>,
     /// 1 on tiles with a building, so roads and track avoid them.
     pub occupied: Layer,
+    /// The current year; new buildings are built in it.
+    pub year: i32,
+    /// Progress towards the next redevelopment.
+    renewal: f32,
     rng: u64,
 }
 
@@ -64,14 +87,19 @@ impl Towns {
             list: Vec::new(),
             buildings: BTreeMap::new(),
             occupied: Layer::new(size_x, size_z),
+            year: 2000,
+            renewal: 0.0,
             rng: 1,
         }
     }
 
     /// Places towns on flat land and grows each a little. Builds their roads
     /// into `roads`.
-    pub fn generate(world: &World, roads_layer: &mut Layer, rails: &Layer, seed: u32) -> Towns {
+    /// `year` is the year the game starts in: towns have grown over the
+    /// 30 years before it, so their buildings are of different ages.
+    pub fn generate(world: &World, roads_layer: &mut Layer, rails: &Layer, seed: u32, year: i32) -> Towns {
         let mut towns = Towns::empty(world.size_x, world.size_z);
+        towns.year = year;
         towns.rng = (seed as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
         let size = world.size_x as i32;
         let wanted = ((size * size) / 9000).clamp(2, 24) as usize;
@@ -115,10 +143,13 @@ impl Towns {
         // Give each town a head start of varying size.
         for i in 0..towns.list.len() {
             let steps = 30 + towns.next() % 90;
-            for _ in 0..steps {
+            for step in 0..steps {
+                // The head start spans the 30 years before the game begins.
+                towns.year = year - 30 + (step * 30 / steps) as i32;
                 towns.grow(i, world, roads_layer, rails);
             }
         }
+        towns.year = year;
         towns
     }
 
@@ -205,6 +236,7 @@ impl Towns {
         world: &World,
         roads_layer: &mut Layer,
         rails: &Layer,
+        models: &Models,
     ) -> (Vec<(i32, i32)>, bool) {
         let mut road_tiles = Vec::new();
         let mut built = false;
@@ -220,7 +252,157 @@ impl Towns {
                 built |= b;
             }
         }
+        // Old buildings are slowly replaced with ones of the current look.
+        self.renewal += dt * self.buildings.len() as f32 / RENEWAL_SECONDS;
+        while self.renewal >= 1.0 {
+            self.renewal -= 1.0;
+            built |= self.renew_one(world, roads_layer, rails, models);
+        }
         (road_tiles, built)
+    }
+
+    /// Redevelops one old building whose replacement would look different:
+    /// rebuilt as a current model in place, or (once there are models that big)
+    /// merged with its neighbours into a larger building. Returns whether
+    /// anything changed.
+    fn renew_one(&mut self, world: &World, roads_layer: &Layer, rails: &Layer, models: &Models) -> bool {
+        let year = self.year;
+        // Candidates: old anchors that would get a different model today.
+        for _ in 0..16 {
+            if self.buildings.is_empty() {
+                return false;
+            }
+            let n = self.below(self.buildings.len() as u64) as usize;
+            let (&tile, &b) = self.buildings.iter().nth(n).unwrap();
+            if b.part_of.is_some() || year - b.year < MIN_AGE {
+                continue;
+            }
+            let seed = (tile.0 as u32).wrapping_mul(73856093) ^ (tile.1 as u32).wrapping_mul(19349663);
+            let now = models.pick_building(year, b.floors, b.size, seed.wrapping_add(b.style as u32));
+            let then = models.pick_building(b.year, b.floors, b.size, seed.wrapping_add(b.style as u32));
+            if now == then {
+                continue;
+            }
+            // Big buildings first, where there's room and a model for them.
+            if b.size == (1, 1) && b.floors >= 4 {
+                let biggest = models.largest_building_footprint(year);
+                for side in (2..=biggest).rev() {
+                    if let Some(anchor) = self.room_for(world, roads_layer, rails, tile, b.town, side) {
+                        let floors = (b.floors + 4).max(8);
+                        if models.has_building(year, floors, (side, side)) {
+                            self.merge(anchor, side, b.town, floors, year);
+                            return true;
+                        }
+                    }
+                }
+            }
+            let style = self.below(4) as u8;
+            let entry = self.buildings.get_mut(&tile).unwrap();
+            entry.year = year;
+            entry.style = style;
+            return true;
+        }
+        false
+    }
+
+    /// Winds the town back to `year`: buildings from later years are re-aged
+    /// to just before it, and buildings too big to have existed (orbs) go
+    /// back to ordinary ones. For seeking back through time when testing.
+    pub fn rewind(&mut self, year: i32) {
+        let big: Vec<(i32, i32)> = self
+            .buildings
+            .iter()
+            .filter(|(_, b)| b.part_of.is_none() && b.size != (1, 1) && b.year > year)
+            .map(|(t, _)| *t)
+            .collect();
+        for anchor in big {
+            let b = self.buildings[&anchor];
+            for dx in 0..b.size.0 as i32 {
+                for dz in 0..b.size.1 as i32 {
+                    if (dx, dz) != (0, 0) {
+                        let t = (anchor.0 + dx, anchor.1 + dz);
+                        self.buildings.remove(&t);
+                        self.occupied.set(t.0, t.1, 0);
+                    }
+                }
+            }
+            let entry = self.buildings.get_mut(&anchor).unwrap();
+            entry.size = (1, 1);
+            entry.floors = entry.floors.min(6);
+        }
+        let tiles: Vec<(i32, i32)> = self
+            .buildings
+            .iter()
+            .filter(|(_, b)| b.year > year)
+            .map(|(t, _)| *t)
+            .collect();
+        for t in tiles {
+            let age = self.below(10) as i32;
+            self.buildings.get_mut(&t).unwrap().year = year - age;
+        }
+        self.year = year;
+    }
+
+    /// Where a `side` x `side` building containing `tile` could stand: every
+    /// tile either free flat land at the same height or a small building of
+    /// this town, and no road or track.
+    fn room_for(
+        &self,
+        world: &World,
+        roads_layer: &Layer,
+        rails: &Layer,
+        tile: (i32, i32),
+        town: TownId,
+        side: u8,
+    ) -> Option<(i32, i32)> {
+        let s = side as i32;
+        let level = world.surface(tile.0, tile.1)?.0;
+        for ox in 0..s {
+            for oz in 0..s {
+                let anchor = (tile.0 - ox, tile.1 - oz);
+                let fits = (0..s).all(|dx| {
+                    (0..s).all(|dz| {
+                        let t = (anchor.0 + dx, anchor.1 + dz);
+                        let flat = world
+                            .surface(t.0, t.1)
+                            .is_some_and(|(base, shape)| shape.0 == 0 && base == level && base > world.sea_level);
+                        let clear = roads_layer.get(t.0, t.1) == 0 && rails.get(t.0, t.1) == 0;
+                        let ours_or_free = match self.buildings.get(&t) {
+                            Some(b) => b.town == town && b.part_of.is_none() && b.size == (1, 1),
+                            None => self.occupied.get(t.0, t.1) == 0,
+                        };
+                        flat && clear && ours_or_free
+                    })
+                });
+                if fits {
+                    return Some(anchor);
+                }
+            }
+        }
+        None
+    }
+
+    /// Replaces whatever is on a `side` x `side` area with one big building.
+    fn merge(&mut self, anchor: (i32, i32), side: u8, town: TownId, floors: u8, year: i32) {
+        let style = self.below(4) as u8;
+        for dx in 0..side as i32 {
+            for dz in 0..side as i32 {
+                let t = (anchor.0 + dx, anchor.1 + dz);
+                let is_anchor = (dx, dz) == (0, 0);
+                self.buildings.insert(
+                    t,
+                    Building {
+                        town,
+                        floors: if is_anchor { floors } else { 0 },
+                        style,
+                        year,
+                        size: if is_anchor { (side, side) } else { (1, 1) },
+                        part_of: if is_anchor { None } else { Some(anchor) },
+                    },
+                );
+                self.occupied.set(t.0, t.1, 1);
+            }
+        }
     }
 
     /// One growth step for town `i`. Returns (road tiles built, whether a building changed).
@@ -289,6 +471,9 @@ impl Towns {
                             town: id,
                             floors: 1,
                             style,
+                            year: self.year,
+                            size: (1, 1),
+                            part_of: None,
                         },
                     );
                     self.occupied.set(t.0, t.1, 1);
@@ -296,12 +481,20 @@ impl Towns {
                 }
             } else {
                 // Taller buildings towards the centre as the town grows.
-                let max_floors = (1 + self.population(id) / 300).min(8) as u8;
+                // Later years build taller.
+                let cap = (8 + (self.year - 2000).max(0) / 8).min(14) as u32;
+                let max_floors = (1 + self.population(id) / 300).min(cap) as u8;
                 let inner = radius / 2 + 1;
                 let pick: Vec<(i32, i32)> = self
                     .buildings
                     .iter()
-                    .filter(|(t, b)| b.town == id && b.floors < max_floors && near(**t, inner))
+                    .filter(|(t, b)| {
+                        b.town == id
+                            && b.part_of.is_none()
+                            && b.size == (1, 1)
+                            && b.floors < max_floors
+                            && near(**t, inner)
+                    })
                     .map(|(t, _)| *t)
                     .collect();
                 if !pick.is_empty() {
@@ -314,20 +507,32 @@ impl Towns {
         (Vec::new(), false)
     }
 
-    /// Removes buildings in an inclusive rectangle. Returns whether any were removed.
+    /// Removes buildings in an inclusive rectangle (a big building goes
+    /// entirely if any tile of it is inside). Returns whether any were removed.
     pub fn demolish(&mut self, a: (i32, i32), b: (i32, i32)) -> bool {
-        let before = self.buildings.len();
         let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
         let (z0, z1) = (a.1.min(b.1), a.1.max(b.1));
-        let occupied = &mut self.occupied;
-        self.buildings.retain(|&(x, z), _| {
-            let inside = (x0..=x1).contains(&x) && (z0..=z1).contains(&z);
-            if inside {
-                occupied.set(x, z, 0);
+        let mut anchors: Vec<(i32, i32)> = self
+            .buildings
+            .iter()
+            .filter(|((x, z), _)| (x0..=x1).contains(x) && (z0..=z1).contains(z))
+            .map(|(t, b)| b.part_of.unwrap_or(*t))
+            .collect();
+        anchors.sort();
+        anchors.dedup();
+        for anchor in &anchors {
+            let Some(b) = self.buildings.get(anchor).copied() else {
+                continue;
+            };
+            for dx in 0..b.size.0 as i32 {
+                for dz in 0..b.size.1 as i32 {
+                    let t = (anchor.0 + dx, anchor.1 + dz);
+                    self.buildings.remove(&t);
+                    self.occupied.set(t.0, t.1, 0);
+                }
             }
-            !inside
-        });
-        self.buildings.len() != before
+        }
+        !anchors.is_empty()
     }
 
     /// People living within a station's catchment of any of these tiles.
@@ -363,7 +568,7 @@ mod tests {
         let world = generation::generate(&p);
         let mut roads_layer = Layer::new(256, 256);
         let rails = Layer::new(256, 256);
-        let mut towns = Towns::generate(&world, &mut roads_layer, &rails, 7);
+        let mut towns = Towns::generate(&world, &mut roads_layer, &rails, 7, 2000);
         assert!(towns.list.len() >= 2, "{} towns", towns.list.len());
         let names: std::collections::HashSet<_> = towns.list.iter().map(|t| t.name.clone()).collect();
         assert_eq!(names.len(), towns.list.len(), "names are unique");
@@ -381,9 +586,83 @@ mod tests {
         }
         let before: u32 = towns.list.iter().map(|t| towns.population(t.id)).sum();
         for _ in 0..600 {
-            towns.update(1.0, &world, &mut roads_layer, &rails);
+            towns.update(1.0, &world, &mut roads_layer, &rails, &crate::models::Models::default());
         }
         let after: u32 = towns.list.iter().map(|t| towns.population(t.id)).sum();
         assert!(after > before, "towns grow: {before} -> {after}");
+    }
+
+    #[test]
+    fn towns_modernise_over_the_years_and_can_be_rewound() {
+        let models = crate::models::Models::load_embedded();
+        let p = GenParams {
+            size: 256,
+            ..Default::default()
+        };
+        let world = generation::generate(&p);
+        let mut roads_layer = Layer::new(256, 256);
+        let rails = Layer::new(256, 256);
+        let mut towns = Towns::generate(&world, &mut roads_layer, &rails, 7, 2000);
+        // Buildings begin with a spread of ages before 2000.
+        let oldest = towns.buildings.values().map(|b| b.year).min().unwrap();
+        assert!(
+            oldest < 1990 && towns.buildings.values().all(|b| b.year <= 2000),
+            "oldest {oldest}"
+        );
+        let before = towns.buildings.values().filter(|b| b.year < 2000).count();
+
+        for year in 2001..=2046 {
+            towns.year = year;
+            for _ in 0..12 {
+                towns.update(30.0, &world, &mut roads_layer, &rails, &models);
+            }
+        }
+        let anchors: Vec<_> = towns.buildings.iter().filter(|(_, b)| b.part_of.is_none()).collect();
+        let recent = anchors.iter().filter(|(_, b)| b.year >= 2025).count();
+        assert!(
+            recent * 3 > anchors.len(),
+            "{recent} of {} buildings are from 2025 or later",
+            anchors.len()
+        );
+        assert!(anchors.iter().any(|(_, b)| b.year >= 2030), "nothing was redeveloped");
+        let old_left = towns.buildings.values().filter(|b| b.year < 2000).count();
+        assert!(
+            old_left * 4 < before.max(1) * 3,
+            "{old_left} of {before} old buildings are still standing"
+        );
+        // Big buildings appear once there are models for them, and all of them have a footprint on the map.
+        let big: Vec<_> = anchors.iter().filter(|(_, b)| b.size != (1, 1)).collect();
+        assert!(!big.is_empty(), "no merged buildings by 2046");
+        for ((x, z), b) in big.iter().map(|(t, b)| (**t, **b)) {
+            for dx in 0..b.size.0 as i32 {
+                for dz in 0..b.size.1 as i32 {
+                    let part = towns
+                        .buildings
+                        .get(&(x + dx, z + dz))
+                        .expect("every tile of a big building is recorded");
+                    assert_eq!(part.part_of, if (dx, dz) == (0, 0) { None } else { Some((x, z)) });
+                    assert_eq!(towns.occupied.get(x + dx, z + dz), 1);
+                    assert_eq!(roads_layer.get(x + dx, z + dz), 0, "a big building covers a road");
+                }
+            }
+        }
+        // Population counts each big building once.
+        let sum: u32 = towns.list.iter().map(|t| towns.population(t.id)).sum();
+        assert_eq!(sum, anchors.iter().map(|(_, b)| b.population()).sum::<u32>());
+
+        // Winding back to 2005: nothing from later, and no orbs.
+        towns.rewind(2005);
+        assert!(towns.buildings.values().all(|b| b.year <= 2005));
+        assert!(
+            towns
+                .buildings
+                .values()
+                .all(|b| b.part_of.is_none() && b.size == (1, 1))
+        );
+        let occupied: usize = (0..256)
+            .flat_map(|z| (0..256).map(move |x| (x, z)))
+            .filter(|&(x, z)| towns.occupied.get(x, z) != 0)
+            .count();
+        assert_eq!(occupied, towns.buildings.len(), "freed tiles are free again");
     }
 }

@@ -223,3 +223,33 @@ pub fn status_pane(ui: &mut Ui, width: f32, text: &str) {
         Color32::BLACK,
     );
 }
+
+/// A sunken pane with the date, and a sun or moon showing the time of day.
+pub fn clock_pane(ui: &mut Ui, width: f32, text: &str, daylight: f32) {
+    let height = ui.spacing().interact_size.y;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let p = ui.painter();
+    edge(p, rect, SHADOW, HIGHLIGHT);
+    let c = pos2(rect.min.x + 12.0, rect.center().y);
+    if daylight > 0.5 {
+        // A sun: a disc with rays.
+        let sun = Color32::from_rgb(0xf2, 0xb8, 0x10);
+        p.circle_filled(c, 4.0, sun);
+        for i in 0..8 {
+            let a = i as f32 * std::f32::consts::FRAC_PI_4;
+            let d = vec2(a.cos(), a.sin());
+            p.line_segment([c + d * 6.0, c + d * 8.0], egui::Stroke::new(1.0, sun));
+        }
+    } else {
+        // A crescent moon: a pale disc with a bite taken out of it.
+        p.circle_filled(c, 6.0, Color32::from_rgb(0x30, 0x40, 0x80));
+        p.circle_filled(c + vec2(2.5, -1.5), 5.0, FACE);
+    }
+    p.text(
+        pos2(rect.min.x + 26.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+}

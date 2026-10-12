@@ -228,7 +228,7 @@ mod tests {
         let (sx, sz) = (world.size_x, world.size_z);
         let mut roads = Layer::new(sx, sz);
         let mut rails = Layer::new(sx, sz);
-        let towns = Towns::generate(&world, &mut roads, &rails, p.seed);
+        let towns = Towns::generate(&world, &mut roads, &rails, p.seed, 2000);
         let signals = Signals::default();
         let mut stations = Stations::default();
         let mut rw = Railway {

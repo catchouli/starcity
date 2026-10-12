@@ -28,6 +28,8 @@ struct Globals {
     sky: vec4<f32>,
     sun_color: vec4<f32>,
     ambient: vec4<f32>,
+    // Era: x = how chrome roads and track look (0 to 1).
+    era: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -289,13 +291,19 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let road = (1.0 - smoothstep(hw - px, hw + px, inf.road.x)) * top;
     // Fine details fade out once they'd be smaller than a pixel or two.
     let detail = 1.0 - smoothstep(0.015, 0.05, px);
+    // Roads change with the era: asphalt, then a cool glassy surface with
+    // glowing lane lines as chrome takes over.
+    let chrome = g.era.x;
     var asphalt = vec3<f32>(0.13, 0.13, 0.14) * (0.75 + dot(rock, vec3<f32>(0.3, 0.5, 0.2)) * 0.8);
+    asphalt = mix(asphalt, vec3<f32>(0.10, 0.12, 0.17), chrome);
     let kerb = smoothstep(hw - 0.07, hw - 0.05, inf.road.x) * detail;
-    asphalt = mix(asphalt, vec3<f32>(0.5, 0.5, 0.48), kerb);
+    asphalt = mix(asphalt, mix(vec3<f32>(0.5, 0.5, 0.48), vec3<f32>(0.78, 0.84, 0.95), chrome), kerb);
     let centre = 1.0 - smoothstep(0.018, 0.018 + px, inf.road.x);
     let dash = centre * step(0.5, fract(inf.road.y * 2.5)) * detail;
-    asphalt = mix(asphalt, vec3<f32>(0.9, 0.85, 0.6), dash);
-    color = mix(color, asphalt * light, road);
+    asphalt = mix(asphalt, vec3<f32>(0.9, 0.85, 0.6), dash * (1.0 - chrome));
+    color = mix(color, (asphalt * light) + g.sky.xyz * (0.2 * chrome), road);
+    // Lane lines that glow, whatever the light.
+    color = mix(color, vec3<f32>(0.35, 0.95, 1.0), dash * chrome * road);
 
     // Track: a ballast bed with darker borders, sleepers and two steel rails.
     let rhw = RAIL_HALF_WIDTH;
@@ -308,7 +316,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     ballast = mix(ballast, vec3<f32>(0.3, 0.2, 0.13), sleeper);
     let rail_line = (1.0 - smoothstep(0.014, 0.014 + px, abs(fd - 0.1))) * max(detail, 0.5);
     ballast = mix(ballast, vec3<f32>(0.58, 0.59, 0.62), rail_line);
+    // Track becomes a pale guideway with glowing strips.
+    ballast = mix(ballast, vec3<f32>(0.62, 0.65, 0.72), chrome);
     color = mix(color, ballast * light, bed);
+    color = mix(color, vec3<f32>(0.35, 0.95, 1.0), rail_line * chrome * bed);
 
     // Drag preview: a pale ghost where it fits, red where it doesn't.
     let phw = select(hw, rhw, g.options.z > 0.5);
@@ -461,66 +472,82 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(color, 1.0);
 }
 
-// --- Boxes ---------------------------------------------------------------------
+// --- Models ----------------------------------------------------------------------
 //
-// Small props (signals now, trains later) are instanced boxes: a centre,
-// half-extents, a rotation about the vertical axis and a colour. The 36
-// vertices of the cube come from tables here; no vertex buffer is needed.
+// Props are glTF models (see src/models.rs), drawn instanced: each instance has
+// a position, a yaw, a scale and a tint. Materials come from the model file:
+// metallic surfaces reflect the sky (so "chrome" is just metallic = 1 in the
+// asset), emissive ones glow in their own colour, and "Paint" materials take
+// the instance's tint.
 
-struct BoxOut {
+struct ModelOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
-    @location(1) @interpolate(flat) normal: vec3<f32>,
-    @location(2) @interpolate(flat) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) material: vec4<f32>,
+    @location(4) @interpolate(flat) tint: vec4<f32>,
 };
 
 @vertex
-fn vs_box(
-    @builtin(vertex_index) vi: u32,
-    @location(1) center: vec3<f32>,
-    @location(2) half: vec3<f32>,
-    @location(3) yaw: f32,
-    @location(4) color: vec4<f32>,
-) -> BoxOut {
-    // Each face: outward normal n and axes u, v with u x v = n, so the
-    // triangles wind anticlockwise seen from outside.
-    var normals = array<vec3<f32>, 6>(
-        vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0),
-        vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, -1.0),
-    );
-    var us = array<vec3<f32>, 6>(
-        vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 0.0, 1.0),
-        vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0),
-    );
-    var vs = array<vec3<f32>, 6>(
-        vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0),
-        vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0),
-    );
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
-        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
-    );
-    let face = vi / 6u;
-    let c = corners[vi % 6u];
-    let local = (normals[face] + us[face] * c.x + vs[face] * c.y) * half;
+fn vs_model(
+    @location(0) pos: vec3<f32>,
+    @location(1) nrm: vec3<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) material: vec4<f32>,
+    @location(4) origin: vec3<f32>,
+    @location(5) yaw: f32,
+    @location(6) scale: f32,
+    @location(7) tint: vec4<f32>,
+) -> ModelOut {
     let sn = sin(yaw);
     let cs = cos(yaw);
     let rotate = mat2x2<f32>(cs, -sn, sn, cs);
-    let xz = rotate * local.xz;
-    let n = rotate * normals[face].xz;
+    let xz = rotate * (pos.xz * scale);
+    let n = rotate * nrm.xz;
 
-    var out: BoxOut;
-    out.world = center + vec3<f32>(xz.x, local.y, xz.y);
+    var out: ModelOut;
+    out.world = origin + vec3<f32>(xz.x, pos.y * scale, xz.y);
     out.clip = g.view_proj * vec4<f32>(out.world, 1.0);
-    out.normal = vec3<f32>(n.x, normals[face].y, n.y);
+    out.normal = vec3<f32>(n.x, nrm.y, n.y);
     out.color = color;
+    out.material = material;
+    out.tint = tint;
     return out;
 }
 
 @fragment
-fn fs_box(in: BoxOut) -> @location(0) vec4<f32> {
-    // Colours arrive as sRGB bytes; alpha > 0.5 marks a lamp, which isn't shaded.
-    let albedo = pow(in.color.rgb, vec3<f32>(2.2));
-    var color = select(albedo * lighting(in.normal), albedo * 1.4, in.color.a > 0.5);
+fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
+    let n = normalize(in.normal);
+    var albedo = in.color.rgb;
+    // "Paint" materials take the instance's tint (an sRGB byte colour).
+    albedo = select(albedo, albedo * pow(in.tint.rgb, vec3<f32>(2.2)), in.material.w > 0.5);
+    // A wreck: dark and burnt.
+    albedo = albedo * (1.0 - 0.8 * in.tint.a);
+    let metallic = in.material.x;
+    let rough = in.material.y;
+    let glow = in.material.z * 2.0;
+
+    // Mirror the sky: a gradient from the horizon up to the zenith, a dark
+    // ground below, and a bright streak where the sun is.
+    var view = normalize(g.camera_pos.xyz);
+    if g.camera_pos.w > 0.5 {
+        view = normalize(g.camera_pos.xyz - in.world);
+    }
+    let r = reflect(-view, n);
+    let horizon = g.sky.xyz * 1.1 + vec3<f32>(0.08);
+    let zenith = g.sky.xyz * vec3<f32>(0.55, 0.72, 1.0);
+    let ground = vec3<f32>(0.14, 0.16, 0.14) * (0.3 + 0.7 * g.sky.w);
+    var env = mix(horizon, zenith, smoothstep(0.0, 0.8, r.y));
+    env = mix(env, ground, smoothstep(0.0, 0.35, -r.y));
+    let sun_amount = max(dot(r, g.sun_dir.xyz), 0.0);
+    let streak = pow(sun_amount, mix(220.0, 20.0, rough)) * g.sun_color.xyz * 3.0;
+    let reflection = (env + streak) * mix(vec3<f32>(1.0), albedo, 0.4);
+    let shininess = metallic * (1.0 - 0.55 * rough);
+
+    var color = albedo * lighting(n) * (1.0 - 0.85 * metallic) + reflection * shininess;
+    // A little glint on glossy non-metals (glass, paint).
+    color += g.sun_color.xyz * pow(sun_amount, 64.0) * 0.14 * (1.0 - rough) * (1.0 - metallic);
+    color += albedo * glow * 1.4;
     return vec4<f32>(mix(color, g.sky.xyz, fog(in.world)), 1.0);
 }

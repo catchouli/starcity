@@ -1,18 +1,23 @@
 //! Game time: a calendar date and time of day that tick up with the simulation.
 //!
-//! One game hour is [`SECONDS_PER_HOUR`] seconds of simulation, so at normal
-//! speed a day takes 48 s, a week about 5½ minutes and a year about 4¾ hours.
-//! The speed buttons multiply everything (vehicles, towns, the clock itself):
-//! at 8× a day is 6 s and a year about 36 minutes.
+//! The **calendar** runs one day per second of simulation, so at normal speed
+//! a month is about 30 s and a year about 6 minutes, in step with the
+//! economy's own months and years (GAME-DESIGN.md §2). The game spans 2000 to
+//! 2050, so that's about 5 hours at 1×, and under an hour at 8×.
+//!
+//! The **light** (time of day) is separate: one cycle every
+//! [`LIGHT_CYCLE_SECONDS`] of simulation, slow enough to look good. The speed
+//! buttons multiply both, along with vehicles, towns and everything else.
 //!
 //! The calendar is the real Gregorian one, with leap years, starting on
-//! Saturday 1 January 2000. Weeks and months are for display and, later, for
-//! the economy's accounting periods (see GAME-DESIGN.md).
+//! Saturday 1 January 2000.
 
-/// Simulation seconds in one game hour.
-pub const SECONDS_PER_HOUR: f64 = 2.0;
+/// Simulation seconds in one calendar day.
+pub const SECONDS_PER_DAY: f64 = 1.0;
+/// Simulation seconds for the light to go round once (a full day and night).
+pub const LIGHT_CYCLE_SECONDS: f32 = 120.0;
 const START_YEAR: i32 = 2000;
-/// Time of day the game starts at, so the first view is in morning light.
+/// Hour of the day the light starts at, so the first view is in morning light.
 pub const START_HOUR: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,14 +52,12 @@ impl Speed {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DateTime {
+pub struct Date {
     pub year: i32,
     /// 1 to 12.
     pub month: u32,
     /// 1 to 31.
     pub day: u32,
-    pub hour: u32,
-    pub minute: u32,
     /// 0 = Sunday.
     pub weekday: u32,
 }
@@ -64,7 +67,7 @@ const MONTHS: [&str; 12] = [
 ];
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-impl DateTime {
+impl Date {
     pub fn date_string(&self) -> String {
         format!(
             "{} {} {} {}",
@@ -74,18 +77,16 @@ impl DateTime {
             self.year
         )
     }
-
-    /// Time to the nearest quarter hour, so the display changes twice a second
-    /// at normal speed, not every frame.
-    pub fn time_string(&self) -> String {
-        format!("{:02}:{:02}", self.hour, self.minute / 15 * 15)
-    }
 }
 
+/// The calendar and the light cycle run separately: the calendar fast enough
+/// for a 50-year game, the light slowly enough to look good.
 #[derive(Clone, Copy, Debug)]
 pub struct Clock {
-    /// Game hours since midnight on 1 January of the start year.
-    hours: f64,
+    /// Calendar days since 1 January of the start year.
+    days: f64,
+    /// Time of day for the light: 0 at midnight, 0.5 at noon.
+    light_phase: f32,
 }
 
 impl Default for Clock {
@@ -95,13 +96,25 @@ impl Default for Clock {
 }
 
 impl Clock {
+    /// A clock at the start date, with the light at this hour of the day.
     pub fn starting_at(hour: f64) -> Clock {
-        Clock { hours: hour }
+        Clock {
+            days: 0.0,
+            light_phase: (hour / 24.0).rem_euclid(1.0) as f32,
+        }
+    }
+
+    /// Jumps to a date given as a year with a fraction (2025.5 is mid-2025).
+    pub fn set_year_f64(&mut self, year: f64) {
+        let y = year.floor() as i32;
+        let in_year = (days_from_civil(y + 1, 1, 1) - days_from_civil(y, 1, 1)) as f64;
+        self.days = (days_from_civil(y, 1, 1) - days_from_civil(START_YEAR, 1, 1)) as f64 + (year - y as f64) * in_year;
     }
 
     /// Advances by `sim_dt` seconds of simulation time.
     pub fn tick(&mut self, sim_dt: f32) {
-        self.hours += sim_dt as f64 / SECONDS_PER_HOUR;
+        self.days += sim_dt as f64 / SECONDS_PER_DAY;
+        self.light_phase = (self.light_phase + sim_dt / LIGHT_CYCLE_SECONDS).rem_euclid(1.0);
     }
 
     /// Advances by `real_dt` seconds at `speed`; returns the simulation time
@@ -113,30 +126,35 @@ impl Clock {
         sim
     }
 
-    /// How far through the day it is: 0 at midnight, 0.5 at noon.
-    pub fn day_fraction(&self) -> f32 {
-        (self.hours / 24.0).fract() as f32
+    /// The time of day the light shows: 0 at midnight, 0.5 at noon.
+    pub fn light_phase(&self) -> f32 {
+        self.light_phase
     }
 
-    pub fn date_time(&self) -> DateTime {
-        let days = (self.hours / 24.0).floor() as i64;
+    pub fn date(&self) -> Date {
+        let days = self.days.floor() as i64;
         let (year, month, day) = civil_from_days(days_from_civil(START_YEAR, 1, 1) + days);
-        let minutes = ((self.hours - days as f64 * 24.0) * 60.0) as u32;
-        DateTime {
+        Date {
             year,
             month,
             day,
-            hour: minutes / 60 % 24,
-            minute: minutes % 60,
             weekday: (days_from_civil(START_YEAR, 1, 1) + days + 4).rem_euclid(7) as u32,
         }
     }
 
-    /// Real seconds until the displayed time (quarter hours) next changes.
-    pub fn seconds_to_next_display_change(&self, speed: Speed) -> f32 {
-        let quarter = (self.hours * 4.0).fract();
-        let sim = (1.0 - quarter) * SECONDS_PER_HOUR / 4.0;
-        (sim / speed.factor().max(0.001) as f64) as f32
+    /// The year with the part-way through it as a fraction (2025.5 is about 1 July 2025).
+    pub fn year_f64(&self) -> f64 {
+        let d = self.date();
+        let start = days_from_civil(d.year, 1, 1);
+        let end = days_from_civil(d.year + 1, 1, 1);
+        let today = days_from_civil(d.year, d.month, d.day);
+        d.year as f64 + (today - start) as f64 / (end - start) as f64
+    }
+
+    /// Real seconds until the date next changes.
+    pub fn seconds_to_next_day(&self, speed: Speed) -> f32 {
+        let left = (1.0 - self.days.fract()) * SECONDS_PER_DAY;
+        (left / speed.factor().max(0.001) as f64) as f32
     }
 }
 
@@ -168,47 +186,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn starts_on_a_saturday_morning_in_2000() {
-        let t = Clock::default().date_time();
-        assert_eq!(t.date_string(), "Sat 1 Jan 2000");
-        assert_eq!(t.time_string(), "08:00");
+    fn starts_on_a_saturday_in_2000_with_the_light_at_8am() {
+        let c = Clock::default();
+        assert_eq!(c.date().date_string(), "Sat 1 Jan 2000");
+        assert!((c.light_phase() - 8.0 / 24.0).abs() < 1e-6);
+        assert!((c.year_f64() - 2000.0).abs() < 1e-9);
     }
 
     #[test]
-    fn a_day_is_48_seconds_and_the_calendar_has_leap_years() {
-        let mut c = Clock::starting_at(0.0);
-        let at = |c: &Clock| c.date_time().date_string();
-        c.advance(48.0, Speed::X1);
+    fn a_day_is_a_second_and_the_calendar_has_leap_years() {
+        let mut c = Clock::default();
+        let at = |c: &Clock| c.date().date_string();
+        c.advance(1.0, Speed::X1);
         assert_eq!(at(&c), "Sun 2 Jan 2000");
         // Faster speeds pass the same game time in less real time.
-        let mut d = Clock::starting_at(0.0);
-        d.advance(6.0, Speed::X8);
+        let mut d = Clock::default();
+        d.advance(0.125, Speed::X8);
         assert_eq!(at(&d), "Sun 2 Jan 2000");
         // 2000 was a leap year (divisible by 400): 1 Jan + 59 days is 29 Feb.
-        let mut c = Clock::starting_at(0.0);
-        c.advance(59.0 * 48.0, Speed::X1);
+        let mut c = Clock::default();
+        c.advance(59.0, Speed::X1);
         assert_eq!(at(&c), "Tue 29 Feb 2000");
-        c.advance(48.0, Speed::X1);
+        c.advance(1.0, Speed::X1);
         assert_eq!(at(&c), "Wed 1 Mar 2000");
         // 2100 is not: the day after 28 Feb 2100 is 1 Mar.
-        let mut c = Clock::starting_at(0.0);
-        c.advance((100.0 * 365.0 + 25.0 + 31.0 + 27.0) * 48.0, Speed::X1);
+        let mut c = Clock::default();
+        c.advance(100.0 * 365.0 + 25.0 + 31.0 + 27.0, Speed::X1);
         assert_eq!(at(&c).split_once(' ').unwrap().1, "28 Feb 2100");
-        c.advance(48.0, Speed::X1);
+        c.advance(1.0, Speed::X1);
         assert_eq!(at(&c).split_once(' ').unwrap().1, "1 Mar 2100");
         // Paused time doesn't move.
-        let before = c.date_time();
+        let before = c.date();
         assert_eq!(c.advance(100.0, Speed::Paused), 0.0);
-        assert_eq!(c.date_time(), before);
+        assert_eq!(c.date(), before);
     }
 
     #[test]
-    fn the_time_of_day_wraps() {
+    fn a_game_to_2050_takes_about_five_hours_at_normal_speed() {
+        let mut c = Clock::default();
+        // 2000 to 2049 has 13 leap years: 1 Jan 2050 is day 18,263.
+        let days = 50.0 * 365.0 + 13.0;
+        c.advance(days as f32 * SECONDS_PER_DAY as f32, Speed::X1);
+        assert_eq!(c.date().date_string(), "Sat 1 Jan 2050");
+        assert!((c.year_f64() - 2050.0).abs() < 1e-9, "{}", c.year_f64());
+        let hours = days * SECONDS_PER_DAY / 3600.0;
+        assert!((4.5..5.5).contains(&hours), "{hours} hours");
+    }
+
+    #[test]
+    fn the_calendar_can_be_set_to_any_date() {
+        let mut c = Clock::default();
+        c.set_year_f64(2025.0);
+        assert_eq!(c.date().date_string(), "Wed 1 Jan 2025");
+        c.set_year_f64(2025.5);
+        assert_eq!((c.date().year, c.date().month), (2025, 7));
+        assert!((c.year_f64() - 2025.5).abs() < 0.01);
+        c.set_year_f64(2000.0);
+        assert_eq!(c.date().date_string(), "Sat 1 Jan 2000");
+        c.set_year_f64(2050.0);
+        assert_eq!(c.date().date_string(), "Sat 1 Jan 2050");
+    }
+
+    #[test]
+    fn the_light_cycles_independently_of_the_calendar() {
         let mut c = Clock::starting_at(23.0);
-        assert_eq!(c.date_time().time_string(), "23:00");
-        c.advance(3.0, Speed::X1);
-        let t = c.date_time();
-        assert_eq!((t.day, t.time_string().as_str()), (2, "00:30"));
-        assert!((c.day_fraction() - 0.5 / 24.0).abs() < 1e-4);
+        c.advance(LIGHT_CYCLE_SECONDS / 24.0 * 1.5, Speed::X1);
+        assert!((c.light_phase() - 0.5 / 24.0).abs() < 1e-4, "{}", c.light_phase());
+        // A whole light cycle is four calendar months.
+        let mut c = Clock::default();
+        c.advance(LIGHT_CYCLE_SECONDS, Speed::X1);
+        assert!((c.light_phase() - Clock::default().light_phase()).abs() < 1e-4);
+        assert_eq!((c.date().month, c.date().day), (4, 30), "{:?}", c.date());
+        assert!(c.seconds_to_next_day(Speed::X8) <= 0.125 + 1e-6);
     }
 }
