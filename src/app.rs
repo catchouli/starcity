@@ -479,7 +479,7 @@ impl StarcityApp {
                 Network::Road,
             ),
             (Tool::Rail, Some(a), Some(b)) => (
-                rails::plan(
+                rails::plan_terraforming(
                     &self.world,
                     &self.rails,
                     &self.roads,
@@ -509,6 +509,7 @@ impl StarcityApp {
                     Plan {
                         pieces,
                         blocked: sp.blocked,
+                        ..Default::default()
                     },
                     Network::Rail,
                 )
@@ -595,7 +596,7 @@ impl StarcityApp {
                 }
             }
             Tool::Rail => {
-                let plan = rails::plan(
+                let plan = rails::plan_terraforming(
                     &self.world,
                     &self.rails,
                     &self.roads,
@@ -604,9 +605,19 @@ impl StarcityApp {
                     a,
                     b,
                 );
+                let terrain = if plan.blocked.is_none() {
+                    crate::terrain::edit::apply(&mut self.world, &plan.terraform)
+                } else {
+                    Vec::new()
+                };
+                if !terrain.is_empty() {
+                    // The ground moved: buildings, signals and trains sit at new heights.
+                    self.static_changed = true;
+                    self.props_changed = true;
+                }
                 Changes {
                     infra: plan.build(&mut self.rails),
-                    ..Default::default()
+                    terrain,
                 }
             }
             Tool::Station => {
@@ -1323,9 +1334,15 @@ impl StarcityApp {
                 Network::Rail => "track",
             };
             match plan.blocked {
-                None => format!("Build {what}: {} tiles", plan.pieces.len()),
+                None if plan.terraform_steps > 0 => format!(
+                    "Build {what}: {} tiles, £{} (£{} levelling the ground)",
+                    plan.pieces.len(),
+                    plan.cost(),
+                    plan.terraform_cost()
+                ),
+                None => format!("Build {what}: {} tiles, £{}", plan.pieces.len(), plan.cost()),
                 Some(Blocked::Water) => format!("Can't build {what} on water"),
-                Some(Blocked::Slope) => format!("Can't build {what} across this slope"),
+                Some(Blocked::Slope) => format!("Can't build {what} here: the ground is too steep"),
                 Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
                 Some(Blocked::Signal) => "There's a signal in the way: remove it first".to_string(),
             }

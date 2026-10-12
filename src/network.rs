@@ -1,7 +1,7 @@
 //! Shared machinery for tile networks (roads and rails): per-tile bit layers,
 //! tile edges, diagonal walks, and all-or-nothing build plans.
 
-use crate::terrain::World;
+use crate::terrain::{Shape, World};
 
 /// Tile edges. These double as the road "half" bits (centre to that edge).
 pub const N: u8 = 1 << 0;
@@ -137,9 +137,35 @@ pub enum Blocked {
 pub struct Plan {
     pub pieces: Vec<Piece>,
     pub blocked: Option<Blocked>,
+    /// Terrain corners to move (corner grid position, new height in blocks)
+    /// so the pieces fit on sloping ground. Empty unless the plan terraforms.
+    pub terraform: Vec<((i32, i32), u16)>,
+    /// Total height moved, in block-steps summed over corners (the basis of the cost).
+    pub terraform_steps: u32,
 }
 
+/// Price of one new piece of road or track.
+pub const PIECE_COST: u32 = 100;
+/// Price of moving one terrain corner by one block. Levelling a tile costs
+/// several times more than the track laid on it.
+pub const TERRAFORM_COST: u32 = 150;
+
 impl Plan {
+    pub fn from_pieces(pieces: Vec<Piece>) -> Plan {
+        Plan {
+            pieces,
+            ..Default::default()
+        }
+    }
+
+    pub fn terraform_cost(&self) -> u32 {
+        self.terraform_steps * TERRAFORM_COST
+    }
+
+    pub fn cost(&self) -> u32 {
+        self.pieces.len() as u32 * PIECE_COST + self.terraform_cost()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pieces.is_empty()
     }
@@ -178,7 +204,19 @@ pub fn slope_check(world: &World, x: i32, z: i32, along_x: bool, along_z: bool, 
     let Some((base, shape)) = world.surface(x, z) else {
         return Err(Blocked::Water);
     };
-    if base < world.sea_level {
+    shape_check(world.sea_level, base, shape, along_x, along_z, diagonal)
+}
+
+/// `slope_check` for a surface that's already been looked up (or planned).
+pub fn shape_check(
+    sea_level: u16,
+    base: u16,
+    shape: Shape,
+    along_x: bool,
+    along_z: bool,
+    diagonal: bool,
+) -> Result<(), Blocked> {
+    if base < sea_level {
         return Err(Blocked::Water);
     }
     if shape.0 == 0 {

@@ -6,6 +6,7 @@
 //! corners are raised. Underground blocks are full; surface blocks (and tunnel
 //! ramps) can be sloped.
 
+pub mod edit;
 pub mod generation;
 pub mod mesh;
 

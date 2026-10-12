@@ -43,6 +43,7 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | Esc | Back to the pointer tool |
 | Home / island button | Centre the view on the island |
 | Signal tool | Click track to place a signal facing you, click again to turn it round, right-click to remove |
+| Rail tool | Drag to lay track. Ground with the wrong slope is levelled for an extra cost (shown in the status bar) unless it's too steep |
 | Station tool | Drag along straight track or flat ground to build platforms |
 | Train tool | Click plain track to place a train heading away from you |
 | Pointer click | Open a train (orders, stop/go), a station or a town |

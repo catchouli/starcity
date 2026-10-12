@@ -72,7 +72,7 @@ pub fn plan(world: &World, roads: &Layer, rails: &Layer, buildings: &Layer, a: (
         let n = (dx.abs() + dz.abs() + 1) / 2;
         diagonal(roads, a, (dx.signum(), dz.signum()), n)
     };
-    let mut plan = Plan { pieces, blocked: None };
+    let mut plan = Plan::from_pieces(pieces);
     let tiles: Vec<_> = plan.tiles().collect();
     for t in tiles {
         let bits = plan.result(roads, t).unwrap();

@@ -5,7 +5,8 @@
 
 use crate::network::{self, Blocked, E, Layer, N, Piece, Plan, S, W, edge_towards, midpoint};
 use crate::terrain::World;
-use std::collections::BTreeMap;
+use crate::terrain::edit::Corners;
+use std::collections::{BTreeMap, HashMap};
 
 pub const X: u8 = 1 << 0;
 pub const Y: u8 = 1 << 1;
@@ -136,7 +137,8 @@ pub fn check(world: &World, roads: &Layer, buildings: &Layer, x: i32, z: i32, bi
 }
 
 /// Plans track dragged from tile `a` to tile `b`: straight along an axis, or
-/// diagonal when the drag is nearer 45°.
+/// diagonal when the drag is nearer 45°. Slopes that don't suit the track
+/// block it.
 pub fn plan(
     world: &World,
     rails: &Layer,
@@ -145,6 +147,35 @@ pub fn plan(
     signals: &Signals,
     a: (i32, i32),
     b: (i32, i32),
+) -> Plan {
+    plan_with(world, rails, roads, buildings, signals, a, b, false)
+}
+
+/// Like [`plan`], but where the ground has the wrong slope the plan levels it
+/// (see `Plan::terraform`), which costs extra. Ground that's too steep to
+/// level without moving corners too far still blocks it.
+pub fn plan_terraforming(
+    world: &World,
+    rails: &Layer,
+    roads: &Layer,
+    buildings: &Layer,
+    signals: &Signals,
+    a: (i32, i32),
+    b: (i32, i32),
+) -> Plan {
+    plan_with(world, rails, roads, buildings, signals, a, b, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_with(
+    world: &World,
+    rails: &Layer,
+    roads: &Layer,
+    buildings: &Layer,
+    signals: &Signals,
+    a: (i32, i32),
+    b: (i32, i32),
+    terraform: bool,
 ) -> Plan {
     let (dx, dz) = (b.0 - a.0, b.1 - a.1);
     let pieces = if dx == 0 && dz == 0 {
@@ -157,19 +188,85 @@ pub fn plan(
         let n = (dx.abs() + dz.abs() + 1) / 2;
         diagonal(rails, a, (dx.signum(), dz.signum()), n)
     };
-    let mut plan = Plan { pieces, blocked: None };
+    let mut plan = Plan::from_pieces(pieces);
     let tiles: Vec<_> = plan.tiles().collect();
-    for t in tiles {
-        let bits = plan.result(rails, t).unwrap();
+    let bits_at: Vec<u8> = tiles.iter().map(|&t| plan.result(rails, t).unwrap()).collect();
+    for (&t, &bits) in tiles.iter().zip(&bits_at) {
         if signals.by_tile.contains_key(&t) && bits != rails.get(t.0, t.1) {
             plan.blocked = Some(Blocked::Signal);
-            break;
+            return plan;
         }
-        if let Err(why) = check(world, roads, buildings, t.0, t.1, bits) {
-            plan.blocked = Some(why);
-            break;
+        if roads.get(t.0, t.1) != 0 || buildings.get(t.0, t.1) != 0 {
+            plan.blocked = Some(Blocked::Occupied);
+            return plan;
         }
     }
+
+    // Each pass finds the tiles whose ground doesn't suit their track and
+    // levels them; levelling can disturb neighbours, so check again until
+    // everything fits (or it clearly won't).
+    let mut corners = Corners::new(world);
+    let mut levelled: HashMap<(i32, i32), i32> = HashMap::new();
+    for pass in 0..8 {
+        let mut misfits = Vec::new();
+        for (&t, &bits) in tiles.iter().zip(&bits_at) {
+            let Some((base, shape)) = corners.surface(t.0, t.1) else {
+                plan.blocked = Some(Blocked::Water);
+                return plan;
+            };
+            match network::shape_check(
+                world.sea_level,
+                base,
+                shape,
+                bits & X != 0,
+                bits & Y != 0,
+                bits & DIAGONALS != 0,
+            ) {
+                Ok(()) => {}
+                Err(Blocked::Slope) if terraform && pass < 7 => misfits.push(t),
+                Err(why) => {
+                    plan.blocked = Some(why);
+                    return plan;
+                }
+            }
+        }
+        if misfits.is_empty() {
+            break;
+        }
+        for t in misfits {
+            // Track wants to stay level from one levelled tile to the next, so
+            // reuse a neighbour's height; otherwise move the ground least.
+            let h = levelled.get(&t).copied().or_else(|| {
+                [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .find_map(|&(dx, dz)| levelled.get(&(t.0 + dx, t.1 + dz)).copied())
+            });
+            let h = h.unwrap_or_else(|| {
+                let mut c = corners.tile(t.0, t.1).unwrap();
+                c.sort();
+                c[1]
+            });
+            levelled.insert(t, h);
+            if !corners.level(t.0, t.1, h) {
+                plan.blocked = Some(Blocked::Slope);
+                return plan;
+            }
+        }
+    }
+
+    // Moving the ground mustn't disturb anything already built beside it.
+    for (x, z) in corners.affected_tiles() {
+        if tiles.contains(&(x, z)) {
+            continue;
+        }
+        let built = roads.get(x, z) != 0 || buildings.get(x, z) != 0 || rails.get(x, z) != 0;
+        if built && corners.surface(x, z) != world.surface(x, z) {
+            plan.blocked = Some(Blocked::Occupied);
+            return plan;
+        }
+    }
+    plan.terraform = corners.changes();
+    plan.terraform_steps = corners.steps();
     plan
 }
 

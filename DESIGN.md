@@ -70,7 +70,7 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - **Pieces**: each tile has 8 road bits. Four *halves* join the tile centre to an edge midpoint, and combine into straights, bends, T-junctions and crossroads. Four *diagonals* join two adjacent edge midpoints across a corner, and a 45° road is a staircase of them. Pieces meet at edge midpoints, which later forms the graph cars drive on.
 - **Drawing**: drag from a tile; mostly along an axis gives a straight road, nearer 45° gives a diagonal. The end tiles get the half pointing inwards, plus the outward half if a road already reaches that edge. That gives T-junctions, bends and continuations without special cases.
 - **Diagonals off existing road**: dragging diagonally from a dead end turns that last tile into a diagonal piece, so the road bends 45° where it enters the tile and carries straight on. From a through road or junction, the road continues to the tile's far edge along its own axis, then turns 45°. A diagonal leaving through a dead end's open edge replaces the stub. From an empty tile there are two possible 45° lines; the planner picks the one that joins up at the far end.
-- **Fit rules (v1)**: anything on flat ground; on a slope only straight pieces running up the slope; diagonals need flat ground; nothing on water. **All or nothing**: if any piece doesn't fit, the whole preview turns red, the status bar says why, and nothing is built.
+- **Fit rules (v1)**: anything on flat ground; on a slope only straight pieces running up the slope; diagonals need flat ground; nothing on water. **All or nothing**: if any piece doesn't fit, the whole preview turns red, the status bar says why, and nothing is built. Track can level misfit ground for a fee (§4.2); roads can't yet.
 - **Rendering**: roads are drawn by the terrain shader from a per-tile `Rgba8Uint` texture (r = roads, g = rails, b/a = drag preview), as a distance field around the pieces. They follow slopes exactly, cost no extra geometry, and placing one rewrites a single texel.
 - Towns are made of the same roads the player builds.
 
@@ -79,6 +79,7 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 - One track segment takes a whole tile, **with borders on each side** (ballast/fence).
 - **Pieces** (TTD-style): every piece joins two edge midpoints. There are two straights and four corner diagonals, so no 90° turns and nothing stops at a tile's centre. Junctions (switches) are pieces sharing an edge midpoint.
 - **Drawing** follows the road rules: drag straight or at 45°, all or nothing. A diagonal off a straight starts at the edge the straight leads to; from an existing diagonal it carries on along the same line. A diagonal arriving where track already reaches its entry edge joins there. Track is drawn by the shader (ballast, sleepers, rails) from the `g` channel of the infrastructure texture. Roads and track can't share a tile yet (level crossings later).
+- **Levelling** ✅: where the ground has the wrong slope, the rail tool levels it instead of refusing. Each misfit tile is flattened (to the median of its corners, or its neighbour's height so the track stays level), and surrounding corners move just enough to keep every step to a neighbour at one block or less. Terraforming is priced: a piece costs £100 and each corner moved by one block costs £150, shown in the status bar while dragging. It's refused ("the ground is too steep") if a corner would move more than 3 blocks or more than 160 corners would move, which happens when a flat bench would drag a whole hillside with it, and if it would disturb roads, buildings or track beside it. The plan carries the corner changes (`Plan::terraform`) and `terrain::edit::apply` writes them. Roads and stations don't level yet.
 - **Single track per tile.** Trains can run either way along it. A double-track line is two parallel rail tiles that the player links with junctions.
 - **Collisions are real.** If two trains meet head-on on unsignalled track, they crash. Safety is the player's job.
 - **Diagonal pieces**: a 45° drag builds dedicated diagonal track (TTD-style half-tile pieces running corner to corner), not a staircase of straight tiles.
@@ -241,30 +242,24 @@ Terrain generation was never really started: it only produced random noise for o
 6. Name: "Starcity" is just the directory name for now.
 7. ~~Diagonal roads and rail~~: dedicated diagonal pieces (§4.2).
 
-## 13. Hand-off: where things stand (2026-10-11)
+## 13. Hand-off: where things stand (2026-10-12)
 
-### Done in the latest session (uncommitted work is now committed)
-- **Road vehicles** (`src/vehicles.rs`): cars, buses and trucks drive the road graph in the right-hand lane, choose randomly at junctions, turn at dead ends and queue behind each other. Each town keeps a fleet sized to its population (capped at 900 vehicles in total). Tested: junction options, dead-end U-turns, queueing.
-- **Static/dynamic prop buffers**: buildings and stations go in a static box buffer, rebuilt only when they change. Trains, vehicles and signals go in a dynamic one, rebuilt each frame.
-- **Default map is 512×512** (about 29 towns).
-- **Demo scenario** (`src/scenario.rs`): `build_lines` builds rail lines between neighbouring towns (a station near each, track laid straight + 45° + straight, kept only if `trains::reachable` succeeds both ways, otherwise rolled back). **It is written and compiles, but it isn't wired up yet.**
+### Done in the latest session
+- **Demo mode wired up** (`src/scenario.rs`, `StarcityApp::start_demo`): `--demo` natively, `?demo` on the web. It builds up to 12 rail lines between neighbouring towns, each with a 3-car train shuttling between its two stations, and the status bar says "Demo: N lines, M trains". The old fixed straight/45°/straight track shape never fitted the hills (every candidate hit a slope), so lines are now routed tile by tile with an A* over (tile, heading) using straights and curves (`scenario::route`). On the default 512 map it builds about 4 lines (each town gets at most one, 13 towns, spacing and slopes limit it). There's a test for that, which also runs the trains for two minutes.
+- **Terraforming for rail** (§4.2 "Levelling"): `src/terrain/edit.rs` (`Corners` overlay, `apply`), `rails::plan_terraforming`, `Plan::{terraform, terraform_steps, cost}`. Tested on a generated map (levelled ground takes the track and stays consistent) and on a uniform steep ramp (refused).
+- Notes corrected: the 512 map founds ~13 towns, not 29 (the cap of 24 and the spacing of size/5 apply).
 
 ### Next steps, in order
-1. **Wire up demo mode.**
-   - Native: in `main.rs`, check `std::env::args().any(|a| a == "--demo")` and pass a flag to `StarcityApp::new`.
-   - Web: check `web_sys::window().location().search()` contains `demo`.
-   - When set, after `regenerate`: call `scenario::build_lines(&mut Railway { world, roads, buildings: &towns.occupied, signals, rails, stations }, &towns, 12)`. Then for each `Line`, `trains.spawn(&rails, line.start, line.forward, 3)` and `set_orders(id, vec![line.to, line.from], 0)`. Then name the new stations (`name_station`), mark the whole infra layer dirty, set `static_changed`, bump `track_version`, and show "Demo: N lines" in the status bar.
-   - Add a unit test that `build_lines` builds at least one line on a generated 512 map.
-   - Mention `--demo` / `?demo` in the README.
-2. **Check road vehicles visually** (native screenshot with `STARCITY_DEMO=towns`), and tune sizes, speeds and colours. Possible follow-ups: buses running between bus stops, trucks to industries, and despawning vehicles that wander far from home.
-3. **Check performance on the web at 512²**, with ~29 towns and hundreds of vehicles. The whole scene redraws every frame while anything moves. Look at generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
-4. **Not yet verified live**: passenger loading and unloading (`StarcityApp::handle_arrivals` has no test), the train, station and town windows, and the station and train tools in the browser.
-5. **Money** (M7 start): construction costs, passenger income by distance, a balance in the status bar, and loans.
-6. **Industries and cargo** (M7): coal mines and power stations etc., freight wagons, catchment for cargo.
-7. **Terraforming** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1).
-8. Smaller items: cars and trains tilting on slopes, cloud shadows, settlement-site overlay (M2), save/load.
+1. **Money** (M7 start). Costs already exist (`Plan::cost`) and are shown, but nothing is charged: add a balance in the status bar, charge on build, passenger income by distance, loans. Then give roads the same levelling (`roads::plan` has the same per-tile check) and let stations level their platforms.
+2. **Check road vehicles visually** (native screenshot with `STARCITY_DEMO=towns`), and tune sizes, speeds and colours. Possible follow-ups: buses running between bus stops, trucks to industries, and despawning vehicles that wander far from home. Screenshots in demo mode centre on the biggest town; use `STARCITY_FOCUS` to look at a line.
+3. **Check performance on the web at 512²** with the demo and hundreds of vehicles. The whole scene redraws every frame while anything moves. Look at generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
+4. **Not yet verified live**: passenger loading and unloading (`StarcityApp::handle_arrivals` has no test), the train, station and town windows, the station and train tools in the browser, and the new levelling in the browser (it's only covered by unit tests; terrain re-meshing after a plan goes through `Changes::terrain`).
+5. **Industries and cargo** (M7): coal mines and power stations etc., freight wagons, catchment for cargo.
+6. **Terraforming tools** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1). `terrain::edit::Corners::level` is the building block.
+7. Smaller items: cars and trains tilting on slopes, cloud shadows, settlement-site overlay (M2), save/load.
 
 ### Working notes
 - `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page.
-- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_DEMO=roads|towns`.
-- `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, so give screenshot runs ~40 s.
+- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_DEMO=roads|towns`; pass `--demo` for the rail-line scenario.
+- `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, and screenshot runs sometimes take 30 s or more of wall time even though the app only uses about 2 s of CPU, so give them time.
+- Generated seabed at height 0 has no blocks at all, so `World::surface` can return `None` for in-bounds sea tiles; `terrain::edit` treats those as flat at height 0.

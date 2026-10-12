@@ -91,7 +91,7 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
     let start = (to_xz(a_end.0 + s, a_end.1), dir);
     let goal = to_xz(b_end.0 - s, b_end.1);
     let pieces = route(rw, start.0, dir, goal)?;
-    let plan = Plan { pieces, blocked: None };
+    let plan = Plan::from_pieces(pieces);
     plan.build(rw.rails);
 
     let (from, to) = (
