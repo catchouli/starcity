@@ -90,7 +90,7 @@ The world is the scoreboard: the same map shows the ending, because it has been 
 - **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000. **One calendar day is one second of simulation**, so at normal speed a month is about 30 s and a year about 6 minutes, and the game runs 2000 to 2050 in about **5 hours at 1×** (about 76 minutes at 4×, 38 at 8×). The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*: the calendar, vehicles, towns, the light.
 - **Time of day is separate from the calendar.** The light (DESIGN.md §7b) cycles once every 120 seconds of simulation, whatever the date: slow enough to look good, and independent of the calendar so the calendar can run at the pace a 50-year game needs. The toolbar shows the date with a sun or moon beside it for the time of day, next to the speed buttons.
 - **The economy uses the same time.** *A tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s*, close to the calendar's own month and year, so "monthly" and "yearly" in this document line up with what the date shows. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
-- **Starting position:** £100,000 cash, a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
+- **Starting position:** a tiny company with £30,000 cash and no loan, and a garage for a headquarters (§9.1). Upgrading it to a Depot office (£10,000) opens a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
 - **Income:** paid on delivery, to the company, when cargo is unloaded at a station that accepts it. See §3.
 - **Expenses:**
   - *Construction:* priced per piece (`network::PIECE_COST`, now £100; proposed £40 per road piece and £80 per rail piece, since a route between two towns is 100+ tiles), plus levelling at `TERRAFORM_COST` per corner-block, plus stations and terminals (§8).
@@ -523,13 +523,16 @@ The game is a sandbox first, but a little structure keeps sessions interesting:
 
 The company has a **headquarters**, a real building in a town of your choice, upgraded in stages. It is both the player's progress bar and the main way the game paces what is available. It is also a place: it appears on the map, changes its shape with every level, and by the late game is the tallest thing in the city.
 
-**Placing it.** You pick the town once, at the start (a free 2×2 office). Choosing is a real decision: the HQ gives its town a Prosperity bonus that grows with its level (a company town, §5.10), and later levels need space, power and a large city to support them. It can be relocated, at the cost of the progress in the building.
+**It is there from the start.** You begin as a **tiny baby company** in a town the map generator chooses for you: a modest town (500–1,500 people) with another town within 60–100 tiles, so a first route exists. Your **headquarters is already standing there as a garage** (level 0): a shed with a sign, a little cash (£30,000), no loan, and only the basics (roads, bus stops, a minibus). The camera opens on it. Everything the later game offers sits behind upgrading it, so the first goal on screen is “**Build your Depot office**”: the first upgrade (£10,000 and a delivery of Goods) turns the toy into a company: the loan opens, rail opens, goals start and the Assistant (§9.2) moves in. Having the HQ there from the first frame makes it the obvious centre of the game and the player never wonders what the point is: it's the thing to grow.
+
+**The starting town.** It is the company town: its Prosperity bonus grows with each HQ level (§5.10), and by the Citadel it has probably become your biggest city. A later option is a “choose your start” step in the new-game screen (pick from three towns on a map preview). **Relocating** the HQ is allowed from level 3 on, at a cost, if the player's growth has taken them elsewhere.
 
 **Levels.** Each upgrade is a *construction project*: you pay money (or, later, compute) and **deliver materials to the site** (Steel, Goods, then Chips, Lunar glass...). Work shows as scaffolding on the model, then the new model replaces it. Each level also has requirements (a checklist in the HQ window, lit green as met), and a technology year, so a level can't be reached before its time.
 
 | Level | Name | Needs | Unlocks |
 |---|---|---|---|
-| 1 | **Depot office** (2000) | Free at the start | Roads, rail, buses, trains. Loan £200k; up to 40 vehicles |
+| 0 | **Garage** (2000) | Already built at the start | Roads, bus stops, the minibus. £30k, no loan, up to 6 vehicles |
+| 1 | **Depot office** (2000) | £10k; deliver Goods; earn your first £1,000 | Rail, trains, signals. Loan £200k; up to 40 vehicles; goals and the Assistant |
 | 2 | **Regional office** | Company value £250k; town ≥ 2,000 | Ports, ferries, airports and planes; first industries funded; 150 vehicles; loan £500k; hosting program |
 | 3 | **Corporate tower** | Value £1M; metropolis ≥ 20,000 | Industry deliveries at scale, goals, Forecast (year ahead); 400 vehicles; server farms |
 | 4 | **Data campus HQ** (2012+) | Own a data centre; Training tier 1 | The Compute meter becomes the headline; fleet optimiser, autonomy; power grid planning |
@@ -548,7 +551,30 @@ The company has a **headquarters**, a real building in a town of your choice, up
 
 **Vehicles and slots.** Each level raises the vehicle cap and the loan limit and opens slots for compute programs (§5.8) so the HQ governs company size, not only features.
 
-**Look.** One `.glb` per level in `assets/models/buildings/` (`hq_1_depot` ... `hq_8_convergence`), with `role = hq` and `level = N` custom properties; artists can change any of them. The scaffolding stage is a shared model. Sizes grow from 2×2 to 6×6 (the placement checks the room, as the megastructure merge does).
+**Look.** One `.glb` per level in `assets/models/buildings/` (`hq_1_depot` ... `hq_8_convergence`), with `role = hq` and `level = N` custom properties; artists can change any of them. The scaffolding stage is a shared model. Sizes grow from 2×2 (the garage) to 6×6 (the placement checks the room, as the megastructure merge does).
+
+### 9.2 Never stuck: the Assistant and the next step
+
+The failure to avoid is a new player staring at a map unsure what to do, or a late-game player with money, compute and no idea what is worth building. The game always has an answer.
+
+**The Next Step panel.** A small, always-available panel (a Win95 window, collapsible, remembering its state) shows **one** suggested goal with a button that takes you there (“Build your Depot office” with an arrow on the map to the garage; “Connect these two towns” with the two towns highlighted; “Deliver coal to Ashford's power station: build a station at the mine”). It is built from the HQ checklist (§9.1) and the goals (§9), in a priority order a designer can read: *the next thing that unlocks something*. Each goal shows the exact tool to use and flashes it in the toolbar. Finishing one pays a small bonus and shows the next. There is never a screen without one.
+
+**Stuck detection.** Pure checks on data we already have, run once a month, each producing a gentle suggestion rather than a lecture:
+- *No income for 3 months* → “Your bus line has no passengers: stations need to be near buildings” with the catchment drawn.
+- *Cash below the cost of the cheapest useful thing* → “Sell a vehicle, or take the first loan” (once the HQ allows it).
+- *A vehicle with no orders, a train that can't find a path, a station nothing serves* → “This train has nowhere to go” with the vehicle highlighted.
+- *A town stopped growing* → “Ashford needs food” with the cargo and the nearest producer shown.
+- *Power short, programs idle, the HQ checklist untouched for a long time, no goal done for 10 minutes* → the next HQ requirement, highlighted.
+- *Nothing left to do in the current stage* → the invitation of §10.13.
+
+**The Assistant.** The suggestions come from a character who changes with the era, which both explains the help and carries the story: in 2000 a cheerful desktop-style helper in the corner (a nod to the era's talking paperclips and wizards, in a Win95 balloon), in the 2010s a quiet card in the corner of the screen, in the 2020s a voice-style chat panel, and from the AI Citadel (§9.1) a calm presence that speaks for the company's agents. It is dismissible, can be switched off entirely, never interrupts a build in progress, and says things like “That's a lot of coal. A steel mill needs iron ore too.” Its tips are data (a table of conditions and text), so writers and artists can change them without code.
+
+**Guidance rules.**
+- *One thing at a time.* A single next goal, never a list of twelve.
+- *Show, don't tell.* Every tip points at the map.
+- *Quiet when it's going well.* No tips while money and growth are rising.
+- *Always skippable*, and a “hide hints” setting for experienced players. A sandbox with no hints is a setting.
+- *The same system leads the player on* from stage to stage (§10.13), so the endgame is reached by following the Assistant, not by guessing.
 
 ## 10. Eras: from the web to the singularity
 
@@ -798,7 +824,7 @@ Each phase is playable and testable on its own; later phases lean on earlier one
 
 ### Next steps, in order
 
-**Phase 4 — Money.** `company.rs`: `Company { cash, loan, ledger }`. Charge `Plan::cost` when building (refuse if short and say why); monthly tick for running costs, upkeep and interest; cash in the status bar; the Finance window (§2). Passengers pay by distance (§3): stations record origin and boarding time. *Test:* a scripted route earns a profit within the §8 range. *Touches:* `app.rs`, `network.rs`, `stations`, `ui/`.
+**Phase 4 — Money, the headquarters and the Next Step panel.** The tiny starting company (£30k, road tools only), the garage HQ placed in the starting town by the map generator, upgrading it as the first goal, and the Next Step panel with its first few goals (build a road and a stop, buy a bus, earn your first £1,000, build the Depot office), so the opening is guided from the first money system.  `company.rs`: `Company { cash, loan, ledger }`. Charge `Plan::cost` when building (refuse if short and say why); monthly tick for running costs, upkeep and interest; cash in the status bar; the Finance window (§2). Passengers pay by distance (§3): stations record origin and boarding time. *Test:* a scripted route earns a profit within the §8 range. *Touches:* `app.rs`, `network.rs`, `stations`, `ui/`.
 
 **Phase 5 — Cargo and stations.** `cargo.rs` with the `Cargo` table (§4); `Station.waiting` becomes per-cargo; vehicles carry a class; rating factors; catchment cache. Passengers remain the one-cargo case. *Test:* rating and catchment unit tests.
 
@@ -806,7 +832,7 @@ Each phase is playable and testable on its own; later phases lean on earlier one
 
 **Phase 7 — Vehicle catalogue and the build window.** The `Model` table (§7) with `from`/`to` years in the glb files; the Build Vehicle window with "coming around 2031" entries; vehicles read their stats from the table; boats and planes use the same table. Players choose the generation they buy.
 
-**Phase 8 — Towns as customers, goals, industry life, the headquarters (levels 1–3).** §5.5, §5.2 closures and spawning, fund-a-new-industry, §9 goals, and the HQ: placement, the checklist window, the construction-project mechanic (deliveries to a site), vehicle and loan caps per level, `role = hq` models. Levels 4–8 arrive with the systems they unlock (Phases 9, 11, 13).
+**Phase 8 — Towns as customers, goals, industry life, headquarters levels 2–3, and the stuck detector.** §5.5, §5.2 closures and spawning, fund-a-new-industry, §9 goals, the monthly stuck checks and the Assistant (§9.2), and the HQ upgrades:  the checklist window, the construction-project mechanic (deliveries to a site), vehicle and loan caps per level, `role = hq` models. Levels 4–8 arrive with the systems they unlock (Phases 9, 11, 13).
 
 **Phase 9 — Data centres and compute.** *Start with the meter:* the Compute meter, rate and log sparkline in the toolbar, driven by the formula of §5.9 with the Servers-era numbers, so the idle-game feel is there before the economy is.  The silica → chips → data-centre chain (§5.8) as ordinary industries; `compute.rs` with the CU pool (decay, allocation sliders) and the Compute window; first programs (hosting, analytics, forecasting, fleet optimiser); the Tech Pace meter shifting introduction years. *Test:* compute pays; brownouts cut CU; the allocation of a program changes its effect with diminishing returns. Later programs (autonomy, generative design, agents, synthesis) are added one at a time as the systems they touch arrive.
 
@@ -880,5 +906,6 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 11. ~~**Compute scale.**~~ Decided: keep the unit-change spectacle (kCU → ... → Brim), as idle-game players already read it. A log-axis meter option stays a cheap fallback if playtests find it confusing.
 12. **How far to take the twist?** Charters and endings (§1.2) assume the agents' behaviour can be steered and tested; the first version could ship with two ledgers and three endings, with agents as hand-written heuristics. Is that enough, or should agents be more surprising (they have a mind of their own)?
 13. **Revisions:** rewinding is powerful, and might undermine consequence. Limited use (three per game) and a heavy compute price are the proposal.
+16. **The Assistant's voice:** a cheerful 2000 helper that gently sends itself up (the paperclip joke) is charming, but the tone must stay helpful. Reviewing with real players is the test.
 15. **HQ gating strength:** the proposal is soft (visible checklists, sandbox unlock). Should levels 2–3 be skippable by paying more, and is a relocation penalty right?
 14. ~~**The moon and the globe: same save?**~~ Decided: same save, optional, and reversible (§10.13).
