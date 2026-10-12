@@ -4,6 +4,7 @@
 //!   `STARCITY_SHOT_FRAME=300` waits that many frames first (default 10).
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
+//! - `STARCITY_HOUR=22`: the game starts at this hour of the day (default 8).
 //! - `STARCITY_ZOOM=30`: initial zoom (visible height in tiles at the focus).
 //! - `STARCITY_FOCUS=dx,dz`: move the camera focus from the map centre.
 
@@ -31,6 +32,10 @@ impl DevTools {
 
     pub fn demo() -> Option<String> {
         std::env::var("STARCITY_DEMO").ok()
+    }
+
+    pub fn hour() -> Option<f64> {
+        std::env::var("STARCITY_HOUR").ok()?.parse().ok()
     }
 
     pub fn zoom() -> Option<f32> {

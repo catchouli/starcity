@@ -1,5 +1,6 @@
 //! 3D scene rendering with plain wgpu into an offscreen texture that egui displays.
 
+use crate::daylight::Light;
 use crate::terrain::BLOCK_HEIGHT;
 use crate::terrain::mesh::{ChunkMesh, Vertex};
 use eframe::egui;
@@ -10,12 +11,6 @@ use wgpu::util::DeviceExt;
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const SKY: wgpu::Color = wgpu::Color {
-    r: 0.55,
-    g: 0.70,
-    b: 0.85,
-    a: 1.0,
-};
 
 /// Texture array layers, matching the `L_*` constants in the shader.
 const TEXTURES: [&[u8]; 5] = [
@@ -45,6 +40,12 @@ pub struct Globals {
     pub cursor: [f32; 4],
     /// Endless ocean: map size, sea surface y, seabed y, extent past the map.
     pub ocean: [f32; 4],
+    /// Sky colour (rgb) and daylight (w).
+    pub sky: [f32; 4],
+    /// Direct light colour, strength included.
+    pub sun_color: [f32; 4],
+    /// Ambient light tint.
+    pub ambient: [f32; 4],
 }
 
 /// An instanced box (signals, and later trains and other props).
@@ -434,6 +435,7 @@ impl SceneRenderer {
         camera_pos: Vec4,
         highlight: Option<Highlight>,
         clouds: CloudState,
+        light: &Light,
     ) {
         let device = &rs.device;
         let samples = supported_samples(rs, settings.msaa);
@@ -444,7 +446,7 @@ impl SceneRenderer {
         self.ensure_target(rs, size, samples);
         let target = self.target.as_ref().unwrap();
 
-        let sun = Vec3::new(-0.45, 1.0, 0.35).normalize();
+        let sun = Vec3::from(light.dir);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: camera_pos.into(),
@@ -475,6 +477,9 @@ impl SceneRenderer {
                     (h.a.1.max(h.b.1) + 1) as f32,
                 ]
             }),
+            sky: [light.sky[0], light.sky[1], light.sky[2], light.day],
+            sun_color: [light.sun[0], light.sun[1], light.sun[2], 0.0],
+            ambient: [light.ambient[0], light.ambient[1], light.ambient[2], 0.0],
         };
         rs.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -518,7 +523,12 @@ impl SceneRenderer {
                     depth_slice: None,
                     resolve_target: resolve,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(SKY),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: light.sky[0] as f64,
+                            g: light.sky[1] as f64,
+                            b: light.sky[2] as f64,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

@@ -1,6 +1,8 @@
 mod app;
 mod camera;
+mod clock;
 mod clouds;
+mod daylight;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
 mod input;
@@ -10,6 +12,7 @@ mod rails;
 mod render;
 mod roads;
 mod scenario;
+mod sea;
 #[cfg(test)]
 mod shader_test;
 mod sim;

@@ -2,6 +2,7 @@
 
 pub mod win95;
 
+use crate::clock::Speed;
 use eframe::egui::{self, Color32, Painter, Rect, Stroke, Ui, pos2, vec2};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -79,6 +80,9 @@ pub struct UiState {
     pub grid: bool,
     pub ortho: bool,
     pub clouds: bool,
+    /// Whether the light follows the time of day.
+    pub day_night: bool,
+    pub speed: Speed,
     pub show_debug: bool,
     pub show_about: bool,
     /// Set for one frame when the player asks to centre the view on the island.
@@ -110,6 +114,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
             ui.checkbox(&mut s.grid, "Tile grid\tG");
             ui.checkbox(&mut s.ortho, "Orthographic\tR");
             ui.checkbox(&mut s.clouds, "Clouds\tC");
+            ui.checkbox(&mut s.day_night, "Day/night cycle\tN");
             ui.separator();
             if ui.button("Centre on island\tHome").clicked() {
                 s.go_home = true;
@@ -162,16 +167,33 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
                 response.on_hover_text(tool.name());
             }
         }
+        // Game speed, at the right-hand end.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for speed in [Speed::X8, Speed::X4, Speed::X2, Speed::X1, Speed::Paused] {
+                let selected = s.speed == speed;
+                let response = win95::tool_button(ui, SIZE, selected, |p, r| icon_speed(p, r, speed));
+                if response.clicked() {
+                    s.speed = speed;
+                }
+                response.on_hover_text(match speed {
+                    Speed::Paused => "Pause (Space)".to_string(),
+                    _ => format!("Game speed {}", speed.label()),
+                });
+            }
+            ui.label("Speed");
+        });
     });
 }
 
-pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str) {
+pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str, clock: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let right_width = 180.0;
-        let left = (ui.available_width() - right_width - 2.0).max(50.0);
+        let (right_width, clock_width) = (180.0, 150.0);
+        let left = (ui.available_width() - right_width - clock_width - 4.0).max(50.0);
         win95::status_pane(ui, left, s.tool.hint());
         win95::status_pane(ui, right_width, right);
+        win95::status_pane(ui, clock_width, clock);
     });
 }
 
@@ -183,6 +205,29 @@ pub fn about_window(ctx: &egui::Context, open: &mut bool) {
 }
 
 // Icons, drawn into a ~20px square.
+
+fn icon_speed(p: &Painter, r: Rect, speed: Speed) {
+    if speed == Speed::Paused {
+        for x in [0.22, 0.58] {
+            p.rect_filled(
+                Rect::from_min_max(
+                    pos2(r.min.x + x * r.width(), r.min.y + 0.15 * r.height()),
+                    pos2(r.min.x + (x + 0.2) * r.width(), r.min.y + 0.85 * r.height()),
+                ),
+                0.0,
+                Color32::BLACK,
+            );
+        }
+    } else {
+        p.text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            speed.label(),
+            egui::FontId::proportional(13.0),
+            Color32::BLACK,
+        );
+    }
+}
 
 fn icon_pointer(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());

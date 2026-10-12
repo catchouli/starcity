@@ -23,6 +23,11 @@ struct Globals {
     // Endless ocean around the map: map size (tiles), sea surface y, seabed y,
     // how far the ocean extends past the map (tiles).
     ocean: vec4<f32>,
+    // Time of day. sky: sky colour (rgb) and daylight 0..1 (w). sun_color: direct
+    // light colour with its strength. ambient: tint of the hemisphere light.
+    sky: vec4<f32>,
+    sun_color: vec4<f32>,
+    ambient: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -41,8 +46,6 @@ const L_ROCK: i32 = 2;
 const L_GRAVEL: i32 = 3;
 const L_SAND: i32 = 4;
 
-// Must match the renderer's clear colour, so distant ocean fades into the sky.
-const SKY: vec3<f32> = vec3<f32>(0.55, 0.70, 0.85);
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -242,10 +245,10 @@ fn infra_at(p: vec2<f32>) -> Infra {
     return out;
 }
 
-fn lighting(n: vec3<f32>) -> f32 {
+fn lighting(n: vec3<f32>) -> vec3<f32> {
     let sun = max(dot(n, g.sun_dir.xyz), 0.0);
     let sky = mix(0.40, 0.65, n.y * 0.5 + 0.5);
-    return sky + 0.8 * sun;
+    return g.ambient.xyz * sky + g.sun_color.xyz * sun;
 }
 
 @fragment
@@ -318,7 +321,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     let wire_bg = select(color, vec3<f32>(0.08, 0.09, 0.12), g.options.x > 0.5);
     color = mix(wire_bg, vec3<f32>(1.0, 0.85, 0.2), wf);
-    return vec4<f32>(mix(color, SKY, fog(in.world)), 1.0);
+    return vec4<f32>(mix(color, g.sky.xyz, fog(in.world)), 1.0);
 }
 
 // Fog for the endless ocean: nothing on the map is fogged, but the sea fades
@@ -346,7 +349,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);
     alpha = mix(alpha, 1.0, wf);
     let f = fog(in.world);
-    return vec4<f32>(mix(color, SKY, f), mix(alpha, 1.0, f));
+    return vec4<f32>(mix(color, g.sky.xyz, f), mix(alpha, 1.0, f));
 }
 
 // --- Endless ocean -------------------------------------------------------------
@@ -451,7 +454,9 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     let sun = max(dot(n, g.sun_dir.xyz), 0.0);
     let shade = mix(0.68, 0.9, n.y * 0.5 + 0.5) + 0.18 * sun;
     let under = mix(vec3<f32>(0.84, 0.87, 0.94), vec3<f32>(1.0, 1.0, 1.0), step(-0.5, n.y));
-    var color = albedo * under * shade * mix(0.86, 1.04, height) * (1.0 + jitter * 0.08);
+    // Clouds go dusky grey-blue at night.
+    let dusk = mix(vec3<f32>(0.30, 0.34, 0.5), vec3<f32>(1.0), g.sky.w);
+    var color = albedo * under * shade * mix(0.86, 1.04, height) * (1.0 + jitter * 0.08) * dusk;
     color = mix(color, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(color, 1.0);
 }
@@ -517,5 +522,5 @@ fn fs_box(in: BoxOut) -> @location(0) vec4<f32> {
     // Colours arrive as sRGB bytes; alpha > 0.5 marks a lamp, which isn't shaded.
     let albedo = pow(in.color.rgb, vec3<f32>(2.2));
     var color = select(albedo * lighting(in.normal), albedo * 1.4, in.color.a > 0.5);
-    return vec4<f32>(mix(color, SKY, fog(in.world)), 1.0);
+    return vec4<f32>(mix(color, g.sky.xyz, fog(in.world)), 1.0);
 }

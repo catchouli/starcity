@@ -47,7 +47,9 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 | Station tool | Drag along straight track or flat ground to build platforms |
 | Train tool | Click plain track to place a train heading away from you |
 | Pointer click | Open a train (orders, stop/go), a station or a town |
-| Space | Pause / resume trains |
+| Space | Pause / resume the game (the clock, trains, vehicles, towns) |
+| Speed buttons | Pause, 1×, 2×, 4×, 8× game speed (right of the toolbar) |
+| N | Day/night cycle on/off |
 | Bulldoze tool | Click a tile, or drag a rectangle, to clear it to dirt. Grass grows back from the edges. |
 
 ## Development
@@ -66,6 +68,8 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/ui/`: Win95-style theme, windows, menu bar, toolbar and status bar
 - `src/picking.rs`: mouse ray to terrain tile
 - `src/sim.rs`: fixed-tick simulation (bulldozing, grass regrowth)
+- `src/clock.rs`: game date and time, speeds
+- `src/daylight.rs`: sun, sky and light colour through the day
 - `src/network.rs`: shared road/rail layers, edges and build plans
 - `src/roads.rs`, `src/rails.rs`: road and track pieces, drag planning, signals
 - `src/trains.rs`: train movement, routing, path-signal reservations, crashes

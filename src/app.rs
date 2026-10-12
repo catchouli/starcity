@@ -1,5 +1,7 @@
 use crate::camera::Camera;
+use crate::clock::{Clock, Speed};
 use crate::clouds;
+use crate::daylight::{self, Light};
 use crate::input::PhysicalKeys;
 use crate::network::{Blocked, Layer, Plan};
 use crate::picking;
@@ -23,6 +25,11 @@ use web_time::Instant;
 const WIND: Vec2 = Vec2::new(0.6, 0.25);
 /// Redraw interval while the only thing moving is the clouds.
 const CLOUD_FRAME_SECONDS: f64 = 1.0 / 15.0;
+/// Longest simulation step, and the most simulated time per frame.
+const MAX_SIM_STEP: f32 = 0.1;
+const MAX_SIM_PER_FRAME: f32 = 0.4;
+/// The light is re-evaluated at most this often.
+const LIGHT_FRAME_SECONDS: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Network {
@@ -75,7 +82,14 @@ pub struct StarcityApp {
     /// Signals or trains changed, so the prop boxes need rebuilding.
     props_changed: bool,
     trains_moving: bool,
-    paused: bool,
+    clock: Clock,
+    /// The speed to go back to when un-pausing with Space.
+    resume_speed: Speed,
+    /// The light the scene was last drawn with.
+    light: Light,
+    /// How far the day/night cycle is allowed to go, eased as speed or the setting changes.
+    light_strength: f32,
+    last_light_render: f64,
     /// A short-lived status bar message and when it expires.
     message: Option<(String, f64)>,
     /// The road or track being dragged out, shown as a preview.
@@ -118,6 +132,8 @@ impl StarcityApp {
                 grid: true,
                 ortho: false,
                 clouds: true,
+                day_night: true,
+                speed: Speed::X1,
                 #[cfg(not(target_arch = "wasm32"))]
                 show_debug: crate::devtools::DevTools::show_debug(),
                 #[cfg(target_arch = "wasm32")]
@@ -149,7 +165,11 @@ impl StarcityApp {
             last_view: None,
             props_changed: false,
             trains_moving: false,
-            paused: false,
+            clock: Clock::default(),
+            resume_speed: Speed::X1,
+            light: daylight::NOON,
+            light_strength: 1.0,
+            last_light_render: 0.0,
             message: None,
             plan: Plan::default(),
             plan_network: Network::Road,
@@ -177,6 +197,9 @@ impl StarcityApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn dev_setup(&mut self, c: i32) {
         use crate::devtools::DevTools;
+        if let Some(hour) = DevTools::hour() {
+            self.clock = Clock::starting_at(hour);
+        }
         if let Some(zoom) = DevTools::zoom() {
             self.camera.view_height = zoom;
         }
@@ -1033,6 +1056,23 @@ impl StarcityApp {
         }
     }
 
+    /// Moves the day/night light along. The scene is only redrawn when the
+    /// light has visibly changed, and no more than 10 times a second.
+    fn update_light(&mut self, now: f64, dt: f32) {
+        let target = daylight::strength_at(self.ui.speed, self.ui.day_night);
+        let ease = 1.5 * dt;
+        self.light_strength += (target - self.light_strength).clamp(-ease, ease);
+        if now - self.last_light_render < LIGHT_FRAME_SECONDS {
+            return;
+        }
+        let light = Light::at(self.clock.day_fraction(), self.light_strength);
+        if light.differs(&self.light) {
+            self.light = light;
+            self.last_light_render = now;
+            self.scene_dirty = true;
+        }
+    }
+
     fn show_message(&mut self, text: &str, now: f64) {
         self.message = Some((text.to_string(), now + 3.0));
     }
@@ -1110,8 +1150,16 @@ impl StarcityApp {
             if i.key_pressed(Key::G) {
                 self.ui.grid = !self.ui.grid;
             }
+            if i.key_pressed(Key::N) {
+                self.ui.day_night = !self.ui.day_night;
+            }
             if i.key_pressed(Key::Space) {
-                self.paused = !self.paused;
+                if self.ui.speed == Speed::Paused {
+                    self.ui.speed = self.resume_speed;
+                } else {
+                    self.resume_speed = self.ui.speed;
+                    self.ui.speed = Speed::Paused;
+                }
             }
             if i.key_pressed(Key::Home) {
                 self.ui.go_home = true;
@@ -1348,7 +1396,7 @@ impl StarcityApp {
             }
         } else if let Some((text, _)) = self.message.as_ref().filter(|(_, until)| *until > ui.input(|i| i.time)) {
             text.clone()
-        } else if self.paused && !self.trains.list.is_empty() {
+        } else if self.ui.speed == Speed::Paused {
             "Paused (Space to resume)".to_string()
         } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {
             "Click plain track to place a train".to_string()
@@ -1368,9 +1416,11 @@ impl StarcityApp {
                 None => format!("Zoom {:.0}", self.camera.view_height),
             }
         };
+        let when = self.clock.date_time();
+        let clock_text = format!("{}  {}", when.date_string(), when.time_string());
         egui::Panel::bottom("status_bar")
             .frame(panel)
-            .show(ui, |ui| ui::status_bar(ui, &self.ui, &status));
+            .show(ui, |ui| ui::status_bar(ui, &self.ui, &status, &clock_text));
 
         // The menus and keyboard edit `self.ui`; apply those to the renderer and camera.
         if self.settings.wireframe != self.ui.wireframe || self.settings.grid != self.ui.grid {
@@ -1418,24 +1468,31 @@ impl eframe::App for StarcityApp {
             }
         }
         let frame_dt = ((now - self.last_time) as f32).min(0.1);
-        self.trains_moving = !self.paused
-            && self
+        // Simulated time this frame. Capped so a slow frame at high speed runs
+        // the game slower for a moment instead of falling further behind.
+        let sim_dt = (frame_dt * self.ui.speed.factor()).min(MAX_SIM_PER_FRAME);
+        self.clock.tick(sim_dt);
+        let steps = (sim_dt / MAX_SIM_STEP).ceil() as u32;
+        let (mut trains_moved, mut vehicles_moved) = (false, false);
+        let mut changed = Vec::new();
+        for _ in 0..steps {
+            let step = sim_dt / steps as f32;
+            trains_moved |= self
                 .trains
-                .update(frame_dt, &self.rails, &self.signals, &self.stations, self.track_version);
-        if self.trains_moving {
+                .update(step, &self.rails, &self.signals, &self.stations, self.track_version);
+            self.tick_towns(step);
+            vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
+            changed.extend(self.sim.advance(&mut self.world, step));
+        }
+        self.last_time = now;
+        self.trains_moving = trains_moved;
+        self.vehicles_moving = vehicles_moved;
+        if self.trains_moving || self.vehicles_moving {
             self.props_changed = true;
         }
         self.handle_arrivals();
-        if !self.paused {
-            self.tick_towns(frame_dt);
-        }
-        self.vehicles_moving = !self.paused && self.vehicles.update(frame_dt, &self.roads, &self.towns);
-        if self.vehicles_moving {
-            self.props_changed = true;
-        }
-        let changed = self.sim.advance(&mut self.world, (now - self.last_time) as f32);
-        self.last_time = now;
         self.remesh_tiles(&rs, &changed);
+        self.update_light(now, frame_dt);
 
         self.game_ui(ui, &rs);
         if self.ui.show_debug {
@@ -1487,8 +1544,16 @@ impl eframe::App for StarcityApp {
                     cursor: cursor_px,
                     fade_radius: 220.0 * scale,
                 };
-                self.renderer
-                    .render(&rs, size, &self.settings, view_proj, camera_pos, self.highlight, clouds);
+                self.renderer.render(
+                    &rs,
+                    size,
+                    &self.settings,
+                    view_proj,
+                    camera_pos,
+                    self.highlight,
+                    clouds,
+                    &self.light,
+                );
                 self.scene_renders += 1;
                 self.scene_dirty = false;
             }
@@ -1510,6 +1575,16 @@ impl eframe::App for StarcityApp {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLOUD_FRAME_SECONDS));
         } else if self.sim.is_active() {
             ctx.request_repaint_after(std::time::Duration::from_secs_f32(sim::TICK_SECONDS));
+        }
+        if self.ui.speed != Speed::Paused {
+            // The clock keeps ticking, and the light with it (it only redraws
+            // the scene when it has visibly changed).
+            let wake = if self.ui.day_night {
+                LIGHT_FRAME_SECONDS as f32
+            } else {
+                self.clock.seconds_to_next_display_change(self.ui.speed).max(0.02)
+            };
+            ctx.request_repaint_after(std::time::Duration::from_secs_f32(wake));
         }
         #[cfg(not(target_arch = "wasm32"))]
         self.devtools.update(&ctx);

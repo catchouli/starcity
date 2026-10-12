@@ -126,6 +126,14 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
 
 - **Clouds**: blocky voxel clouds with sloped edges (the same block shapes as the terrain), generated from noise, drifting slowly over the map at a fixed altitude. They fade out near the mouse cursor so they never get in the way of building. ✅ Implemented as a seamlessly tiling cloud `World` holding a few small clouds (clusters of domes in cube-sized blocks, four grey tones), meshed with the terrain mesher and drawn per chunk at a wind offset. They fade with an ordered dither (no sorting), near the cursor, past the map edge and when zoomed in. Idle redraws are capped at 15 fps while they drift, and C toggles them. Later: cloud shadows on the ground.
 
+## 7b. Time and light
+
+- **Clock** ✅: a real calendar (leap years, weekday names) starting Sunday 1 January 1950, 08:00. One game hour is 2 s of simulation: a day is 48 s at normal speed, a year about 4¾ hours. The status bar shows the date and the time to the nearest quarter hour, like a Win95 tray clock.
+- **Speed** ✅: pause, 1×, 2×, 4×, 8× buttons at the right of the toolbar; Space pauses and resumes at the previous speed. Speed scales the clock, trains, road vehicles, town growth and regrowth together. Each frame simulates at most 0.4 s, in steps of at most 0.1 s, so a slow frame at 8× slows the game down for a moment instead of making vehicle physics unstable or the frame worse.
+- **Day/night** ✅ (`daylight.rs`): the sun crosses the sky from east to west, the sky and fog colour change with it, the light is warm at sunrise and sunset and cool and dim by moonlight, and clouds go dusky. Night is a mood, not an obstacle: the scene stays readable (about half the brightness of noon). Lamps (signals) are unshaded, so they glow. To keep it unobtrusive the cycle eases off at high speeds (full strength at 1×, 40% at 8×, so it never strobes) and **N** or View → Day/night cycle turns it off.
+- **Cost on the web**: the light is a pure function of the time of day plus three uniform colours, with no shadow maps or extra passes. The scene is only re-rendered when the light has visibly changed (a colour step of one 8-bit channel, or the sun moving a few degrees), at most 10 times a second, and not at all while paused. Measured over a full day (`daylight::tests::idle_redraws_stay_rare`): about 4 scene redraws a second at 1× and at most 10 at 8×, where vehicles are redrawing the scene every frame anyway. That's well under the 15 a second the drifting clouds already cost.
+- Later: lit windows at night, street and station lamps, cloud shadows, seasons.
+
 ## 8. UI
 
 - **Windows 95 look**: grey (#c0c0c0) surfaces, 2px bevelled borders (light top-left, dark bottom-right; pressed buttons invert), navy title bars with white text, square corners, no transparency, and a pixel-style sans font.
@@ -137,6 +145,7 @@ All generation is **seeded and deterministic**. A debug panel (egui) exposes the
   - Later: terraform (raise, lower, level, dig), stations, demolish.
 - Dialogs and info panels (town info, train orders) are Win95 windows inside the game view.
 - The debug window (F3) stays separate from the game UI.
+- **Status bar** ✅: hint, status (tile, build cost, messages), and the date and time at the right.
 
 ## 9. Tech stack
 
@@ -260,6 +269,6 @@ Terrain generation was never really started: it only produced random noise for o
 
 ### Working notes
 - `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page.
-- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_DEMO=roads|towns`; pass `--demo` for the rail-line scenario.
+- Dev hooks (native): `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_HOUR=22` (start hour), `STARCITY_DEMO=roads|towns`; pass `--demo` for the rail-line scenario.
 - `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, and screenshot runs sometimes take 30 s or more of wall time even though the app only uses about 2 s of CPU, so give them time.
 - Generated seabed at height 0 has no blocks at all, so `World::surface` can return `None` for in-bounds sea tiles; `terrain::edit` treats those as flat at height 0.

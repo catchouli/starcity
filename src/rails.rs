@@ -139,6 +139,7 @@ pub fn check(world: &World, roads: &Layer, buildings: &Layer, x: i32, z: i32, bi
 /// Plans track dragged from tile `a` to tile `b`: straight along an axis, or
 /// diagonal when the drag is nearer 45°. Slopes that don't suit the track
 /// block it.
+#[allow(dead_code)] // The game levels slopes; this strict version serves tests and dev demos.
 pub fn plan(
     world: &World,
     rails: &Layer,
