@@ -47,7 +47,9 @@ impl Tool {
             Tool::Pointer => "Drag to pan, right-drag to rotate, scroll to zoom. Click a train or station to open it.",
             Tool::Road => "Drag along an axis or at 45° to draw road. Red means it can't be built there.",
             Tool::RemoveRoad => "Click or drag a rectangle to remove road",
-            Tool::Rail => "Drag along an axis or at 45° to lay track. Red means it can't be built there.",
+            Tool::Rail => {
+                "Drag from one point to another: it finds a way round obstacles and levels the ground (for a fee). Red means no way through."
+            }
             Tool::Signal => {
                 "Click track to place a path signal facing you; click again to turn it round, right-click to remove"
             }

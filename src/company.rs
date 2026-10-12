@@ -4,17 +4,24 @@
 
 use crate::ui::Tool;
 
-pub const START_CASH: i64 = 30_000;
+pub const START_CASH: i64 = 40_000;
 /// The economy month, in seconds of simulation (GAME-DESIGN.md §2).
 pub const MONTH_SECONDS: f32 = 30.0;
 
 // Prices (GAME-DESIGN.md §8). Dials, not facts.
-pub const ROAD_PIECE: u32 = 40;
-pub const RAIL_PIECE: u32 = 80;
-pub const STATION_TILE: u32 = 300;
-pub const SIGNAL: u32 = 50;
+pub const ROAD_PIECE: u32 = 25;
+pub const RAIL_PIECE: u32 = 50;
+pub const STATION_TILE: u32 = 200;
+pub const SIGNAL: u32 = 30;
 /// A locomotive and two coaches.
-pub const TRAIN: u32 = 7_200;
+pub const TRAIN: u32 = 5_000;
+/// Moving one terrain corner by one block. Gentler than building the track itself
+/// would suggest, so that crossing hills is a cost and not a wall.
+pub const TERRAFORM_STEP: u32 = 25;
+
+pub fn terraform_cost(plan: &crate::network::Plan) -> u32 {
+    plan.terraform_steps * TERRAFORM_STEP
+}
 pub const FERRY: u32 = 6_000;
 pub const PLANE: u32 = 9_000;
 /// Running costs per year (charged monthly, earning or not).
@@ -42,11 +49,14 @@ pub enum Item {
     Upkeep,
     Interest,
     Headquarters,
+    /// Money from the council's contracts: seed money and completion rewards.
+    Contracts,
 }
 
 impl Item {
-    pub const ALL: [Item; 7] = [
+    pub const ALL: [Item; 8] = [
         Item::Passengers,
+        Item::Contracts,
         Item::Construction,
         Item::Vehicles,
         Item::Headquarters,
@@ -64,6 +74,7 @@ impl Item {
             Item::Upkeep => "Infrastructure upkeep",
             Item::Interest => "Loan interest",
             Item::Headquarters => "Headquarters",
+            Item::Contracts => "Contracts",
         }
     }
 
@@ -76,7 +87,7 @@ impl Item {
 /// expense are kept apart by sign of the category: passengers are income).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ledger {
-    amounts: [i64; 7],
+    amounts: [i64; 8],
 }
 
 impl Ledger {
@@ -89,13 +100,13 @@ impl Ledger {
     }
 
     pub fn income(&self) -> i64 {
-        self.get(Item::Passengers)
+        self.get(Item::Passengers) + self.get(Item::Contracts)
     }
 
     pub fn expenses(&self) -> i64 {
         Item::ALL
             .iter()
-            .filter(|&&i| i != Item::Passengers)
+            .filter(|&&i| i != Item::Passengers && i != Item::Contracts)
             .map(|&i| self.get(i))
             .sum()
     }
@@ -212,6 +223,56 @@ pub struct Facts {
     pub vehicles: u32,
 }
 
+/// 12345 -> "£12,345".
+pub fn pounds(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    format!("{}£{out}", if n < 0 { "-" } else { "" })
+}
+
+/// What a contract from the town council asks for (GAME-DESIGN.md §9.3): link two towns by
+/// rail and carry some people between them. The council pays `seed` money when it starts, to
+/// get you going, and `reward` when it's done.
+#[derive(Clone, Debug)]
+pub struct Contract {
+    pub from: String,
+    pub to: String,
+    pub seed: u32,
+    pub reward: u32,
+    /// Passengers to carry once the contract has started.
+    pub carry: u32,
+    pub done: bool,
+    started_carried: u32,
+}
+
+impl Contract {
+    pub fn link(from: &str, to: &str, seed: u32, reward: u32, carry: u32) -> Contract {
+        Contract {
+            from: from.into(),
+            to: to.into(),
+            seed,
+            reward,
+            carry,
+            done: false,
+            started_carried: 0,
+        }
+    }
+}
+
+/// Where the company stands on its current contract's two towns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkFacts {
+    pub station_a: bool,
+    pub station_b: bool,
+    pub connected: bool,
+}
+
 /// Whether passengers pay: units, tiles between the stations, and seconds on board.
 /// Passengers pay 2.4 per 10 tiles, in full for 20 s and falling to 30% by 80 s (§3, §4).
 pub fn passenger_fare(units: u32, tiles: f32, seconds: f32) -> u32 {
@@ -241,6 +302,10 @@ pub struct Company {
     income_this_month: i64,
     pub months_in_red: u32,
     pub bankrupt: bool,
+    /// Contracts from the council, the one being worked on first.
+    pub contracts: Vec<Contract>,
+    /// Passengers carried in all.
+    pub carried: u32,
 }
 
 impl Company {
@@ -259,7 +324,91 @@ impl Company {
             income_this_month: 0,
             months_in_red: 0,
             bankrupt: false,
+            contracts: Vec::new(),
+            carried: 0,
         }
+    }
+
+    /// The contract being worked on, if any.
+    pub fn contract(&self) -> Option<&Contract> {
+        self.contracts.iter().find(|c| !c.done)
+    }
+
+    /// Queues contracts and starts the first, paying its seed money.
+    pub fn offer_contracts(&mut self, contracts: Vec<Contract>) -> Option<String> {
+        self.contracts = contracts;
+        self.start_next()
+    }
+
+    fn start_next(&mut self) -> Option<String> {
+        let carried = self.carried;
+        let c = self.contracts.iter_mut().find(|c| !c.done)?;
+        c.started_carried = carried;
+        let (text, seed) = (
+            format!(
+                "New contract: link {} and {}. The council pays {} now and {} when it's done.",
+                c.from,
+                c.to,
+                pounds(c.seed as i64),
+                pounds(c.reward as i64)
+            ),
+            c.seed,
+        );
+        self.cash += seed as i64;
+        self.ledger.add(Item::Contracts, seed as i64);
+        Some(text)
+    }
+
+    /// What the current contract asks, and how far along it is.
+    pub fn contract_requirements(&self, link: &LinkFacts, facts: &Facts) -> Vec<Requirement> {
+        let Some(c) = self.contract() else { return Vec::new() };
+        let carried = self.carried.saturating_sub(c.started_carried).min(c.carry);
+        vec![
+            Requirement {
+                text: format!("A station in {}", c.from),
+                met: link.station_a,
+            },
+            Requirement {
+                text: format!("A station in {}", c.to),
+                met: link.station_b,
+            },
+            Requirement {
+                text: "Track joining the two stations".into(),
+                met: link.connected,
+            },
+            Requirement {
+                text: "A train running".into(),
+                met: facts.trains > 0,
+            },
+            Requirement {
+                text: format!("Carry {} passengers ({carried} so far)", c.carry),
+                met: carried >= c.carry,
+            },
+        ]
+    }
+
+    /// Checks the current contract; pays the reward and starts the next one when it's done.
+    pub fn update_contract(&mut self, link: &LinkFacts, facts: &Facts) -> Vec<String> {
+        let mut messages = Vec::new();
+        if self.contract().is_none() || self.contract_requirements(link, facts).iter().any(|r| !r.met) {
+            return messages;
+        }
+        let c = self.contracts.iter_mut().find(|c| !c.done).unwrap();
+        c.done = true;
+        let (reward, text) = (
+            c.reward,
+            format!(
+                "Contract complete: {} and {} are linked. The council pays {}.",
+                c.from,
+                c.to,
+                pounds(c.reward as i64)
+            ),
+        );
+        self.cash += reward as i64;
+        self.ledger.add(Item::Contracts, reward as i64);
+        messages.push(text);
+        messages.extend(self.start_next());
+        messages
     }
 
     pub fn loan_limit(&self) -> i64 {
@@ -447,9 +596,57 @@ impl Company {
     }
 
     /// The one thing to do next (GAME-DESIGN.md §9.2): a goal, and where to do it.
-    pub fn next_step(&self, assets: &Assets, facts: &Facts) -> NextStep {
+    pub fn next_step(&self, assets: &Assets, facts: &Facts, link: &LinkFacts) -> NextStep {
         if self.bankrupt {
             return NextStep::plain("Your company is bankrupt", "Start again from the File menu.");
+        }
+        if let Some(c) = self.contract() {
+            let (from, to) = (&c.from, &c.to);
+            if facts.rail_pieces < 12 {
+                return NextStep::tool(
+                    &format!("Contract: lay a railway from {from} towards {to}"),
+                    &format!(
+                        "Pick the Build railway tool and drag from open ground by {from} to open ground by {to}. It finds the way and levels the ground. The council has paid you {} to get started.",
+                        pounds(c.seed as i64)
+                    ),
+                    Tool::Rail,
+                );
+            }
+            if !link.station_a {
+                return NextStep::tool(
+                    &format!("Contract: build a station in {from}"),
+                    &format!("Pick the Build station tool and drag along the track at the edge of {from}."),
+                    Tool::Station,
+                );
+            }
+            if !link.station_b {
+                return NextStep::tool(
+                    &format!("Contract: build a station in {to}"),
+                    &format!("Pick the Build station tool and drag along the track at the edge of {to}."),
+                    Tool::Station,
+                );
+            }
+            if !link.connected {
+                return NextStep::tool(
+                    "Contract: join the two stations with track",
+                    "The stations aren't connected yet. Lay track from one station to the other.",
+                    Tool::Rail,
+                );
+            }
+            if facts.trains < 1 {
+                return NextStep::tool(
+                    "Contract: buy a train",
+                    "Pick the Place train tool and click plain track. Then click the train and add both stations to its orders.",
+                    Tool::Train,
+                );
+            }
+            return NextStep::plain(
+                &format!("Contract: carry {} passengers", c.carry),
+                &format!(
+                    "Click your train and add the stations in {from} and {to} to its orders. When it has carried enough, the council pays you {}.",
+                    pounds(c.reward as i64)
+                ),
+            );
         }
         if self.hq_level == 0 {
             if facts.rail_pieces < 12 {
@@ -560,7 +757,7 @@ mod tests {
     #[test]
     fn a_small_company_starts_with_a_garage_and_no_loan() {
         let c = Company::new(2000);
-        assert_eq!(c.cash, 30_000);
+        assert_eq!(c.cash, START_CASH);
         assert_eq!(c.hq_level, 0);
         assert_eq!(c.loan_limit(), 0);
         assert!(!Company::new(2000).borrow());
@@ -571,13 +768,13 @@ mod tests {
     #[test]
     fn spending_checks_the_money_and_the_books_balance() {
         let mut c = Company::new(2000);
-        assert!(c.spend(Item::Construction, 20_000));
+        assert!(c.spend(Item::Construction, 30_000));
         assert!(!c.spend(Item::Vehicles, 20_000), "only 10,000 left");
         assert_eq!(c.cash, 10_000);
         c.earn(Item::Passengers, 500);
         assert_eq!(c.cash, 10_500);
         assert_eq!(c.ledger.income(), 500);
-        assert_eq!(c.ledger.expenses(), 20_000);
+        assert_eq!(c.ledger.expenses(), 30_000);
     }
 
     #[test]
@@ -598,7 +795,7 @@ mod tests {
         assert!(c.can_upgrade(&a, &f));
         assert!(c.upgrade(&a, &f));
         assert_eq!(c.hq_level, 1);
-        assert_eq!(c.cash, 30_000 + 1_000 - 10_000);
+        assert_eq!(c.cash, START_CASH + 1_000 - 10_000);
         assert!(c.borrow());
         assert_eq!(c.loan, 10_000);
         assert!(c.repay());
@@ -681,18 +878,22 @@ mod tests {
         let mut c = Company::new(2000);
         let a = Assets::default();
         let mut f = Facts::default();
-        assert_eq!(c.next_step(&a, &f).tool, Some(Tool::Rail));
+        assert_eq!(c.next_step(&a, &f, &LinkFacts::default()).tool, Some(Tool::Rail));
         f.rail_pieces = 30;
-        assert_eq!(c.next_step(&a, &f).tool, Some(Tool::Station));
+        assert_eq!(c.next_step(&a, &f, &LinkFacts::default()).tool, Some(Tool::Station));
         f.stations = 2;
-        assert_eq!(c.next_step(&a, &f).tool, Some(Tool::Train));
+        assert_eq!(c.next_step(&a, &f, &LinkFacts::default()).tool, Some(Tool::Train));
         f.trains = 1;
-        assert!(c.next_step(&a, &f).title.contains("first £1,000"));
+        assert!(
+            c.next_step(&a, &f, &LinkFacts::default())
+                .title
+                .contains("first £1,000")
+        );
         c.earn(Item::Passengers, 1_200);
-        assert!(c.next_step(&a, &f).hq);
+        assert!(c.next_step(&a, &f, &LinkFacts::default()).hq);
         c.upgrade(&a, &f);
         // Now it names the next unmet requirement instead of leaving the player stuck.
-        let step = c.next_step(&a, &f);
+        let step = c.next_step(&a, &f, &LinkFacts::default());
         assert!(step.title.contains("Regional office"), "{}", step.title);
         assert!(!step.detail.is_empty());
     }
@@ -710,5 +911,40 @@ mod tests {
         c.earn(Item::Passengers, 10);
         c.tick(MONTH_SECONDS, 2000, &Assets::default());
         assert!(c.stuck_hint(&f).is_none());
+    }
+
+    #[test]
+    fn a_council_contract_pays_seed_money_then_a_reward_and_leads_the_way() {
+        let mut c = Company::new(2000);
+        let msg = c.offer_contracts(vec![
+            Contract::link("Ashford", "Brookley", 20_000, 15_000, 50),
+            Contract::link("Brookley", "Calder", 25_000, 25_000, 100),
+        ]);
+        assert!(msg.unwrap().contains("Ashford"));
+        assert_eq!(c.cash, START_CASH + 20_000, "seed money is paid up front");
+        let a = Assets::default();
+        let mut f = Facts::default();
+        let mut link = LinkFacts::default();
+        // The next step walks through the contract.
+        assert_eq!(c.next_step(&a, &f, &link).tool, Some(Tool::Rail));
+        f.rail_pieces = 40;
+        let step = c.next_step(&a, &f, &link);
+        assert!(step.title.contains("station in Ashford"), "{}", step.title);
+        link.station_a = true;
+        assert!(c.next_step(&a, &f, &link).title.contains("station in Brookley"));
+        link.station_b = true;
+        link.connected = true;
+        f.trains = 1;
+        assert!(c.update_contract(&link, &f).is_empty(), "nobody carried anyone yet");
+        c.carried = 60;
+        let before = c.cash;
+        let messages = c.update_contract(&link, &f);
+        assert!(messages[0].contains("complete"), "{messages:?}");
+        // The reward, then the next contract's seed money.
+        assert_eq!(c.cash, before + 15_000 + 25_000);
+        assert_eq!(c.contract().unwrap().from, "Brookley");
+        assert!(c.ledger.get(Item::Contracts) >= 60_000);
+        // Its passengers count from when it started, not before.
+        assert!(!c.contract_requirements(&link, &f).last().unwrap().met);
     }
 }

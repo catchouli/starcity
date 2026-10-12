@@ -20,7 +20,7 @@
 | Time | ✅ Calendar (a day a second), independent day/night light, speeds 1×–8× and pause, date slider (2000–2050) in the debug window. |
 | Eras and chrome | ✅ `era.rs` (chrome 0 at 2025 → 1 at 2050), chrome roads and track in the terrain shader, metallic/emissive models, evolving towns. |
 | Assets | ✅ glTF pipeline: 60 placeholder `.glb` models embedded at build time, artist guide in `assets/models/README.md`, tests for size, triangle budget and year coverage. |
-| Company and money | ✅ (Phase 4) A tiny company (£30,000) with a garage headquarters in the starting town; building, vehicles, ports and airports are charged; passengers pay by distance and time (§3); monthly running costs, upkeep and loan interest; the Finances window; HQ levels 0–2 with their checklists; tools locked behind the HQ; the Next Step panel and stuck hints. Sandbox/demo mode is free and unlocked. |
+| Company and money | ✅ (Phase 4) A tiny company (£40,000 plus £20,000 seed money from the first council contract) with a garage headquarters in the starting town; building, vehicles, ports and airports are charged; passengers pay by distance and time (§3); monthly running costs, upkeep and loan interest; the Finances window; HQ levels 0–2 with their checklists; tools locked behind the HQ; the Next Step panel and stuck hints. Sandbox/demo mode is free and unlocked. |
 | Cargo, industries, vehicle catalogue, goals, events | ❌ Not yet. Passengers are the only cargo. |
 | Power, data centres, space | ❌ Design only (§5.7, §5.8, §10.4). |
 | UI by era | ❌ Win95 theme only (§10.3). |
@@ -91,7 +91,7 @@ The world is the scoreboard: the same map shows the ending, because it has been 
 - **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000. **One calendar day is one second of simulation**, so at normal speed a month is about 30 s and a year about 6 minutes, and the game runs 2000 to 2050 in about **5 hours at 1×** (about 76 minutes at 4×, 38 at 8×). The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*: the calendar, vehicles, towns, the light.
 - **Time of day is separate from the calendar.** The light (DESIGN.md §7b) cycles once every 120 seconds of simulation, whatever the date: slow enough to look good, and independent of the calendar so the calendar can run at the pace a 50-year game needs. The toolbar shows the date with a sun or moon beside it for the time of day, next to the speed buttons.
 - **The economy uses the same time.** *A tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s*, close to the calendar's own month and year, so "monthly" and "yearly" in this document line up with what the date shows. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
-- **Starting position:** a tiny company with £30,000 cash and no loan, and a garage for a headquarters (§9.1). Upgrading it to a Depot office (£10,000) opens a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
+- **Starting position:** a tiny company with £40,000 cash and no loan, and a garage for a headquarters (§9.1), plus £20,000 of seed money from the council's first contract (§9.3). Upgrading it to a Depot office (£10,000) opens a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
 - **Income:** paid on delivery, to the company, when cargo is unloaded at a station that accepts it. See §3.
 - **Expenses:**
   - *Construction:* priced per piece (`network::PIECE_COST`, now £100; proposed £40 per road piece and £80 per rail piece, since a route between two towns is 100+ tiles), plus levelling at `TERRAFORM_COST` per corner-block, plus stations and terminals (§8).
@@ -553,6 +553,16 @@ The company has a **headquarters**, a real building in a town of your choice, up
 **Vehicles and slots.** Each level raises the vehicle cap and the loan limit and opens slots for compute programs (§5.8) so the HQ governs company size, not only features.
 
 **Look.** One `.glb` per level in `assets/models/buildings/` (`hq_1_depot` ... `hq_8_convergence`), with `role = hq` and `level = N` custom properties; artists can change any of them. The scaffolding stage is a shared model. Sizes grow from 2×2 (the garage) to 6×6 (the placement checks the room, as the megastructure merge does).
+
+### 9.3 Council contracts: seed money, then the rest on completion ✅
+
+Borrowed from the way Prison Architect starts: instead of dropping the player into an empty map with a purse, **the town council hands them a job**. A contract names what to build, pays **seed money** the moment it starts (enough to do it), and pays a **reward** when every requirement is met. It is the opening's guide (§9.2: the Next Step panel shows the contract's checklist) and its safety net: the first line can't bankrupt you.
+
+- **Contract 1** (at the start): link the company town and the nearest town along by rail. Seed £20,000, reward £15,000. Needs: a station in each town, track joining them, a train, and 50 passengers carried.
+- **Contract 2** (when 1 is done): link that town to the next one. Seed £25,000, reward £25,000, 100 passengers.
+- Then the headquarters upgrades (§9.1) and goals take over. Later contracts, by era: carry cargo from a mine to a power station (Phase 5–6), supply a town with food and goods, connect an airport, feed a data centre, deliver to a spaceport. The same shape throughout: seed, requirements, reward. Rewards are bigger than the seed, so a contract is profit as well as help.
+- **Why seed money.** It decouples "what the game asks" from "what you can afford", which is what a guided opening needs. The player never has to wonder whether they can do the thing the Assistant just asked for.
+- **Cost of the opening (tuned):** rail £50 a piece, levelling £25 a block, stations £200 a tile, a train £5,000. The first railway between two towns costs about £7,000–£13,000; with the £40,000 start and £20,000 seed it can't be a trap, but a careless player can still spend the lot.
 
 ### 9.2 Never stuck: the Assistant and the next step
 

@@ -18,14 +18,37 @@ pub const MAX_CORNERS: usize = 160;
 pub struct Corners<'a> {
     world: &'a World,
     changed: BTreeMap<(i32, i32), i32>,
+    max_shift: i32,
+    max_corners: usize,
+    /// Corners that must not move (they belong to something built).
+    frozen: std::collections::HashSet<(i32, i32)>,
 }
 
 impl<'a> Corners<'a> {
     pub fn new(world: &'a World) -> Corners<'a> {
+        Corners::with_limits(world, MAX_SHIFT, MAX_CORNERS)
+    }
+
+    /// An overlay that may move corners further and in greater number, for
+    /// long graded cuttings and embankments.
+    pub fn with_limits(world: &'a World, max_shift: i32, max_corners: usize) -> Corners<'a> {
         Corners {
             world,
             changed: BTreeMap::new(),
+            max_shift,
+            max_corners,
+            frozen: Default::default(),
         }
+    }
+
+    /// Forbids moving this corner.
+    pub fn freeze(&mut self, c: (i32, i32)) {
+        self.frozen.insert(c);
+    }
+
+    /// A corner's height in the world as it is now (ignoring planned changes).
+    pub fn world_height(&self, c: (i32, i32)) -> Option<i32> {
+        self.original(c)
     }
 
     /// A corner's height in the world as it is now.
@@ -107,7 +130,11 @@ impl<'a> Corners<'a> {
 
     fn set(&mut self, c: (i32, i32), h: i32) -> bool {
         let Some(old) = self.original(c) else { return false };
-        if (h - old).abs() > MAX_SHIFT || h < 1 || h as usize + 2 >= self.world.height {
+        if (h != old && self.frozen.contains(&c))
+            || (h - old).abs() > self.max_shift
+            || h < 1
+            || h as usize + 2 >= self.world.height
+        {
             return false;
         }
         if h == old {
@@ -115,7 +142,7 @@ impl<'a> Corners<'a> {
         } else {
             self.changed.insert(c, h);
         }
-        self.changed.len() <= MAX_CORNERS
+        self.changed.len() <= self.max_corners
     }
 
     /// Corners that differ from the world, with their new heights.

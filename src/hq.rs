@@ -166,4 +166,70 @@ mod tests {
         assert!(!hq.contains((14, 20)) && !hq.contains((9, 20)));
         assert_eq!(hq.tiles().len(), 16);
     }
+
+    /// The opening: from the garage's town to the next town along, a railway has to be possible and
+    /// cheap enough for the starting money (GAME-DESIGN.md §9.2).
+    #[test]
+    fn the_first_railway_is_possible_and_affordable() {
+        use crate::company;
+        use crate::rails::{self, Signals};
+        let (mut tried, mut ok) = (0, 0);
+        for seed in [1u32, 7, 42, 2024, 99, 5, 11, 123] {
+            let (mut world, mut towns, roads, rails_layer) = generated(seed);
+            let town = choose_town(&towns).expect("a town");
+            let Some(hq) = place(&world, &mut towns, &roads, &rails_layer, town) else {
+                continue;
+            };
+            let c = towns.list[town as usize].centre;
+            let dist = |o: &crate::towns::Town| (((o.centre.0 - c.0).pow(2) + (o.centre.1 - c.1).pow(2)) as f32).sqrt();
+            let Some(other) = towns
+                .list
+                .iter()
+                .filter(|o| o.id != town && (30.0..=130.0).contains(&dist(o)))
+                .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+            else {
+                continue;
+            };
+            // Open ground at the edge of each town, as a player would pick.
+            let open = |centre: (i32, i32)| {
+                (0..25i32).find_map(|r| {
+                    (-r..=r)
+                        .flat_map(|dz| (-r..=r).map(move |dx| (dx, dz)))
+                        .find_map(|(dx, dz)| {
+                            let t = (centre.0 + dx, centre.1 + dz);
+                            let clear = (-1..=1).all(|oz| {
+                                (-1..=1).all(|ox| {
+                                    roads.get(t.0 + ox, t.1 + oz) == 0
+                                        && towns.occupied.get(t.0 + ox, t.1 + oz) == 0
+                                        && world
+                                            .surface(t.0 + ox, t.1 + oz)
+                                            .is_some_and(|(b, _)| b > world.sea_level)
+                                })
+                            });
+                            (dx.abs().max(dz.abs()) == r && clear).then_some(t)
+                        })
+                })
+            };
+            let _ = hq;
+            let (Some(a), Some(b)) = (open(c), open(other.centre)) else {
+                continue;
+            };
+            let plan = rails::plan_route(&world, &rails_layer, &roads, &towns.occupied, &Signals::default(), a, b);
+            tried += 1;
+            if plan.blocked.is_some() {
+                eprintln!("seed {seed}: first railway blocked: {:?}", plan.blocked);
+                continue;
+            }
+            ok += 1;
+            let cost = plan.pieces.len() as u32 * company::RAIL_PIECE + company::terraform_cost(&plan);
+            eprintln!(
+                "seed {seed}: {} tiles, {} corner-steps, track costs £{cost}",
+                plan.pieces.len(),
+                plan.terraform_steps
+            );
+            assert!(cost <= 20_000, "seed {seed}: the first railway costs £{cost}");
+            let _ = &mut world;
+        }
+        assert!(tried >= 5 && ok * 10 >= tried * 8, "{ok} of {tried}");
+    }
 }

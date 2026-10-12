@@ -5,22 +5,12 @@
 use super::StarcityApp;
 use crate::company::{self, Assets, Company, Facts, Item};
 use crate::hq;
+use crate::towns::TownId;
 use crate::ui::win95;
 use eframe::egui;
 use glam::Vec3;
 
-/// 12345 -> "12,345"; negative numbers keep their sign.
-pub fn money(n: i64) -> String {
-    let digits = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    format!("{}£{out}", if n < 0 { "-" } else { "" })
-}
+pub use crate::company::pounds as money;
 
 impl StarcityApp {
     /// A fresh company with its garage in the company town. Keeps the sandbox setting.
@@ -32,7 +22,84 @@ impl StarcityApp {
         self.hq = hq::choose_town(&self.towns)
             .and_then(|town| hq::place(&self.world, &mut self.towns, &self.roads, &self.rails, town));
         self.static_changed = true;
+        self.contract_towns.clear();
+        if !self.company.sandbox {
+            self.offer_contracts();
+        }
         self.refresh_assets();
+    }
+
+    /// The council's first contracts: join the company town to the nearest town along, then that
+    /// town to the next. Seed money up front covers the building (GAME-DESIGN.md §9.3).
+    fn offer_contracts(&mut self) {
+        let Some(hq) = self.hq else { return };
+        let towns = &self.towns.list;
+        let dist = |a: &crate::towns::Town, b: &crate::towns::Town| {
+            (((a.centre.0 - b.centre.0).pow(2) + (a.centre.1 - b.centre.1).pow(2)) as f32).sqrt()
+        };
+        let nearest_to = |from: &crate::towns::Town, not: &[TownId]| {
+            towns
+                .iter()
+                .filter(|t| !not.contains(&t.id) && (25.0..=140.0).contains(&dist(from, t)))
+                .min_by(|a, b| dist(from, a).total_cmp(&dist(from, b)))
+                .map(|t| t.id)
+        };
+        let home = &towns[hq.town as usize];
+        let mut pairs = Vec::new();
+        let mut contracts = Vec::new();
+        if let Some(b) = nearest_to(home, &[hq.town]) {
+            pairs.push((hq.town, b));
+            contracts.push(company::Contract::link(
+                &home.name,
+                &towns[b as usize].name,
+                20_000,
+                15_000,
+                50,
+            ));
+            if let Some(c) = nearest_to(&towns[b as usize], &[hq.town, b]) {
+                pairs.push((b, c));
+                contracts.push(company::Contract::link(
+                    &towns[b as usize].name,
+                    &towns[c as usize].name,
+                    25_000,
+                    25_000,
+                    100,
+                ));
+            }
+        }
+        self.contract_towns = pairs;
+        if let Some(text) = self.company.offer_contracts(contracts) {
+            let now = self.last_time;
+            self.show_message(&text, now + 4.0);
+        }
+    }
+
+    /// Which of the company's stations serve a town, and whether two towns' stations are joined by track.
+    fn link_facts(&self, a: TownId, b: TownId) -> company::LinkFacts {
+        let serving = |town: TownId| -> Vec<crate::stations::StationId> {
+            self.stations
+                .list
+                .values()
+                .filter(|s| {
+                    let (x, z) = s.centre();
+                    self.towns.nearest((x as i32, z as i32), 30) == Some(town)
+                        && self.towns.population_near(&s.tiles) > 0
+                })
+                .map(|s| s.id)
+                .collect()
+        };
+        let (sa, sb) = (serving(a), serving(b));
+        let connected = sa.iter().any(|&x| {
+            sb.iter().any(|&y| {
+                crate::trains::reachable(&self.rails, &self.stations, x, y)
+                    && crate::trains::reachable(&self.rails, &self.stations, y, x)
+            })
+        });
+        company::LinkFacts {
+            station_a: !sa.is_empty(),
+            station_b: !sb.is_empty(),
+            connected,
+        }
     }
 
     /// Points the camera at the headquarters.
@@ -81,6 +148,36 @@ impl StarcityApp {
             town_served,
             vehicles: self.assets.trains + self.assets.ferries + self.assets.planes,
         };
+        let active = self.company.contracts.iter().position(|c| !c.done);
+        self.link = match active.and_then(|i| self.contract_towns.get(i)) {
+            Some(&(a, b)) => self.link_facts(a, b),
+            None => company::LinkFacts::default(),
+        };
+        let messages = self.company.update_contract(&self.link, &self.facts);
+        let now = self.last_time;
+        for m in messages {
+            self.show_message(&m, now + 4.0);
+        }
+    }
+
+    /// The rail route for the preview, searched again only when the drag or the map changes.
+    pub(super) fn rail_plan_cached(&mut self, a: (i32, i32), b: (i32, i32)) -> crate::network::Plan {
+        if let Some((key, epoch, plan)) = &self.route_cache {
+            if *key == (a, b) && *epoch == self.plan_epoch {
+                return plan.clone();
+            }
+        }
+        let plan = crate::rails::plan_route(
+            &self.world,
+            &self.rails,
+            &self.roads,
+            &self.towns.occupied,
+            &self.signals,
+            a,
+            b,
+        );
+        self.route_cache = Some(((a, b), self.plan_epoch, plan.clone()));
+        plan
     }
 
     /// Charges for something; says so if the money isn't there.
@@ -120,6 +217,7 @@ impl StarcityApp {
         }
         let tiles = ((at.0 - x).powi(2) + (at.1 - z).powi(2)).sqrt();
         let seconds = (self.clock.days() - since).max(0.0) as f32;
+        self.company.carried += passengers;
         self.company
             .earn(Item::Passengers, company::passenger_fare(passengers, tiles, seconds));
     }
@@ -266,8 +364,13 @@ impl StarcityApp {
 
     /// The panel that always has one thing for the player to do.
     pub(super) fn next_step_window(&mut self, ctx: &egui::Context) {
-        let step = self.company.next_step(&self.assets, &self.facts);
+        let step = self.company.next_step(&self.assets, &self.facts, &self.link);
         let hint = self.company.stuck_hint(&self.facts);
+        let contract = self
+            .company
+            .contract()
+            .map(|c| (c.from.clone(), c.to.clone(), c.seed, c.reward));
+        let reqs = self.company.contract_requirements(&self.link, &self.facts);
         let mut look = false;
         win95::window(
             ctx,
@@ -278,6 +381,18 @@ impl StarcityApp {
                 ui.set_width(250.0);
                 ui.label(egui::RichText::new(&step.title).strong());
                 ui.label(&step.detail);
+                if let Some((from, to, seed, reward)) = &contract {
+                    ui.add_space(2.0);
+                    ui.label(egui::RichText::new(format!("Council contract: {from} - {to}")).strong());
+                    ui.label(format!(
+                        "{} paid up front, {} on completion",
+                        money(*seed as i64),
+                        money(*reward as i64)
+                    ));
+                    for r in &reqs {
+                        ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+                    }
+                }
                 if let Some(h) = hint {
                     ui.add_space(2.0);
                     ui.label(egui::RichText::new(h).color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));

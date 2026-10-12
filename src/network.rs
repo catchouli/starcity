@@ -134,6 +134,10 @@ pub enum Blocked {
     Occupied,
     /// Track would change a tile that has a signal on it.
     Signal,
+    /// No way round the water, buildings and roads between the two points.
+    NoRoute,
+    /// Levelling the ground for it would disturb something already built nearby.
+    Disturbs,
 }
 
 /// A dragged-out piece of network. All or nothing: if any piece doesn't fit,
@@ -147,6 +151,8 @@ pub struct Plan {
     pub terraform: Vec<((i32, i32), u16)>,
     /// Total height moved, in block-steps summed over corners (the basis of the cost).
     pub terraform_steps: u32,
+    /// Where the ground work failed, if it did: a hint for planning round it.
+    pub trouble: Option<(i32, i32)>,
 }
 
 /// Price of one new piece of road or track.

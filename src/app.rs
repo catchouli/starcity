@@ -105,6 +105,10 @@ pub struct StarcityApp {
     town_clock: f32,
     /// Bumped whenever track changes, so trains re-plan their routes.
     track_version: u64,
+    /// The rail route last planned for the preview, so dragging doesn't search every frame.
+    route_cache: Option<(((i32, i32), (i32, i32)), u64, Plan)>,
+    /// Bumped when anything the route planner looks at changes.
+    plan_epoch: u64,
     selected_train: Option<u32>,
     selected_station: Option<StationId>,
     /// View-projection and 3D view rectangle from the last frame, for picking
@@ -120,6 +124,9 @@ pub struct StarcityApp {
     /// What the company owns and can do, refreshed once a second.
     assets: Assets,
     facts: Facts,
+    /// How the current council contract is going, and which towns each contract links.
+    link: company::LinkFacts,
+    contract_towns: Vec<(TownId, TownId)>,
     /// Road pieces the player has built (towns' own roads don't cost upkeep).
     player_roads: u32,
     assets_version: u64,
@@ -219,6 +226,8 @@ impl StarcityApp {
             selected_town: None,
             town_clock: 0.0,
             track_version: 0,
+            route_cache: None,
+            plan_epoch: 0,
             selected_train: None,
             selected_station: None,
             last_view: None,
@@ -229,6 +238,8 @@ impl StarcityApp {
             hq: None,
             assets: Assets::default(),
             facts: Facts::default(),
+            link: company::LinkFacts::default(),
+            contract_towns: Vec::new(),
             player_roads: 0,
             assets_version: u64::MAX,
             resume_speed: Speed::X1,
@@ -247,8 +258,8 @@ impl StarcityApp {
             devtools: crate::devtools::DevTools::from_env(),
             params,
         };
-        app.regenerate(rs);
         app.company.sandbox = demo;
+        app.regenerate(rs);
         if demo {
             app.start_demo();
             let tiles = std::mem::take(&mut app.demo_levelled);
@@ -274,6 +285,7 @@ impl StarcityApp {
         use crate::devtools::DevTools;
         if DevTools::demo().is_some() {
             self.company.sandbox = true;
+            self.company.contracts.clear();
         }
         if let Some(year) = DevTools::year() {
             self.seek_to(year as f64);
@@ -733,18 +745,7 @@ impl StarcityApp {
                 roads::plan(&self.world, &self.roads, &self.rails, &self.towns.occupied, a, b),
                 Network::Road,
             ),
-            (Tool::Rail, Some(a), Some(b)) => (
-                rails::plan_terraforming(
-                    &self.world,
-                    &self.rails,
-                    &self.roads,
-                    &self.towns.occupied,
-                    &self.signals,
-                    a,
-                    b,
-                ),
-                Network::Rail,
-            ),
+            (Tool::Rail, Some(a), Some(b)) => (self.rail_plan_cached(a, b), Network::Rail),
             (Tool::Station, Some(a), Some(b)) => {
                 let sp = self.stations.plan(
                     &self.world,
@@ -869,7 +870,7 @@ impl StarcityApp {
                 }
             }
             Tool::Rail => {
-                let plan = rails::plan_terraforming(
+                let plan = rails::plan_route(
                     &self.world,
                     &self.rails,
                     &self.roads,
@@ -879,7 +880,7 @@ impl StarcityApp {
                     b,
                 );
                 if plan.blocked.is_none() && !plan.is_empty() {
-                    let cost = plan.pieces.len() as u32 * company::RAIL_PIECE + plan.terraform_cost();
+                    let cost = plan.pieces.len() as u32 * company::RAIL_PIECE + company::terraform_cost(&plan);
                     if !self.pay(Item::Construction, cost) {
                         return Changes::default();
                     }
@@ -1001,6 +1002,7 @@ impl StarcityApp {
         self.mark_infra(&road_tiles);
         if built {
             self.static_changed = true;
+            self.plan_epoch += 1;
         }
         for station in self.stations.list.values_mut() {
             // Each person nearby makes about one trip every 100 seconds.
@@ -1036,6 +1038,9 @@ impl StarcityApp {
     }
 
     fn apply_changes(&mut self, rs: &RenderState, changes: Changes) {
+        if !changes.infra.is_empty() || !changes.terrain.is_empty() {
+            self.plan_epoch += 1;
+        }
         if !changes.infra.is_empty() {
             self.track_version += 1;
         }
@@ -1704,7 +1709,7 @@ impl StarcityApp {
             .inner;
         let clock_text = self.clock.date().date_string();
         let cash_text = company_ui::money(self.company.cash);
-        let step = self.company.next_step(&self.assets, &self.facts);
+        let step = self.company.next_step(&self.assets, &self.facts, &self.link);
         let company = &self.company;
         let unlocked = |t: Tool| company.tool_unlocked(t);
         let info = ui::ToolbarInfo {
@@ -1731,7 +1736,7 @@ impl StarcityApp {
                         (Network::Road, _) => company::ROAD_PIECE,
                         (Network::Rail, _) => company::RAIL_PIECE,
                     };
-                    let cost = plan.pieces.len() as u32 * unit + plan.terraform_cost();
+                    let cost = plan.pieces.len() as u32 * unit + company::terraform_cost(plan);
                     let short = if self.company.can_afford(cost) {
                         ""
                     } else {
@@ -1742,7 +1747,7 @@ impl StarcityApp {
                             "Build {what}: {} tiles, {} ({} levelling the ground){short}",
                             plan.pieces.len(),
                             company_ui::money(cost as i64),
-                            company_ui::money(plan.terraform_cost() as i64)
+                            company_ui::money(company::terraform_cost(plan) as i64)
                         )
                     } else {
                         format!(
@@ -1756,6 +1761,12 @@ impl StarcityApp {
                 Some(Blocked::Slope) => format!("Can't build {what} here: the ground is too steep"),
                 Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
                 Some(Blocked::Signal) => "There's a signal in the way: remove it first".to_string(),
+                Some(Blocked::Disturbs) => {
+                    "The ground work would disturb nearby buildings: start or end further from them".to_string()
+                }
+                Some(Blocked::NoRoute) => {
+                    "No way through: water or buildings are in the way. Try a different spot.".to_string()
+                }
             }
         } else if let Some((text, _)) = self.message.as_ref().filter(|(_, until)| *until > ui.input(|i| i.time)) {
             text.clone()

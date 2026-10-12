@@ -45,7 +45,8 @@ fn dead_end(bits: u8) -> Option<u8> {
 
 /// Whether a tile could hold these road pieces.
 pub fn check(world: &World, rails: &Layer, buildings: &Layer, x: i32, z: i32, bits: u8) -> Result<(), Blocked> {
-    if rails.get(x, z) != 0 || buildings.get(x, z) != 0 {
+    let rail = rails.get(x, z);
+    if (rail != 0 && !crate::rails::crossing_ok(bits, rail)) || buildings.get(x, z) != 0 {
         return Err(Blocked::Occupied);
     }
     network::slope_check(
