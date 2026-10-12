@@ -533,7 +533,7 @@ The company has a **headquarters**, a real building in a town of your choice, up
 | 2 | **Regional office** | Company value £250k; town ≥ 2,000 | Ports, ferries, airports and planes; first industries funded; 150 vehicles; loan £500k; hosting program |
 | 3 | **Corporate tower** | Value £1M; metropolis ≥ 20,000 | Industry deliveries at scale, goals, Forecast (year ahead); 400 vehicles; server farms |
 | 4 | **Data campus HQ** (2012+) | Own a data centre; Training tier 1 | The Compute meter becomes the headline; fleet optimiser, autonomy; power grid planning |
-| 5 | **Glass spire** (2025+) | An AI campus; tier 2; delivered Chips and Lunar-free glass | Agents (one line at a time), generative design, spaceport permits, sub-orbital pads |
+| 5 | **Glass spire** (2025+) | An AI campus; tier 2; delivered Chips and Goods | Agents (one line at a time), generative design, spaceport permits, sub-orbital pads |
 | 6 | **The AI Citadel** (2032+) | Megacity ≥ 200,000; tier 4; a dedicated 400 MW; Lunar glass and Chips delivered | **Compute becomes the default currency** (below), charters, agents that run whole towns, the moon |
 | 7 | **Orbital Citadel** (2044+) | A spaceport and tier 5 | A second seat in orbit: Mars, the system map, space drones |
 | 8 | **The Convergence seat** (2048+) | The Convergence Array | The singularity (§10.5) |
