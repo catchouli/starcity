@@ -1,6 +1,30 @@
-# Starcity — Economy, industries and vehicles
+# Starcity — Game design
 
-> A design for the money game that sits on top of what's built. Companion to [DESIGN.md](DESIGN.md), whose §6 ("Industries & economy") this replaces. Everything here is a first pass: the numbers are starting points to tune, not promises. Written 2026-10-12.
+> The whole design as we understand it today: what the game is, what already exists, and what is still to build. Companion to [DESIGN.md](DESIGN.md) (engine and rendering). Numbers are first-pass dials, not promises. Items marked ✅ are implemented; everything else is planned. §11 is the implementation plan and the next steps. Last revised 2026-10-12.
+
+**The pitch.** An OpenTTD-style transport tycoon on 3D voxel terrain, played through fifty years of the future. You start in **2000**, as the web takes off, moving coal, people and goods by road, rail, sea and air. Around 2025 the world starts to turn to chrome; **data centres** and then **AI campuses** swallow the grid; from about 2030 **spaceports** open the moon and later the asteroids, whose dust and metals feed new industries on the ground. By **2050** the technological singularity arrives: whole cities of chrome orbs, rockets at every coast, and a final megaproject to finish. Past 2050, in the far future, there is another map: the moon, under domes (§10.10).
+
+**The twist.** Where OpenTTD's late game repeats its early game, Starcity's changes verbs: you start as a **builder**, become a **manager** as compute buys you agents and forecasts, and end as a **governor** who writes the charter an automated civilisation follows, before the singularity reads what you made (§1.1). The map is the scoreboard: the same world ends as silent chrome orbs or as busy plazas, depending on what you told it to value.
+
+**How the document is organised.** §1 is the player's role and the twist. §2–9 are the economy (money, cargo, industries, vehicles, goals). §10 is the arc of the fifty years: eras, chrome, power and data centres, space, the singularity and the moon beyond. §11 is the plan. §12 lists open questions.
+
+## Status: what exists today
+
+| Area | State |
+|---|---|
+| World | ✅ Voxel terrain with half-block slopes, water, sea level, trees; map generator; camera (orbit/pan/zoom), picking, voxel-aware rendering; native and WebAssembly (GitHub Pages). |
+| Networks | ✅ Roads and rails on shared bit layers, curves and diagonals, junctions, path signals, stations, crossing rules. Building on bad slopes **levels the terrain for a fee** (`terrain::edit`, up to 3 blocks of cut/fill). |
+| Towns | ✅ Generated towns that grow with service and **change with the years** (§10.7): buildings keep their build year, are retired and rebuilt, and merge into megastructures. |
+| Vehicles | ✅ Trains (with signals and stations), road vehicles (queueing, 900 cap), **boats** (budgeted A* over a sea grid, cached routes, ports) and **planes** (airports, taxi/take-off/cruise/landing, shared orders). One model per mode so far. |
+| Demo mode | ✅ `STARCITY_DEMO`/default: scripted rail lines, road traffic, ferry and flight lines between big towns, all back and forth. |
+| Time | ✅ Calendar (a day a second), independent day/night light, speeds 1×–8× and pause, date slider (2000–2050) in the debug window. |
+| Eras and chrome | ✅ `era.rs` (chrome 0 at 2025 → 1 at 2050), chrome roads and track in the terrain shader, metallic/emissive models, evolving towns. |
+| Assets | ✅ glTF pipeline: 60 placeholder `.glb` models embedded at build time, artist guide in `assets/models/README.md`, tests for size, triangle budget and year coverage. |
+| Economy | ❌ No money, cargo, industries, vehicle catalogue, goals or events yet. Costs are displayed but not charged; passengers are the only cargo and aren't paid for. |
+| Power, data centres, space | ❌ Design only (§5.7, §5.8, §10.4). |
+| UI by era | ❌ Win95 theme only (§10.3). |
+
+Known limits: orbs can't cover roads; models' textures and animations aren't read yet; player vehicles keep their purchase-year model; the web build hasn't been profiled in a real browser (3.79 MB compressed).
 
 ## 1. What the player is doing
 
@@ -15,10 +39,51 @@ The tone to aim for is "one more line": simple rules that interlock, never a spr
 
 ### Design rules
 
-- **Few cargo types, each with a clear role.** Twelve cargoes in four classes (§4).
+- **Few cargo types, each with a clear role.** Twelve cargoes at the start, in four classes, with era cargo joining later (§4).
 - **Two-input recipes, not deep trees.** Chains are at most three steps (mine → mill → factory → town).
 - **No hidden state.** Every number the economy uses is shown in a window: production, stock, rating, income per trip.
 - **Cheap to simulate.** The whole economy ticks once per economy month (30 simulated seconds); vehicles only touch it when they load or unload (§11).
+
+### 1.1 The twist: builder, then manager, then governor
+
+OpenTTD is a game about laying track and watching numbers go up, and its late game is usually the same verbs as its early game, only more of them. Starcity's twist is that **the verbs change as the fifty years go by**, and the thing that changes them is compute (§5.8). The player starts as a builder and ends as something stranger.
+
+1. **Builder (2000–2015).** Hand-built, classic: lay track, place stations, buy a train, watch the first coin come in. Nothing is automated. Compute is a toy.
+2. **Manager (2015–2030).** The network is too big to hold in your head, and compute can buy help: forecasts, optimisers and the first **agents** that run a line for you (§5.8). You stop placing every signal and start deciding where the company should go next, and what to spend compute on.
+3. **Governor (2030–2050).** Agents build and rebuild on their own. The player stops giving orders and writes **charters**: standing priorities that the agents follow (§1.2). The late game is not "more of the same"; it is shaping what an automated civilisation does with its power. Then the singularity arrives and asks what you made.
+
+Three systems carry the twist. They are built on things that already exist (the date slider, the demo builder, the evolving towns), which is why they are cheap to try.
+
+**Forecast, the compute-powered ghost.** The game can already seek time (the date slider, `seek_to`). With compute, the player gets **Forecast**: clone the company's state, run it forward headless a few years at high speed, and show the *ghost*: projected income, which lines saturate, which town will outgrow its station, where the brownout will land. The map shows the ghost lines faintly over the real ones. Better compute looks further (1 year in 2005, 5 years by 2030, "the whole run" in the 2040s). It turns a late-game spreadsheet into a visual, and it makes experiments fun: *what if I build this airport?* costs nothing but compute, and the answer is a picture. Late (2040+), **Revisions** let the player rewind to a saved moment a handful of times per game and take another path, paid for in a large burst of compute. Time itself becomes a resource, which suits a game about the singularity.
+
+**Charters: the governor's verbs (§1.2).** A policy sheet with a few sliders that agents obey.
+
+**The Rival.** The demo mode's scripted builder (`scenario.rs`) already knows how to plan rail lines, pick big towns and run services. Run it, tuned and budgeted, as an **autonomous competitor** on the same map from the start, a slower, dumber one in 2000 and a smart one by the 2030s (it too gets compute and agents). It competes for the same industries, spaceports and power, and in the late game it is the other intelligence you are racing to the singularity. Players can ally with it (merge and share a grid) or buy it out. This also solves "an empty map in a sandbox": the world is alive when you arrive, and the demo mode is no longer a separate thing but the rival with the player's hand off the controls.
+
+### 1.2 Charters and the two ledgers
+
+As agents take over, every automated decision (build this line, close that street, redevelop that block, route power here) follows the company's **charter**: four sliders that always add up to 100%.
+
+| Priority | Agents favour | Cost of ignoring it |
+|---|---|---|
+| **Profit** | High-yield routes, big towns, dense industry | Poor towns are left without service |
+| **People** | Service to every town, housing and green space, short commutes | Lower income per vehicle |
+| **Planet** | Clean power, fewer emissions, preserved land and coasts | Higher construction cost; slower growth |
+| **Reach** | Space, the moon, the Convergence Array | Neglects the ground; brownouts |
+
+There are two ledgers, both visible all game: **Money** (the familiar company value) and **Wellbeing** (a 0–100 score for the people: how many towns are served, how long their journeys are, power reliability, air, green space). Early on they rise together. From the 2030s they begin to pull apart, since a ground full of chrome orbs and a pure compute economy makes a great deal of money for a city of no people.
+
+**The ending depends on what you built, not on a button.** At the end of 2050 the singularity arrives and the game reads the two ledgers and the charter:
+
+| Ending | What it looks like |
+|---|---|
+| **Ascension** | Money and Reach maximal, Wellbeing low: whole cities of orbs, empty streets, the network running itself in perfect silence, with rockets leaving every hour. Beautiful and a little frightening. |
+| **Commons** | Balanced: crowded plazas under the chrome, towns that kept their roads, power that doesn't run out. |
+| **Stagnation** | The Convergence Array unbuilt or the grid collapsed: the future arrives late, and the world is left half-chrome. |
+
+The world is the scoreboard: the same map shows the ending, because it has been rebuilt by whatever the agents were told to value. This costs almost nothing to render (we already have towns that rebuild themselves and a chrome shader) and gives every player a different late game, which is exactly what makes a long game worth playing twice.
+
+*Why this is fun and not just an idea.* The decisions get *more* interesting as the game goes on, because they get higher-level, not more numerous. The danger and the joy of automation is a story the genre has barely told. And all three twists are small to build on top of what exists: Forecast is a clone-and-run, the Rival is the demo builder with a budget, charters are four numbers read where costs are already computed.
 
 ## 2. Time and money
 
@@ -60,7 +125,7 @@ Cargo that isn't taken: station stock waits, loses rating while it waits, and is
 
 ## 4. Cargo
 
-Twelve cargoes in four classes. A vehicle model carries one class (some only one cargo), so class decides which wagons, trucks and ships work (§7).
+Twelve starting cargoes in four classes. A vehicle model carries one class (some only one cargo), so class decides which wagons, trucks and ships work (§7).
 
 | Class | Cargo | Rate (£ per unit per 10 tiles) | Fresh / stale (seconds) | Unit |
 |---|---|---|---|---|
@@ -76,6 +141,25 @@ Twelve cargoes in four classes. A vehicle model carries one class (some only one
 | General | Planks | 4.4 | 70 / 110 | tonne |
 | Fresh | Food | 4.8 | 20 / 40 | tonne |
 | General | Goods | 6.4 | 30 / 70 | crate |
+
+**Era cargo** (appear with their industries, §5.7–5.8 and §10.4; the first four sit in the General class, Hydrogen with Bulk):
+
+| Cargo | Rate | Fresh / stale | From → to | Arrives |
+|---|---|---|---|---|
+| Silicon | 3.6 | 100 / 150 | Silica quarry → chip fab | 2000 |
+| Chips | 7.2 | 40 / 90 | Chip fab → data centres, factories | 2000 |
+| Containers | 5.0 | 80 / 120 | Container port → anywhere (replaces Goods on long hauls) | 2000 |
+| Parcels | 6.0 | 15 / 40 | Logistics hub → towns | 2012 |
+| Lithium / Batteries | 4.0 / 6.0 | 100 / 150 | Lithium mine → battery gigafactory → vehicle makers | 2016 |
+| Hydrogen | 4.8 | 60 / 100 | Hydrogen plant → rockets, power | 2022 |
+| Regolith | 2.6 | 200 / 300 | Lunar base → regolith works (§10.4) | 2030 |
+| Lunar glass | 6.8 | 100 / 150 | Regolith works → chrome building, spaceports | 2032 |
+| Helium-3 | 8.0 | 80 / 120 | Lunar base → fusion plant | 2034 |
+| Rare metals | 9.0 | 100 / 150 | Asteroid mining → nano-fabricator | 2040 |
+| Water ice | 3.0 | 150 / 200 | Asteroid mining → water works, rocket fuel | 2040 |
+| Nano-goods | 12.0 | 30 / 70 | Nano-fabricator → big towns | 2040 |
+
+*Power* and *Compute* are not cargo: they are services measured in MW and compute-units (§5.7, §5.8).
 
 Value rises along a chain (coal 3.4 → steel 4.8 → goods 6.4), so finishing the chain pays, but only if the player supplies every input.
 
@@ -188,6 +272,58 @@ A station collects from, and delivers to, every industry or town building within
 | Airport | 6 tiles | passengers and mail only |
 
 Waiting cargo is stored **per cargo** at the station (`waiting: [f32; N]` becomes a small map), capped at 1,000 per cargo; rating (§5.2) falls as it fills. Vehicles load the cargo their class carries, up to capacity, in order of waiting amount.
+
+### 5.7 Power
+
+Electricity is a **service, not cargo**: nothing is hauled, but it limits what you can build. It is the part of the game that grows from a footnote in 2000 to the main constraint by 2040.
+
+- **Sources** produce megawatts (MW): *Power station* (coal or fuel delivered by the player, 100 MW, runs only while it has stock), *Wind farm* (2005, 30 MW, free but variable), *Solar farm* (2012, 40 MW, daytime only: the day/night light already exists to drive this), *Hydrogen plant* (2022, 80 MW), *Fusion plant* (2035, 400 MW, needs Helium-3, §10.4), *Solar array* (space-made units, 2040, 600 MW).
+- **Consumers** draw MW: towns a little (more per person), steel mills 20, data centres 5–400 (§5.8), spaceports 40–150 (§10.4), chip fabs 30.
+- **Grid.** Version one pools every source and consumer within **30 tiles** of each other (the range is drawn as a faint circle when you select a source). Version two lets you build **pylon lines** as another network layer (like roads and rails) when a site is remote. A grid's supply is shared in proportion to demand; a short grid **browns out**: its industries make less in proportion, and nearby towns grow more slowly. The industry window shows "Power 62%".
+- **Cost on the web:** one number per source and consumer, a grid recomputed only when something is built or monthly, no per-frame work.
+
+### 5.8 Data centres and compute
+
+The thread that links the 2000s to the singularity: where the internet lives.
+
+```
+Silica quarry ──► Chip fab ◄── power ──► Data centre / AI campus ──► Compute
+   (silicon)       (chips)                      ▲   (goods or chips + power)
+                                    Power ──────┘
+```
+
+| Industry | Years | Takes | Makes | Notes |
+|---|---|---|---|---|
+| Silica quarry | 2000 | | Silicon | Sand and rock; a plain primary |
+| Chip fab | 2000 | Silicon **and** power (30 MW) | Chips | 4×4, needs flat ground and clean water within 20 tiles |
+| Server farm | 2000–2015 | Goods (servers), 5 MW | Compute | Small, 3×3, near towns |
+| Data centre | 2005+ | Goods or **Chips**, 20–80 MW | Compute | Cloud era: 4×4, chips triple the compute |
+| AI campus | 2020+ | **Chips**, 150–400 MW | Compute ×20 | 6×6 hypercampus; first appears in the 2020s; the largest consumer of power in the game |
+
+**Compute is the ultimate resource.** It is not hauled and it isn't money. It is made in **compute-units per month (CU)** by data centres, kept in a company-wide pool (not stockpiled for long: unspent CU decays 20% a month, so you use it or lose it), and **spent by allocating it to programs**. A program is a standing instruction to the company's software; you give it a share of your CU with a slider in the **Compute window**, and it applies its effect to the whole network until you take it away. The same pool pays for everything, so the question is always *what is my compute for?*
+
+How it becomes extremely powerful: programs unlock with the era (they are models like any other: a `from` year, shifted by the Tech Pace), and their strength **rises faster than their cost**, from an early curiosity to the thing that runs the company.
+
+| Program | Years | What it does | Early strength → late strength |
+|---|---|---|---|
+| **Hosting** | 2000+ | Sells spare compute: £ per CU per month, paid directly | £40 per CU in 2000 → £1,500 in 2026 (the boom) → £600 after the correction (2029) |
+| **Route analytics** | 2003+ | Station ratings and `time_factor` slightly up where service is good | +3% → +12% (2025) |
+| **Forecasting** | 2008+ | Warns of next year's production and growth; from 2015 the **Forecast ghost** (§1.1) runs the company forward and draws projected lines and income; how far it looks grows with the era | 1 year → the whole run; −30% industry build costs |
+| **Fleet optimiser** | 2015+ | Reduces vehicle running cost and queueing (signal/junction timing) | −5% → −25% |
+| **Autonomy** | 2024+ | Unlocks autonomous vehicles (they need compute in proportion to their number); autonomous fleets cost less to run | each autonomous vehicle draws 0.05 CU |
+| **Generative design** | 2026+ | Plans and prices terrain levelling and routes: cheaper construction, auto-proposed lines (the planner assistant) | −10% → −50% on levelling and track |
+| **Agents** | 2028+ | A manager agent for a line, a town or an industry: it buys and replaces vehicles, adds feeder lines, rebalances orders, within a budget you set. The compute cost scales with the number of agents | automates the late-game micromanagement so a 500-vehicle company is playable |
+| **Research** | 2030+ | Each full bar of CU spent on research pulls the introduction year of every model and industry forward (the **Tech Pace** meter) | up to four years by 2050 |
+| **Synthesis** | 2038+ | Converts CU + power into scarce things directly: Nano-goods, Rare-metal substitutes, Hydrogen; a "print it instead of hauling it" option | a dial between hauling and computing |
+| **Convergence** | 2046+ | The compute commitment the Convergence Array needs (§10.5) | the end goal |
+
+**The shape of it.** Until about 2020 a few CU buy modest conveniences: it's hosting income and small percentages, a small data centre is an optional extra. From 2020, each tier of campus multiplies output ×20, and programs scale with the **size of the company** (an optimiser saves 25% of *all* running costs, an agent manages *every* line), so the value of a CU is proportional to what it is applied to, which keeps growing. In 2030 a player with ten campuses and a hundred vehicles runs a company that is partly self-managing; in 2045 compute is what separates a player who is doing things by hand from one who is directing. At the same time its cost is **power, chips and heat**, which are all earned the hard way (§5.7), so compute is the one resource with no ceiling except the other three.
+
+**Why it isn't a runaway.** Programs cost CU *per month*, rising with the fleet and the map; a naive player who runs everything finds their CU doesn't stretch; a power shortage (brownout) cuts compute in proportion; and each program's effect has diminishing returns above a certain share (a 100% allocation to one program gives about 60% more than a 30% one). So there's a real allocation question every era, and what is best changes with the year.
+
+The tension for the player (about compute): an AI campus draws as much power as a city and wants a steady stream of chips, but it makes money, speeds the tech clock and brings a boom. Build too many for the grid and everything browns out. Build none and the future arrives later.
+
+**The AI boom** is also a world event (§10.9): from about 2024 hosting rates triple and chip demand jumps, with the first AI campuses; around 2029 a **correction** cuts hosting rates 40% and some campuses close, but the compute dividend stays. A player who over-built in the boom feels it; a patient one doesn't.
 
 ## 6. Passengers and mail
 
@@ -312,10 +448,10 @@ The game starts on **1 January 2000**, as the web is taking off, and runs to **2
 
 | Era | Years | Feel | What arrives |
 |---|---|---|---|
-| **Dot-com** | 2000–2012 | Grounded and plain. Win2000 grey UI, boxy vehicles. | The §7 models as they are: diesel trains, buses, turboprops and jets, ferries. Mail still matters. |
-| **Broadband** | 2012–2025 | Cleaner and flatter. Glossy buttons give way to flat ones. | Electric trains and buses, hybrid trucks, larger jets, container-style ships. Faster everything, higher running costs falling. |
-| **Chrome dawn** | 2025–2038 | The first metal appears: vehicles and tall buildings gain a sheen. | Maglev trains, autonomous trucks, electric and VTOL aircraft, hydrofoil ferries. Industries get automated (more output per tile, fewer closures). **Sub-orbital rockets** appear around 2032. |
-| **Chrome age** | 2038–2048 | Everything reflective: towers of mirrored glass, polished vehicles, a chrome UI. | Hyperloop pods, autonomous convoys, fusion power. **Orbital lifters** (2038) and **spaceports** open the space economy (§10.4). |
+| **Dot-com** | 2000–2012 | Grounded and plain. Win2000 grey UI, boxy vehicles. | The §7 models as they are: diesel trains, buses, turboprops and jets, ferries. Mail still matters. **Server farms and the first data centres** (§5.8). |
+| **Broadband** | 2012–2025 | Cleaner and flatter. Glossy buttons give way to flat ones. | Electric trains and buses, hybrid trucks, larger jets, container-style ships. Cloud data centres, solar and wind, lithium. **The first AI campuses (2020+).** |
+| **Chrome dawn** | 2025–2038 | The first metal appears: vehicles and tall buildings gain a sheen. | Maglev trains, autonomous trucks, electric and VTOL aircraft, hydrofoil ferries. **The AI boom (2024–29)**. Industries get automated. **Spaceports (2027), orbital lifters (2030), the first moon cargo (2031) and regolith industries**, fusion plants (2035). |
+| **Chrome age** | 2038–2048 | Everything reflective: towers of mirrored glass, polished vehicles, a chrome UI. | Hyperloop pods, autonomous convoys, fusion power. **Asteroid mining (2040)**, nano-fabricators, space-made solar arrays, lunar cities in outline (§10.4). |
 | **Singularity** | 2048–2050 | Gleaming, strange, accelerating. | The final megaproject (§10.5). Production and growth curves steepen. |
 
 Dates are the *centre* of each introduction; each game shifts every model by a random ±3 years, so no two games unlock in the same order and the player can't plan from a memorised list. A model shows as "Coming around 2031" in the buy window, so there's something to look forward to.
@@ -340,22 +476,66 @@ The world turns chrome gradually: a little from 2025, extremely by 2050. It's bu
 
 ### 10.4 Space
 
-Space is the late-game economy and the reason to keep playing after the roads and rails are done.
+Space is a second economy layered on the first, not a replacement for it. It begins as an expensive curiosity around 2027, loses money for years, and becomes the most profitable thing you can run by the 2040s as the technology matures. Its industries come back down to Earth and feed the chains of §5.
 
-- **Spaceports** are terminals (like ports and airports) with a launch complex footprint (about 12×12, levelled flat like an airport, £400,000). They need a flat site away from towns (a noise-and-safety zone of 15 tiles, or town growth stalls) and, for orbital lifters, a coastal or low-population aim line. From 2032 a **sub-orbital** pad (small, cheaper) and from 2038 a full **orbital** pad.
-- **Rockets** are vehicles that follow a route like planes do (a list of destinations), except the destination is **off-map**. A rocket stands on its pad, lifts off with a plume of boxes, climbs out of sight, and returns after a trip time with the cargo exchanged; landing is a powered descent to the pad. They're expensive (£500,000 and up) and carry a lot (100–400 units), and pay by a fixed "orbital distance" per destination, so a short route on the map can still be the best-paid thing you run.
-- **Off-map destinations** are virtual industries, always present once the era opens, and a few more appear over time (§10.1): an **Orbital Station** (accepts people, goods, food and fuel; produces *Solar Power Units*), a **Lunar Base** (accepts goods, food, people; produces *Helium-3* and *Regolith*), and **Asteroid Mining** (accepts fuel and goods; produces *Rare Metals* and *Water Ice*). A spaceport's catchment loads and unloads them exactly like a station loads industries.
-- **Space resources come down to the map** as new cargo: Rare Metals, Helium-3, Water Ice, Solar Power Units. New map industries use them:
-  - *Fusion plant* (Helium-3 → power for towns, like a power station, with a bigger growth bonus),
-  - *Nano-fabricator* (Rare Metals + Goods → **Nano-goods**, the best-paid cargo in the game, accepted by towns above 5,000 people),
-  - *Water works* (Water Ice → Food/Water for big towns),
-  - *Solar array* (Solar Power Units → a large, permanent boost to nearby growth).
-- **Chain depth stays at three**: space resources are an *extra step* feeding the existing economy, not a replacement for it, so a player who never goes to space still has a complete game.
-- **Cost on the web:** a handful of rockets (their props are a few boxes plus a short plume), no off-map world to simulate, and the off-map destinations are just a few numbers each.
+**Launch sites.** *Spaceports* are terminals like ports and airports (`terminals.rs`), but hungry:
+
+| Site | Years | Price | Footprint | Needs |
+|---|---|---|---|---|
+| Sub-orbital pad | 2027+ | £250,000 | 8×8, levelled | 40 MW, 40 kl fuel per launch |
+| Orbital spaceport | 2030+ | £600,000 | 12×12, levelled | 150 MW, 200 kl fuel per launch, a stock of Lunar glass for the pad (2032+) |
+| Lunar-capable complex | 2032+ | £1,200,000 | 14×14 plus a gantry | 250 MW, Hydrogen or Fuel, Water ice (2040+ cheaper) |
+
+Rules of the site, all visible in the spaceport window as red/green checks:
+
+- **Power:** the grid in range must have enough spare MW (§5.7). A spaceport on a short grid launches slowly, or not at all. This is why the fusion plant matters.
+- **Resources:** fuel (and Hydrogen later) must be delivered by the player. A launch takes its fuel from the pad's stock, so an empty pad idles. A refinery and tanker line to the spaceport is a real job.
+- **Site:** a flat area away from towns: a 15-tile safety zone, within which towns lose growth while a pad is active; coastal sites launch over water and are the only choice for the bigger lifters (no pad inland after 2030 unless the zone is 25 tiles).
+- **Noise and weather:** storms (§10.9) delay launches; launches visibly shake the nearest buildings' windows (cosmetic).
+
+**Rockets** are vehicles (`rockets.rs`, modelled on `planes.rs`): they stand on a pad, lift off with a plume and climb out of sight, and return after a trip time with cargo exchanged. They cost £300,000–£1.5 million and carry 60–250 units.
+
+| Rocket | Years | Price | Capacity | Notes |
+|---|---|---|---|---|
+| Hopper (sub-orbital) | 2027 | £300,000 | 60 units | Ballistic, back in minutes: tourists and fast parcels across the map |
+| Orbital lifter | 2030 | £500,000 | 150 units | Orbit and stations |
+| Lunar shuttle | 2031 | £900,000 | 120 units | Moon |
+| Deep-space hauler | 2040 | £1,500,000 | 250 units | Asteroids; long trips (a game year or more) |
+
+**Why spaceports start unprofitable.** Each launch has an *operating cost* (crew, range, refurbishment, the fuel you don't deliver) that falls as the technology improves, while the destinations pay a fixed "orbital distance" (§3):
+
+| Destination | Orbital distance | Years |
+|---|---|---|
+| Orbital station | 400 tiles-equivalent | 2027 |
+| Moon (lunar base) | 1,500 | 2031 |
+| Asteroid belt | 6,000 | 2040 |
+
+Launch operating cost per orbital launch: about **£120,000 in 2030**, falling in steps: booster reuse (~2033, −40%), rapid turnaround (~2037, −50%), orbital lifter infrastructure (~2044, −70%), reaching about **£8,000 by 2050**. A load of 150 Goods to orbit pays about £38,000: so in 2030 a launch loses money on ordinary cargo and only profits with the dear stuff (Chips, Nano-goods, people); by the late 2030s it breaks even on goods; by the 2040s it is the best-paid route in the game. Reliability improves the same way: **failure chance per launch** falls from 6% (2027) to 0.3% (2050); a failure destroys the cargo and the rocket and closes the pad for a month (a visible explosion, and a reason to insure). Early adopters pay to learn, and the Tech Pace meter (§5.8) speeds this curve.
+
+**Off-map destinations** are virtual industries with no tile, always present once their era opens (their stock and production are a few numbers each):
+
+- **Orbital station** (2027): accepts people, goods, food, fuel, chips; produces *Solar power units* (2040).
+- **Lunar base** (2031): accepts goods, food, people, fuel, hydrogen; produces **Regolith** (2031), **Helium-3** (2034) and Lunar glass is made on Earth from regolith. The base grows over the years (its demand rises, a small model sits on the pad's skyline).
+- **Asteroid mining** (2040): accepts fuel and goods; produces **Rare metals** and **Water ice**. Far, slow, rich.
+
+**Space resources feed ground industries** (extra steps in the §5 chains, never a replacement, so a player who skips space still has a complete game):
+
+| Industry | Years | Takes | Makes | Notes |
+|---|---|---|---|---|
+| Regolith works | 2032 | Regolith + power | **Lunar glass** (and Metals) | The moon-dust industry: lunar glass is the material of chrome buildings and the spaceport pad |
+| Chrome foundry | 2034 | Lunar glass + Steel | Chrome plate | Towns supplied with chrome plate redevelop into orbs and towers faster (a growth bonus, §10.7) |
+| Fusion plant | 2035 | Helium-3 | 400 MW | A power source with a big town-growth bonus |
+| Nano-fabricator | 2040 | Rare metals + Goods | **Nano-goods** | The best-paid cargo; accepted by towns above 5,000 |
+| Water works | 2040 | Water ice | Food and Hydrogen | Cheaper than farms near big towns |
+| Solar array receiver | 2040 | Solar power units | 600 MW | Largest source in the game |
+
+**The player's decision:** space is a long investment. A pad, a power source, a fuel supply and a rocket together cost millions before the first cargo lands; early on the money is better spent on the ground. But a player who starts early, learns the economics while the launch cost is still high, and builds the fuel and power they will need is rewarded when the curve turns, and the singularity (§10.5) needs the whole chain.
+
+**Cost on the web:** a handful of rockets (a few boxes plus a short plume), no off-map world to simulate, and a few numbers per off-map destination. Launch plumes are particles on the dynamic buffer, and a bounded count.
 
 ### 10.5 The singularity
 
-By 2048 a megaproject, the **Convergence Array**, becomes available to build: a large structure that needs enormous deliveries over a couple of game years (Rare Metals, Nano-goods, Helium-3, power). Finishing it before the end of 2050 triggers the singularity ending: the sky and UI complete their shift to full chrome, a short credits sequence plays, and the game offers to continue as a post-singularity sandbox (industries produce without inputs, towns grow without limit, the player keeps building). Missing it just continues the sandbox with a note. It's a goal (§9), never a gate.
+By 2048 a megaproject, the **Convergence Array**, becomes available to build: a large structure that needs enormous deliveries over a couple of game years (Rare metals, Nano-goods, Helium-3, Lunar glass, and a large power draw) and a **compute commitment** from the company's data centres and AI campuses (§5.8). Finishing it before the end of 2050 triggers the singularity, whose ending (Ascension, Commons or Stagnation) depends on the charter and the two ledgers (§1.2): the sky and UI complete their shift to full chrome, a short credits sequence plays, and the game offers to continue as a post-singularity sandbox (industries produce without inputs, towns grow without limit, the player keeps building), or, later, to carry on to the moon (§10.10). Missing it just continues the sandbox with a note. It's a goal (§9), never a gate.
 
 ### 10.6 Implementation notes
 
@@ -363,6 +543,8 @@ By 2048 a megaproject, the **Convergence Array**, becomes available to build: a 
 - Vehicle models for sale (§7) will take their introduction and retirement years from the model files too (`from` / `to`), plus a per-game random shift of ±3 years; availability is a pure function of the date.
 - The era value is a uniform in `Globals` next to the light (`daylight::Light` is the model: a pure function of the date, applied in one place); `era.rs` holds the timeline.
 - Space uses the existing terminal and orders machinery (`terminals.rs`): a `Site::Spaceport`, a `rockets.rs` modelled on `planes.rs` (a precomputed list of waypoints for lift-off and landing, plus a timed absence), and off-map destinations as entries in the industry table with no tile.
+- Power is a `power.rs` module (sources, consumers, grids by radius, a monthly solve) used by industries, data centres and spaceports; compute and the Tech Pace meter live in the company state; both are pure data a test can drive.
+- Introduction years are shifted by the Tech Pace as well as the per-game random: `available(model, year) = year >= model.from + shift - pace`.
 
 ### 10.7 Towns that change with the years ✅
 
@@ -404,6 +586,7 @@ What the player meets along the way. Years are when a thing first appears, with 
 |---|---|---|
 | 2001 | Dot-com bust | Office demand dips for a year: towers grow more slowly |
 | 2000s | Broadband spreads | Towns with fibre grow a little faster; commuter passengers fall about 5%, goods rise |
+| 2005 | Cloud and broadband data centres | Data centres available; towns with one boom |
 | 2003 | Low-cost airlines | Airport passenger demand up; short flights pay less |
 | 2005–2012 | Fuel price spikes | Diesel and aviation running costs up 30% for a couple of years; nudges players towards electric |
 | 2008 | Financial crisis | All income down 20% for 18 months; loan interest up: a test for over-borrowed players |
@@ -411,53 +594,98 @@ What the player meets along the way. Years are when a thing first appears, with 
 | 2010s | E-commerce | Parcels and mail grow; goods demand up; a new cargo, Parcels |
 | 2020 | The pandemic | Passenger demand falls 60% for a year and recovers to about 90% for good (remote work); freight up 20% |
 | 2020s | Low-emission zones | Diesel vehicles are banned from a town's centre; electric ones aren't |
+| 2024–29 | **The AI boom** | Hosting rates triple, chip prices jump, the first AI campuses; electricity demand surges and power prices rise 40% |
 | 2024+ | First autonomous pilots | Autonomous road vehicles appear for sale |
+| 2027 | First commercial sub-orbital flights | Sub-orbital pads available (§10.4) |
+| 2029 | AI correction | Hosting rates fall 40%, some campuses close; the compute dividend remains |
+| 2030 | Orbital lifters; first lunar landings | Orbital spaceports available; the moon opens a year later |
 | 2030+ | Sea levels rise | Coasts flood slowly: low coastal tiles become water (the sea grid already follows terrain edits), threatening ports, coastal stations and shore towns; seawalls become a thing to buy |
 | 2030+ | Storms and floods | Random events ground flights, close a route or flood a low station for a month |
-| 2032 | First sub-orbital flights | Spaceports available (§10.4) |
-| 2035 | Fusion pilot plants | A new power industry; towns near it boom |
+| 2031 | First lunar cargo | Lunar base; regolith for sale; regolith works in 2032 |
+| 2035 | Fusion pilot plants | Helium-3 fusion plants; towns near them boom |
+| 2040 | Asteroid prospectors | Deep-space haulers; Rare metals and Water ice |
 | 2038+ | Automation dividend | Running costs fall about 40%; driver-less vehicles; towns shed some commuter traffic |
 | 2045 | "Convergence" announced | The final megaproject opens (§10.5) |
 
-**New industries and cargo along the way** (in addition to §5): *Container port* (2000), *Wind farm* (2005, power), *Biofuel plant* (2008, grain to fuel), *Data centre* (2005+, consumes power, boosts nearby towns), *Logistics hub* (2010+, goods to parcels), *Solar farm* (2012), *Lithium mine and Battery gigafactory* (2015–2020, lithium to batteries, which electric vehicles and the 2030s power industries need), *Hydrogen plant* (2022), *Vertical farm* (2020+, inside towns, food in small amounts), *Fusion plant* (2035), *Nano-fabricator* and the space chain (§10.4, 2038+). New cargo: Containers, Parcels, Lithium, Batteries, Hydrogen.
+**New industries and cargo along the way** (in addition to §5): *Container port* (2000), *Wind farm* (2005, power), *Biofuel plant* (2008, grain to fuel), *Data centre and AI campus* (§5.8), *Chip fab* and *Silica quarry* (2000), *Logistics hub* (2010+, goods to parcels), *Solar farm* (2012), *Lithium mine and Battery gigafactory* (2015–2020, lithium to batteries, which electric vehicles and the 2030s power industries need), *Hydrogen plant* (2022), *Vertical farm* (2020+, inside towns, food in small amounts), *Fusion plant* (2035), and the space chain (§10.4): *Regolith works* (2032), *Chrome foundry* (2034), *Nano-fabricator*, *Water works* and *Solar array receiver* (2040). New cargo: see the era table in §4.
 
 **Technology and policy:**
+- **Power:** the grid (§5.7) is the constraint that grows through the game: data centres, chip fabs, spaceports and megacities all need it, so each era needs new generation.
 - **Electrification:** electric vehicles need chargers (a charging depot building, cheap, at a stop); electric trains need overhead wire; maglev needs its own track. These are the new things to build each era, so the player is always laying something new.
 - **Subsidies and carbon tax:** from the 2020s the government subsidises electric vehicles in some towns and taxes diesel in others, shifting what pays.
 - **Automation:** autonomous vehicles cost more but need no drivers (lower running costs); an early adopter bonus.
-- **Mega-cities:** from the 2030s merged towns can become a *megacity* (population 20,000+), with its own demands (an orbital link by 2045).
+- **Mega-cities:** from the 2030s merged towns can become a *megacity* (population 20,000+), with its own demands (an orbital link by 2045; a spaceport within range is the status symbol).
 
 **Look and feel:** the toolbar icons, window chrome and cursor shift through the desktops of the time (§10.3); the news ticker uses period language; the music (later) moves from synth pop through electronic to ambient. Each era has a one-line tagline in the debug window and a small banner on entering it.
 
-## 11. Implementation plan
+### 10.10 Beyond 2050: the moon (far future)
 
-Order of work, each step playable on its own:
+Not for the first release, but the design should not stand in its way. After the singularity, a late-game campaign **opens a second map**: the moon.
 
-0. **Clock and day/night** ✅. Date and time in the status bar, speed buttons, a light that follows the time of day.
-1. **Money.** `Company { cash, loan }`; charge `Plan::cost` on build (refuse if short, show why); a monthly tick; cash in the status bar; the finance window with loans; income from passengers by distance. *Also*: stations record the day and origin of boarding passengers so payment is per distance.
-2. **Cargo and stations.** Generalise `Station.waiting: f32` to per-cargo stock; vehicles carry a cargo class; `handle_arrivals` pays out; rating factors; catchment query for industries, as `Towns::population_near` does for buildings. Keep the existing passenger behaviour as the one-cargo case.
-3. **Industries.** `industry.rs` with `IndustryKind` (a `const` table of recipe, terrain rule, footprint, colour, cargo in/out), `Industries` (list, by-tile layer, monthly update), placement at generation (resource noise fields, footprints levelled with `terrain::edit`), and stock/acceptance. Static boxes for rendering; the industry window (production, stock, rating, transported %).
-4. **Vehicle catalogue.** A `const` model table per mode (price, speed, capacity, class, running cost); the build-vehicle window; vehicles take their stats from their model. Boats and planes use the same table (see below).
-5. **Town demands** (§5.5) and the power-station bonus.
-6. **Industry life** (§5.2 closures, §5.4 spawning, fund-new-industry) and goals (§9).
-7. **Breakdowns, depots, eras, replace** (§7.5), as optional polish.
+- **A second world.** The moon is another map of the same kind (voxel terrain, no water, no weather), reached by rocket from any lunar-capable spaceport. Switching maps is a button in the status bar; each map keeps its own towns, networks and clock-synced economy. The save holds a list of maps.
+- **Domes and sealed life.** Nothing outside a dome supports people. A **dome** is a building that claims an area (e.g. 12×12), seals it and costs power and water; inside it towns grow as on Earth, with the buildings of the era in miniature. Between domes, travel is by **sealed tunnels and maglev** (built like rails), and cargo vehicles run outside in the vacuum. Low gravity: vehicles are faster; lighting is stark, a black sky with Earth overhead and a two-week day/night cycle (the light cycle in `daylight.rs` is already independent of the calendar).
+- **The lunar economy.** The moon produces Regolith, Helium-3, Metals and Water ice (from polar craters) locally, rather than as a virtual destination; the player builds the mines. It consumes Earth's goods, people and Nano-goods via the **orbital lift**: a long line between maps that pays by the unit like any route. Whole new chains grow from this: domes want Lunar glass, power wants Helium-3, industry wants Metals.
+- **Why it is plausible now.** The big structural choices that allow it: terrain and economy are data (no global singleton in the economy), the sea grid and the weather are optional layers, the light is a pure function, and models and eras are in files. The one change to make before it is cheap now and expensive later: **hold the world, the networks, the towns and the vehicles in a `Level` struct** rather than as separate fields of `App`, so a game can contain two of them (§11, phase 11).
+
+## 11. Implementation plan and next steps
+
+Each phase is playable and testable on its own; later phases lean on earlier ones. Every phase ends with the same checks: `cargo test` (incl. shader validation), `cargo check --target wasm32-unknown-unknown`, a native screenshot run, a frame-time check, and a `trunk build --release` size note.
+
+### Done ✅
+
+0. **Foundations:** terrain, networks, signals, stations, towns, trains and road vehicles, demo mode, rail levelling.
+1. **Sea and air:** sea grid with budgeted A*, ports, ferries, airports, planes, demo ferry and flight lines.
+2. **Time and light:** calendar, speeds, independent day/night, date slider.
+3. **Eras and assets:** glTF pipeline, 60 placeholder models and artist guide, era/chrome shading, towns that renew and merge, vehicles that retire.
+
+### Next steps, in order
+
+**Phase 4 — Money.** `company.rs`: `Company { cash, loan, ledger }`. Charge `Plan::cost` when building (refuse if short and say why); monthly tick for running costs, upkeep and interest; cash in the status bar; the Finance window (§2). Passengers pay by distance (§3): stations record origin and boarding time. *Test:* a scripted route earns a profit within the §8 range. *Touches:* `app.rs`, `network.rs`, `stations`, `ui/`.
+
+**Phase 5 — Cargo and stations.** `cargo.rs` with the `Cargo` table (§4); `Station.waiting` becomes per-cargo; vehicles carry a class; rating factors; catchment cache. Passengers remain the one-cargo case. *Test:* rating and catchment unit tests.
+
+**Phase 6 — Industries and power.** `industry.rs` (the const kind table, placement with resource noise and `terrain::edit` levelling, monthly update, stock, closure/spawn); the industry window; `power.rs` with sources, consumers, radius grids and brownouts (§5.7). Static boxes first, then glTF models in `assets/models/industries/` (add a `Role::Industry` and a `kind` to the loader). *Test:* placement rules on generated maps; a chain delivers; a short grid cuts output.
+
+**Phase 7 — Vehicle catalogue and the build window.** The `Model` table (§7) with `from`/`to` years in the glb files; the Build Vehicle window with "coming around 2031" entries; vehicles read their stats from the table; boats and planes use the same table. Players choose the generation they buy.
+
+**Phase 8 — Towns as customers, goals, industry life.** §5.5, §5.2 closures and spawning, fund-a-new-industry, §9 goals.
+
+**Phase 9 — Data centres and compute.** The silica → chips → data-centre chain (§5.8) as ordinary industries; `compute.rs` with the CU pool (decay, allocation sliders) and the Compute window; first programs (hosting, analytics, forecasting, fleet optimiser); the Tech Pace meter shifting introduction years. *Test:* compute pays; brownouts cut CU; the allocation of a program changes its effect with diminishing returns. Later programs (autonomy, generative design, agents, synthesis) are added one at a time as the systems they touch arrive.
+
+**Phase 9b — Forecast and the Rival.** `forecast.rs`: clone the simulation state, run it N years headless in budgeted slices (so the web UI stays responsive), render ghost lines and a projected-income chart; `scenario.rs` becomes `rival.rs`, a budgeted autonomous company that uses the same costs and the same industries as the player. *Test:* a forecast of an idle company matches the real run within tolerance; the rival makes a profit on generated maps.
+
+**Phase 10a — Agents, charters and the two ledgers.** Agents (§5.8) that build and run lines through the same `Plan` API the player uses; the four-slider charter window; the Wellbeing score from town and grid data; the endings (§1.2). *Test:* charters change what agents build in a seeded scenario, deterministically.
+
+**Phase 10 — Events and the UI by era.** An events engine (headlines, effects with durations; §10.9), and the Win95 theme interpolated through the desktops of the time (§10.3). *Pure functions of the date plus a seed, testable.*
+
+**Phase 11 — Space.** `Site::Spaceport`, `rockets.rs`, off-map destinations, the launch-cost curve and failure model, space industries and cargo (§10.4), then the Convergence Array. *Test:* the economics table: a goods launch loses money in 2030 and makes it by 2040. Before this phase, move the world, networks, towns and vehicles into a **`Level`** struct, a mechanical refactor, so that a second map becomes possible.
+
+**Phase 12 — Polish and far future.** Breakdowns and depots, replace, overhead wire and maglev track, terraforming tools, textures and animation from glb, then the moon (§10.10): second map, domes, sealed networks, the orbital lift.
+
+**Cross-cutting, any time:** profile the web build in a real browser (the one unverified thing); the headless economy test (§8) from Phase 4; replace placeholder art as the artists deliver (files only, no code); the 2× default speed question (§12).
 
 ### Data shapes (sketch)
 
 ```rust
-enum Cargo { Passengers, Mail, Coal, IronOre, Grain, Oil, Fuel, Timber, Steel, Planks, Food, Goods }
+enum Cargo { Passengers, Mail, Coal, IronOre, Grain, Oil, Fuel, Timber, Steel, Planks, Food, Goods,
+             Silicon, Chips, Containers, Parcels, Lithium, Batteries, Hydrogen,
+             Regolith, LunarGlass, Helium3, RareMetals, WaterIce, NanoGoods }
 enum CargoClass { People, Bulk, General, Fresh }       // what a vehicle can carry
 
 struct IndustryKind { name, footprint: (u8, u8), inputs: &[(Cargo, u16)], outputs: &[(Cargo, u16)],
-                      terrain: Rule, spacing: u16, colour: [u8; 3] }
+                      power_mw: i16,                  // + produces, - consumes
+                      years: (u16, u16), terrain: Rule, spacing: u16, colour: [u8; 3] }
 struct Industry { id, kind, tiles: Rect, stock: [u32; N], produced_last_month: u32,
                   transported_last_month: u32, production: u32, rating_low_months: u16 }
 
 struct Model { name, mode: Mode, price: u32, running: u32, speed: f32, capacity: u16,
-               class: CargoClass, tier: u8 }
+               class: CargoClass, tier: u8, from: u16, to: u16 }
 const MODELS: &[Model] = &[ /* tables in §7 */ ];
 
-struct Company { cash: i64, loan: i64, year_ledger: Ledger }
+struct Company { cash: i64, loan: i64, year_ledger: Ledger,
+                 compute: Compute }                    // pool, decay, per-program allocation
+struct Program { kind: ProgramKind, share: f32 }       // a slider; effect = f(share, fleet, year)
+struct Level { world, roads, rails, towns, vehicles, industries, power, .. }  // phase 11
 ```
 
 ### Web performance budget
@@ -469,13 +697,21 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 - **Catchment lookups are cached.** A station records which industries and buildings it covers when it's built or changes, not every tick (`population_near` is the pattern, but cached).
 - **No new per-frame loops over the map.** Resource noise fields are evaluated only at generation; spawning checks a handful of candidate sites per month.
 - **Vehicle counts stay bounded** (the existing cap of 900 road vehicles, small fleets for boats, planes and trains), and everything that moves is already drawn through the dynamic box buffer.
+- **Power and compute are monthly sums:** one pass over sources, consumers and data centres each economy month; programs apply as multipliers read in the places that already compute costs, with no per-frame loops.
+- **Rockets are bounded** (a few at a time), plumes are a capped particle count on the dynamic buffer.
 - **Pathfinding is budgeted** (boats already do this: a fixed number of A* expansions per frame, with cached routes), and the same pattern applies to anything new that searches.
 
 ## 12. Open questions
 
-1. ~~**Pacing of the 50-year arc.**~~ Decided: the calendar runs a day a second and the light cycles separately (§2). A game to 2050 is about 5 hours at normal speed. Still to decide: whether the default speed should be 2× (so a run to 2050 is under 3 hours) and whether to add 16×.
-2. **Eras: all models from day one, or by year?** Settled by §10: by year, with a per-game shift.
-2. **Distance: straight-line or route length?** Straight-line stops players padding routes but rewards the shortest track; route length rewards winding lines. Proposed: straight-line.
-3. **Competing companies.** The market-share split (§5.2) would let AI companies exist; do we want them, or is the split just a rule between a player's own stations?
-4. **Mail** might be cut if passengers alone give enough for aircraft to do.
-5. **Scale of the numbers.** Everything in §3–8 should be tuned against the headless economy test in §8 once money exists, not by hand.
+1. ~~**Pacing of the 50-year arc.**~~ Decided: a calendar day per second, light cycling separately (§2), about 5 hours to 2050 at 1×. Still open: whether the default speed should be 2× and whether to add 16×.
+2. ~~**Eras: all models from day one, or by year?**~~ Decided: by year, with a per-game shift and the Tech Pace (§10.1, §5.8).
+3. **Distance: straight-line or route length?** Proposed: straight-line.
+4. **Competing companies.** The market-share split (§5.2) would let AI companies exist; do we want them, or is the split only between the player's own stations? (A rival "AI company" is thematically appealing in the 2030s.)
+5. **Mail** might be cut if passengers alone give enough for aircraft to do.
+6. **Compute balance.** The programs table (§5.8) is the most speculative part of the design: how strong is too strong? Needs playtests, and the headless economy test should include a compute scenario.
+7. **Are orbs gated by lunar glass?** §10.4 makes supplied towns redevelop faster; a stricter version would make orbs impossible without it. Visually that risks cities that never go chrome, so the proposed rule is a bonus, not a gate.
+8. **Power grid:** radius pooling first, pylons later. Is that enough, or do pylons belong in the first version?
+9. **Scale of the numbers.** Everything in §3–8 and §10.4 should be tuned against headless tests once money exists, not by hand.
+10. **How far to take the twist?** Charters and endings (§1.2) assume the agents' behaviour can be steered and tested; the first version could ship with two ledgers and three endings, with agents as hand-written heuristics. Is that enough, or should agents be more surprising (they have a mind of their own)?
+11. **Revisions:** rewinding is powerful, and might undermine consequence. Limited use (three per game) and a heavy compute price are the proposal.
+12. **The moon:** a separate scenario or the continuation of the same save? (§10.10 assumes the latter.)
