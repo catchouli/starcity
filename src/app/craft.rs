@@ -313,7 +313,7 @@ impl StarcityApp {
             if boarding > 0 {
                 *boarded = Some((c.x, c.y, self.clock.days()));
             }
-            self.pay_fare(delivered, came_from, (c.x, c.y));
+            self.pay_fare(Cargo::Passengers, delivered, came_from, (c.x, c.y));
             if let Some(town) = self.towns.nearest((c.x as i32, c.y as i32), 40) {
                 let town = &mut self.towns.list[town as usize];
                 town.served += delivered as f32;

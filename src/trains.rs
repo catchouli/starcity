@@ -11,6 +11,7 @@
 //! unsignalled track a train only claims a piece as its head enters it, so
 //! two trains can run into each other there, and they crash.
 
+use crate::cargo::Cargo;
 use crate::network::Layer;
 use crate::rails::{Signals, piece_ends};
 use crate::stations::{StationId, Stations};
@@ -157,7 +158,10 @@ pub struct Train {
     pub loading: Option<f32>,
     /// Told to stop by the player.
     pub stopped: bool,
-    pub passengers: u32,
+    /// How many units of `cargo` are on board.
+    pub load: u32,
+    /// What the cars carry (coaches seat people; mail vans take bags).
+    pub cargo: Cargo,
     /// Where and when (game seconds) the passengers on board got on, for the fare.
     pub boarded: Option<(f32, f32, f64)>,
     /// Distance to the target station from each segment, and the target and
@@ -172,9 +176,9 @@ struct Routing {
 }
 
 impl Train {
-    /// Passenger seats: every car but the locomotive.
+    /// Units of its cargo the train holds: every car but the locomotive.
     pub fn capacity(&self) -> u32 {
-        self.cars.saturating_sub(1) * 30
+        self.cars.saturating_sub(1) * self.cargo.wagon_capacity()
     }
 
     pub fn length(&self) -> f32 {
@@ -388,7 +392,8 @@ impl Trains {
             order: 0,
             loading: None,
             stopped: false,
-            passengers: 0,
+            load: 0,
+            cargo: Cargo::Passengers,
             boarded: None,
             routing: None,
         });

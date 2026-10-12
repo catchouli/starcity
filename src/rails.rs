@@ -162,6 +162,7 @@ pub fn plan(
 /// Like [`plan`], but where the ground has the wrong slope the plan levels it
 /// (see `Plan::terraform`), which costs extra. Ground that's too steep to
 /// level without moving corners too far still blocks it.
+#[allow(dead_code)] // The game routes with `plan_route`; kept for the demo and tests.
 pub fn plan_terraforming(
     world: &World,
     rails: &Layer,

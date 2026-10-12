@@ -43,6 +43,8 @@ const BANKRUPT_MONTHS: u32 = 12;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     Passengers,
+    /// Mail and every other cargo.
+    Freight,
     Construction,
     Vehicles,
     Running,
@@ -54,8 +56,9 @@ pub enum Item {
 }
 
 impl Item {
-    pub const ALL: [Item; 8] = [
+    pub const ALL: [Item; 9] = [
         Item::Passengers,
+        Item::Freight,
         Item::Contracts,
         Item::Construction,
         Item::Vehicles,
@@ -68,6 +71,7 @@ impl Item {
     pub fn name(self) -> &'static str {
         match self {
             Item::Passengers => "Passengers",
+            Item::Freight => "Mail and freight",
             Item::Construction => "Construction",
             Item::Vehicles => "New vehicles",
             Item::Running => "Running costs",
@@ -87,7 +91,7 @@ impl Item {
 /// expense are kept apart by sign of the category: passengers are income).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ledger {
-    amounts: [i64; 8],
+    amounts: [i64; 9],
 }
 
 impl Ledger {
@@ -100,13 +104,13 @@ impl Ledger {
     }
 
     pub fn income(&self) -> i64 {
-        self.get(Item::Passengers) + self.get(Item::Contracts)
+        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts)
     }
 
     pub fn expenses(&self) -> i64 {
         Item::ALL
             .iter()
-            .filter(|&&i| i != Item::Passengers && i != Item::Contracts)
+            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts))
             .map(|&i| self.get(i))
             .sum()
     }
@@ -271,17 +275,6 @@ pub struct LinkFacts {
     pub station_a: bool,
     pub station_b: bool,
     pub connected: bool,
-}
-
-/// Whether passengers pay: units, tiles between the stations, and seconds on board.
-/// Passengers pay 2.4 per 10 tiles, in full for 20 s and falling to 30% by 80 s (§3, §4).
-pub fn passenger_fare(units: u32, tiles: f32, seconds: f32) -> u32 {
-    let time = if seconds <= 20.0 {
-        1.0
-    } else {
-        (1.0 - 0.7 * ((seconds - 20.0) / 60.0)).max(0.3)
-    };
-    (units as f32 * (tiles / 10.0) * 2.4 * time).round() as u32
 }
 
 pub struct Company {
@@ -453,7 +446,7 @@ impl Company {
     pub fn earn(&mut self, item: Item, amount: u32) {
         self.cash += amount as i64;
         self.ledger.add(item, amount as i64);
-        if item == Item::Passengers {
+        if matches!(item, Item::Passengers | Item::Freight) {
             self.lifetime_income += amount as i64;
             self.income_this_month += amount as i64;
         }
@@ -495,7 +488,7 @@ impl Company {
         if l.income > 0 {
             out.push(Requirement {
                 text: format!(
-                    "Earn £{} from passengers (£{} so far)",
+                    "Earn £{} from deliveries (£{} so far)",
                     l.income,
                     self.lifetime_income.min(l.income)
                 ),
@@ -859,18 +852,6 @@ mod tests {
         c2.cash = 100;
         c2.tick(MONTH_SECONDS, 2000, &Assets::default());
         assert_eq!(c2.months_in_red, 0, "recovering resets the count");
-    }
-
-    #[test]
-    fn fares_follow_distance_and_speed() {
-        // GAME-DESIGN.md §3: 120 passengers, 100 tiles, quick.
-        assert_eq!(passenger_fare(120, 100.0, 15.0), 2_880);
-        assert!(passenger_fare(120, 100.0, 50.0) < 2_880);
-        assert_eq!(
-            passenger_fare(120, 100.0, 1_000.0),
-            (120.0f32 * 10.0 * 2.4 * 0.3).round() as u32
-        );
-        assert_eq!(passenger_fare(60, 0.0, 5.0), 0);
     }
 
     #[test]

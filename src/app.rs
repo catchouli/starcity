@@ -3,10 +3,12 @@ mod craft;
 
 use crate::boats::Boats;
 use crate::camera::Camera;
+use crate::cargo::Cargo;
 use crate::clock::{Clock, Speed};
 use crate::clouds;
 use crate::company::{self, Assets, Company, Facts, Item};
 use crate::daylight::{self, Light};
+use crate::exchange;
 use crate::hq::Hq;
 use crate::input::PhysicalKeys;
 use crate::models::Models;
@@ -127,6 +129,8 @@ pub struct StarcityApp {
     /// How the current council contract is going, and which towns each contract links.
     link: company::LinkFacts,
     contract_towns: Vec<(TownId, TownId)>,
+    /// Seconds since the people near each station were last counted.
+    catchment_age: u32,
     /// Road pieces the player has built (towns' own roads don't cost upkeep).
     player_roads: u32,
     assets_version: u64,
@@ -241,6 +245,7 @@ impl StarcityApp {
             link: company::LinkFacts::default(),
             contract_towns: Vec::new(),
             player_roads: 0,
+            catchment_age: 0,
             assets_version: u64::MAX,
             resume_speed: Speed::X1,
             light: daylight::NOON,
@@ -1004,10 +1009,22 @@ impl StarcityApp {
             self.static_changed = true;
             self.plan_epoch += 1;
         }
+        // People nearby are counted now and then, not every second.
+        self.catchment_age += 1;
+        let recount = self.catchment_age >= 10;
+        if recount {
+            self.catchment_age = 0;
+        }
+        let now = self.clock.days();
         for station in self.stations.list.values_mut() {
-            // Each person nearby makes about one trip every 100 seconds.
-            let people = self.towns.population_near(&station.tiles) as f32;
-            station.waiting = (station.waiting + people * 0.01).min(500.0);
+            if recount {
+                station.people = None;
+            }
+            let towns = &self.towns;
+            let people = *station
+                .people
+                .get_or_insert_with(|| towns.population_near(&station.tiles)) as f32;
+            exchange::accrue(station, people, now);
         }
         self.tick_terminals();
     }
@@ -1019,20 +1036,15 @@ impl StarcityApp {
                 continue;
             };
             let t = self.trains.train(train);
-            let delivered = std::mem::take(&mut t.passengers);
-            let came_from = t.boarded.take();
-            let boarding = (st.waiting as u32).min(t.capacity());
-            t.passengers = boarding;
-            st.waiting -= boarding as f32;
-            let (x, z) = st.centre();
-            if boarding > 0 {
-                t.boarded = Some((x, z, self.clock.days()));
-            }
-            self.pay_fare(delivered, came_from, (x, z));
-            if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
-                let town = &mut self.towns.list[town as usize];
-                town.served += delivered as f32;
-                town.delivered += delivered;
+            let d = exchange::arrive(st, t, self.clock.days(), self.year);
+            let (cargo, delivered, (x, z)) = (d.cargo, d.units, d.at);
+            self.pay_fare(cargo, delivered, d.boarded, (x, z));
+            if cargo == Cargo::Passengers {
+                if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
+                    let town = &mut self.towns.list[town as usize];
+                    town.served += delivered as f32;
+                    town.delivered += delivered;
+                }
             }
         }
     }
@@ -1151,6 +1163,7 @@ impl StarcityApp {
             Delete(usize),
             Add(StationId),
             ToggleStop,
+            SetCargo(Cargo),
             Remove,
             Find,
         }
@@ -1162,7 +1175,7 @@ impl StarcityApp {
             train.order % orders.len()
         };
         let stopped = train.stopped;
-        let (passengers, capacity) = (train.passengers, train.capacity());
+        let (load, capacity, cargo) = (train.load, train.capacity(), train.cargo);
         let name = |sid: StationId| self.stations.get(sid).map_or("?".to_string(), |s| s.name.clone());
         let mut action = None;
         let mut open = true;
@@ -1174,7 +1187,16 @@ impl StarcityApp {
             |ui| {
                 ui.set_width(240.0);
                 ui.label(status);
-                ui.label(format!("Carrying {} / {} passengers", passengers, capacity));
+                ui.label(format!("Carrying {load} / {capacity} {}", cargo.unit()));
+                egui::ComboBox::from_id_salt(("cargo", id))
+                    .selected_text(format!("Carries: {}", cargo.name()))
+                    .show_ui(ui, |ui| {
+                        for c in [Cargo::Passengers, Cargo::Mail] {
+                            if ui.selectable_label(c == cargo, c.name()).clicked() {
+                                action = Some(Action::SetCargo(c));
+                            }
+                        }
+                    });
                 ui.separator();
                 ui.label("Orders:");
                 if orders.is_empty() {
@@ -1260,6 +1282,15 @@ impl StarcityApp {
                 }
             }
             Some(Action::Add(sid)) => new_orders.push(sid),
+            Some(Action::SetCargo(c)) => {
+                let t = self.trains.train(id);
+                if t.cargo != c {
+                    t.cargo = c;
+                    t.load = 0;
+                    t.boarded = None;
+                }
+                return;
+            }
             Some(Action::ToggleStop) => {
                 let t = self.trains.train(id);
                 t.stopped = !t.stopped;
@@ -1299,11 +1330,20 @@ impl StarcityApp {
                 ui.text_edit_singleline(&mut station.name);
             });
             ui.label(format!("{} platform tiles", station.tiles.len()));
-            ui.label(format!(
-                "{} passengers waiting, {} people nearby",
-                station.waiting as u32,
-                self.towns.population_near(&station.tiles)
-            ));
+            ui.label(format!("{} people nearby", station.people.unwrap_or(0)));
+            egui::Grid::new("station cargo").num_columns(3).show(ui, |ui| {
+                ui.label("");
+                ui.label("Waiting");
+                ui.label("Rating");
+                ui.end_row();
+                for cargo in [Cargo::Passengers, Cargo::Mail] {
+                    ui.label(cargo.name());
+                    ui.label(format!("{} {}", station.stock.get(cargo), cargo.unit()));
+                    ui.label(format!("{:.0}%", station.service[cargo.index()].rating * 100.0));
+                    ui.end_row();
+                }
+            });
+            ui.weak("Faster, more frequent, newer trains and a short queue raise the rating, and with it how many people and bags turn up.");
             ui.label(match calling {
                 0 => "No trains call here yet".to_string(),
                 1 => "1 train calls here".to_string(),

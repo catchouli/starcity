@@ -210,16 +210,27 @@ impl StarcityApp {
     }
 
     /// Passengers got off: pay the fare for the trip from where they boarded.
-    pub(super) fn pay_fare(&mut self, passengers: u32, boarded: Option<(f32, f32, f64)>, at: (f32, f32)) {
+    pub(super) fn pay_fare(
+        &mut self,
+        cargo: crate::cargo::Cargo,
+        units: u32,
+        boarded: Option<(f32, f32, f64)>,
+        at: (f32, f32),
+    ) {
         let Some((x, z, since)) = boarded else { return };
-        if passengers == 0 {
+        if units == 0 {
             return;
         }
         let tiles = ((at.0 - x).powi(2) + (at.1 - z).powi(2)).sqrt();
         let seconds = (self.clock.days() - since).max(0.0) as f32;
-        self.company.carried += passengers;
+        let item = if cargo == crate::cargo::Cargo::Passengers {
+            self.company.carried += units;
+            Item::Passengers
+        } else {
+            Item::Freight
+        };
         self.company
-            .earn(Item::Passengers, company::passenger_fare(passengers, tiles, seconds));
+            .earn(item, crate::cargo::fare(cargo, units, tiles, seconds));
     }
 
     /// Once per sim step: the monthly books.

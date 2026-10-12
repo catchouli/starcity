@@ -1,5 +1,6 @@
 //! Railway stations: runs of platform tiles along straight track.
 
+use crate::cargo::{self, Service, Stock};
 use crate::network::{self, Blocked, Layer};
 use crate::rails::{self, Signals};
 use crate::terrain::World;
@@ -12,8 +13,12 @@ pub struct Station {
     pub id: StationId,
     pub name: String,
     pub tiles: Vec<(i32, i32)>,
-    /// Passengers waiting for a train (fractional while they trickle in).
-    pub waiting: f32,
+    /// Cargo waiting for a vehicle (fractional while it trickles in).
+    pub stock: Stock,
+    /// Service record and rating for each cargo.
+    pub service: [Service; cargo::COUNT],
+    /// People living within reach of the platforms, counted now and then.
+    pub people: Option<u32>,
 }
 
 impl Station {
@@ -128,7 +133,9 @@ impl Stations {
                     id,
                     name: format!("Station {}", id + 1),
                     tiles: Vec::new(),
-                    waiting: 0.0,
+                    stock: Stock::default(),
+                    service: [Service::default(); cargo::COUNT],
+                    people: None,
                 },
             );
             id

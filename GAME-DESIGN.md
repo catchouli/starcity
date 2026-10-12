@@ -21,7 +21,8 @@
 | Eras and chrome | ✅ `era.rs` (chrome 0 at 2025 → 1 at 2050), chrome roads and track in the terrain shader, metallic/emissive models, evolving towns. |
 | Assets | ✅ glTF pipeline: 60 placeholder `.glb` models embedded at build time, artist guide in `assets/models/README.md`, tests for size, triangle budget and year coverage. |
 | Company and money | ✅ (Phase 4) A tiny company (£40,000 plus £20,000 seed money from the first council contract) with a garage headquarters in the starting town; building, vehicles, ports and airports are charged; passengers pay by distance and time (§3); monthly running costs, upkeep and loan interest; the Finances window; HQ levels 0–2 with their checklists; tools locked behind the HQ; the Next Step panel and stuck hints. Sandbox/demo mode is free and unlocked. |
-| Cargo, industries, vehicle catalogue, goals, events | ❌ Not yet. Passengers are the only cargo. |
+| Cargo and stations | ✅ (Phase 5) `cargo.rs`: the twelve-cargo table, fares by cargo, distance and time (§3); stations hold stock per cargo and a service rating per cargo (§5.2); passengers and mail flow in from nearby people at a rate set by the rating; trains choose what they carry (passengers or mail) in their window; the headless economy test checks the opening pays back in about a year. Ports, airports, boats and planes still carry passengers only. |
+| Industries, vehicle catalogue, goals, events | ❌ Not yet. |
 | Power, data centres, space | ❌ Design only (§5.7, §5.8, §10.4). |
 | UI by era | ❌ Win95 theme only (§10.3). |
 
@@ -161,6 +162,8 @@ Twelve starting cargoes in four classes. A vehicle model carries one class (some
 | Nano-goods | 12.0 | 30 / 70 | Nano-fabricator → big towns | 2040 |
 
 *Power* and *Compute* are not cargo: they are services measured in MW and compute-units (§5.7, §5.8).
+
+**Pay scale (as built).** Every fare is multiplied by `cargo::PAY_SCALE` (1.3), a single dial kept apart from this table so the table's relative values stay as designed. It was set by the headless economy test so that a train line between two 500-person towns 90 tiles apart pays back its building cost in about 0.9 economy years. A coach seats 40 passengers (a mail van 30 bags; other wagons 20 units).
 
 Value rises along a chain (coal 3.4 → steel 4.8 → goods 6.4), so finishing the chain pays, but only if the player supplies every input.
 
@@ -837,7 +840,7 @@ Each phase is playable and testable on its own; later phases lean on earlier one
 
 **Phase 4 — Money, the headquarters and the Next Step panel.** The tiny starting company (£30k, road tools only), the garage HQ placed in the starting town by the map generator, upgrading it as the first goal, and the Next Step panel with its first few goals (build a road and a stop, buy a bus, earn your first £1,000, build the Depot office), so the opening is guided from the first money system.  `company.rs`: `Company { cash, loan, ledger }`. Charge `Plan::cost` when building (refuse if short and say why); monthly tick for running costs, upkeep and interest; cash in the status bar; the Finance window (§2). Passengers pay by distance (§3): stations record origin and boarding time. *Test:* a scripted route earns a profit within the §8 range. *Touches:* `app.rs`, `network.rs`, `stations`, `ui/`.
 
-**Phase 5 — Cargo and stations.** `cargo.rs` with the `Cargo` table (§4); `Station.waiting` becomes per-cargo; vehicles carry a class; rating factors; catchment cache. Passengers remain the one-cargo case. *Test:* rating and catchment unit tests.
+**Phase 5 — Cargo and stations** ✅ (stations and trains; terminals, boats and planes follow with the vehicle catalogue). `cargo.rs` with the `Cargo` table (§4); `Station.waiting` becomes per-cargo; vehicles carry a class; rating factors; catchment cache. Passengers remain the one-cargo case. *Test:* rating and catchment unit tests.
 
 **Phase 6 — Industries and power.** `industry.rs` (the const kind table, placement with resource noise and `terrain::edit` levelling, monthly update, stock, closure/spawn); the industry window; `power.rs` with sources, consumers, radius grids and brownouts (§5.7). Static boxes first, then glTF models in `assets/models/industries/` (add a `Role::Industry` and a `kind` to the loader). *Test:* placement rules on generated maps; a chain delivers; a short grid cuts output.
 
