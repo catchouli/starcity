@@ -147,6 +147,19 @@ pub fn hq(models: &Models, world: &World, hq: &crate::hq::Hq, level: u8) -> Plac
         .collect()
 }
 
+/// Mines, forests, farms, power stations, mills and the factory.
+pub fn industries(models: &Models, world: &World, industries: &crate::industry::Industries) -> Placed {
+    let mut out = Vec::with_capacity(industries.list.len());
+    for i in &industries.list {
+        let Some(model) = models.pick(Role::Industry, i.kind.key(), 2000, 0) else {
+            continue;
+        };
+        let (cx, cz) = i.centre();
+        out.push((model, ModelInstance::at([cx, world.height_at(cx, cz), cz], 0.0)));
+    }
+    out
+}
+
 /// Cars, buses and trucks, in the look of the year they were bought, in their own colours.
 pub fn road_vehicles(models: &Models, world: &World, vehicles: &Vehicles) -> Placed {
     let mut out = Vec::with_capacity(vehicles.list.len());

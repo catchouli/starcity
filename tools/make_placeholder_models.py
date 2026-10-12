@@ -680,6 +680,57 @@ hq_depot_office("buildings/hq_1_depot_office")
 hq_regional_office("buildings/hq_2_regional_office")
 
 
+# --- Industries (GAME-DESIGN.md 5): centred on their footprint, 3 x 3 or 4 x 4 tiles ------------
+
+
+def industry(name, kind, size, parts):
+    model(f"industries/{name}", "industry", kind, parts, **{"from": 1900, "to": 2200, "tiles_x": size, "tiles_z": size, "weight": 1})
+
+
+def pad(size, mat_):
+    return box("Pad", mat_, (0, 0.012, 0), (size - 0.2, 0.024, size - 0.2))
+
+
+def tree(i, x, z, h=0.55):
+    return [cyl(f"Trunk_{i}", WOOD, (x, h / 4, z), 0.05, h / 2, seg=8), sphere(f"Crown_{i}", mat("Leaf", "#2f6a34"), (x, h * 0.75, z), (0.22, 0.28, 0.22), lat=6, lon=10)]
+
+
+COAL = mat("Coal", "#25252a", roughness=0.95)
+ORE = mat("Ore", "#8a4a32", roughness=0.9)
+SOIL = mat("Soil", "#5a4630")
+FIELD1 = mat("FieldGreen", "#5d8f3a")
+FIELD2 = mat("FieldGold", "#c9b252")
+BARN = mat("Barn", "#a63a2c")
+CONCRETE_LIGHT = mat("ConcreteLight", "#c4c4c6")
+PLATE = mat("SteelPlate", "#7c8088", metallic=0.5, roughness=0.5)
+
+industry("coal_mine", "coal_mine", 3, [pad(3, SOIL),
+    box("Shed", PLATE, (-0.6, 0.3, -0.5), (0.9, 0.6, 0.7)), box("Headframeleg1", BLACK, (0.3, 0.55, -0.7), (0.07, 1.1, 0.07)), box("Headframeleg2", BLACK, (0.55, 0.55, -0.7), (0.07, 1.1, 0.07)),
+    cyl("Wheel", STEEL, (0.42, 1.1, -0.7), 0.17, 0.05, axis="z", seg=14), box("CoalPile", COAL, (0.6, 0.18, 0.6), (1.0, 0.36, 0.8)), box("CoalPile2", COAL, (-0.5, 0.12, 0.7), (0.7, 0.24, 0.5))])
+industry("iron_ore_mine", "iron_ore_mine", 3, [pad(3, SOIL),
+    box("Crusher", PLATE, (-0.5, 0.45, -0.4), (0.9, 0.9, 0.9)), box("Conveyor", BLACK, (0.2, 0.3, -0.4), (1.3, 0.06, 0.18)),
+    box("OrePile", ORE, (0.7, 0.2, 0.5), (1.0, 0.4, 0.9)), box("OrePile2", ORE, (-0.3, 0.14, 0.8), (0.8, 0.28, 0.5)), box("Pit", mat("Pit", "#3b2a20"), (-0.7, 0.01, 0.6), (0.7, 0.02, 0.7))])
+industry("forest", "forest", 3, [box("Floor", mat("ForestFloor", "#35542a"), (0, 0.012, 0), (2.9, 0.024, 2.9))]
+    + sum([tree(i, x, z) for i, (x, z) in enumerate([(-0.9, -0.9), (0.0, -0.9), (0.9, -0.8), (-0.8, 0.0), (0.1, -0.1), (0.9, 0.1), (-0.9, 0.9), (0.0, 0.8), (0.8, 0.9)])], []))
+industry("farm", "farm", 4, [box("FieldA", FIELD1, (-1.0, 0.012, 1.0), (1.8, 0.024, 1.6)), box("FieldB", FIELD2, (1.0, 0.012, 1.0), (1.8, 0.024, 1.6)), box("Yard", SOIL, (0, 0.01, -1.1), (3.8, 0.02, 1.4)),
+    box("Barn", BARN, (-0.8, 0.35, -1.2), (1.2, 0.7, 0.8)), box("BarnRoof", ROOF_GREY, (-0.8, 0.74, -1.2), (1.3, 0.08, 0.9)), cyl("Silo", CONCRETE_LIGHT, (0.8, 0.5, -1.3), 0.25, 1.0, seg=14), sphere("SiloTop", STEEL, (0.8, 1.0, -1.3), 0.25, half=True, lat=5, lon=12)])
+industry("power_station", "power_station", 4, [pad(4, CONCRETE),
+    box("Hall", mat("HallWall", "#a9aeb8"), (-0.6, 0.45, 0.5), (2.2, 0.9, 1.3)), cyl("Tower1", CONCRETE_LIGHT, (1.1, 0.7, -0.9), 0.5, 1.4, seg=18, rtop=0.34), cyl("Tower2", CONCRETE_LIGHT, (1.1, 0.7, 0.4), 0.5, 1.4, seg=18, rtop=0.34),
+    cyl("Chimney", DARK_CONCRETE, (-1.3, 0.9, -1.0), 0.12, 1.8, seg=10), box("CoalStore", COAL, (-0.8, 0.2, -0.9), (1.4, 0.4, 0.9)), box("Glow", GLOW_WARM, (-0.6, 0.62, 1.16), (1.4, 0.18, 0.02))])
+industry("steel_mill", "steel_mill", 4, [pad(4, DARK_CONCRETE),
+    box("Shed", PLATE, (-0.4, 0.5, 0.2), (2.8, 1.0, 1.6)), box("ShedRoof", ROOF_GREY, (-0.4, 1.04, 0.2), (2.9, 0.08, 1.7)), cyl("Stack1", BRICK, (1.2, 0.9, -1.0), 0.14, 1.8, seg=10), cyl("Stack2", BRICK, (0.7, 0.8, -1.0), 0.12, 1.6, seg=10),
+    box("Furnace", mat("Furnace", "#ff7a2a", emissive=0.6), (0.9, 0.35, 0.9), (0.6, 0.5, 0.5)), box("Stockyard", ORE, (-1.1, 0.12, -1.1), (1.2, 0.24, 0.8))])
+industry("sawmill", "sawmill", 3, [pad(3, SOIL),
+    box("Shed", mat("SawmillWall", "#8b6a46"), (-0.3, 0.35, -0.5), (1.6, 0.7, 1.0)), box("Roof", ROOF_GREEN, (-0.3, 0.74, -0.5), (1.7, 0.07, 1.1)),
+    cyl("Logs1", WOOD, (0.7, 0.14, 0.7), 0.14, 1.2, axis="x", seg=8), cyl("Logs2", WOOD, (0.7, 0.4, 0.7), 0.14, 1.2, axis="x", seg=8), box("Planks", TIMBER, (-0.8, 0.15, 0.8), (0.8, 0.3, 0.5))])
+industry("food_plant", "food_plant", 3, [pad(3, CONCRETE),
+    box("Hall", WHITE, (-0.3, 0.4, -0.3), (1.8, 0.8, 1.4)), box("Roof", ROOF_RED, (-0.3, 0.84, -0.3), (1.9, 0.07, 1.5)),
+    cyl("Tank1", STEEL, (0.9, 0.45, 0.8), 0.28, 0.9, seg=14), cyl("Tank2", STEEL, (0.9, 0.4, -0.5), 0.22, 0.8, seg=14), box("Dock", GREEN, (-0.8, 0.12, 0.9), (0.9, 0.24, 0.5))])
+industry("factory", "factory", 4, [pad(4, CONCRETE),
+    box("Shed1", mat("FactoryWall", "#b8bcc6"), (-0.4, 0.45, -0.2), (3.0, 0.9, 1.8)), box("Saw1", ROOF_GREY, (-1.2, 1.0, -0.2), (0.7, 0.28, 1.9)), box("Saw2", ROOF_GREY, (-0.3, 1.0, -0.2), (0.7, 0.28, 1.9)), box("Saw3", ROOF_GREY, (0.6, 1.0, -0.2), (0.7, 0.28, 1.9)),
+    box("Office", GLASS, (-0.4, 0.4, 0.75), (2.2, 0.5, 0.06)), cyl("Chimney", BRICK, (1.5, 0.8, -1.2), 0.12, 1.6, seg=10), box("Docks", DARK_CONCRETE, (-0.4, 0.1, 1.5), (3.0, 0.2, 0.5))])
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

@@ -3,9 +3,17 @@
 //! (GAME-DESIGN.md §2, §9.1, §9.2).
 
 use super::StarcityApp;
+use crate::cargo::Cargo;
 use crate::company::{self, Assets, Company, Facts, Item};
 use crate::hq;
 use crate::towns::TownId;
+
+/// What a contract joins: a town or an industry.
+#[derive(Clone, Copy, Debug)]
+pub enum Endpoint {
+    Town(TownId),
+    Industry(usize),
+}
 use crate::ui::win95;
 use eframe::egui;
 use glam::Vec3;
@@ -22,7 +30,7 @@ impl StarcityApp {
         self.hq = hq::choose_town(&self.towns)
             .and_then(|town| hq::place(&self.world, &mut self.towns, &self.roads, &self.rails, town));
         self.static_changed = true;
-        self.contract_towns.clear();
+        self.contract_ends.clear();
         if !self.company.sandbox {
             self.offer_contracts();
         }
@@ -30,25 +38,25 @@ impl StarcityApp {
     }
 
     /// The council's first contracts: join the company town to the nearest town along, then that
-    /// town to the next. Seed money up front covers the building (GAME-DESIGN.md §9.3).
+    /// town to the next, then haul a cargo between two industries. Seed money up front covers the
+    /// building (GAME-DESIGN.md §9.3).
     fn offer_contracts(&mut self) {
         let Some(hq) = self.hq else { return };
         let towns = &self.towns.list;
-        let dist = |a: &crate::towns::Town, b: &crate::towns::Town| {
-            (((a.centre.0 - b.centre.0).pow(2) + (a.centre.1 - b.centre.1).pow(2)) as f32).sqrt()
-        };
+        let dist = |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+        let centre = |t: &crate::towns::Town| (t.centre.0 as f32, t.centre.1 as f32);
         let nearest_to = |from: &crate::towns::Town, not: &[TownId]| {
             towns
                 .iter()
-                .filter(|t| !not.contains(&t.id) && (25.0..=140.0).contains(&dist(from, t)))
-                .min_by(|a, b| dist(from, a).total_cmp(&dist(from, b)))
+                .filter(|t| !not.contains(&t.id) && (25.0..=140.0).contains(&dist(centre(from), centre(t))))
+                .min_by(|a, b| dist(centre(from), centre(a)).total_cmp(&dist(centre(from), centre(b))))
                 .map(|t| t.id)
         };
         let home = &towns[hq.town as usize];
-        let mut pairs = Vec::new();
+        let mut ends = Vec::new();
         let mut contracts = Vec::new();
         if let Some(b) = nearest_to(home, &[hq.town]) {
-            pairs.push((hq.town, b));
+            ends.push((Endpoint::Town(hq.town), Endpoint::Town(b)));
             contracts.push(company::Contract::link(
                 &home.name,
                 &towns[b as usize].name,
@@ -57,7 +65,7 @@ impl StarcityApp {
                 50,
             ));
             if let Some(c) = nearest_to(&towns[b as usize], &[hq.town, b]) {
-                pairs.push((b, c));
+                ends.push((Endpoint::Town(b), Endpoint::Town(c)));
                 contracts.push(company::Contract::link(
                     &towns[b as usize].name,
                     &towns[c as usize].name,
@@ -67,23 +75,87 @@ impl StarcityApp {
                 ));
             }
         }
-        self.contract_towns = pairs;
+        // Then freight: the nearest pair that makes and wants the same thing, from the company town.
+        let near_name = |c: (f32, f32), label: &str| {
+            let t = self
+                .towns
+                .nearest((c.0 as i32, c.1 as i32), 80)
+                .map(|t| towns[t as usize].name.clone());
+            match t {
+                Some(t) => format!("{label} near {t}"),
+                None => label.to_string(),
+            }
+        };
+        let industries = &self.industries.list;
+        let mut best: Option<(f32, usize, usize, Cargo)> = None;
+        for (maker, user, cargo) in [
+            (
+                crate::industry::Kind::CoalMine,
+                crate::industry::Kind::PowerStation,
+                Cargo::Coal,
+            ),
+            (
+                crate::industry::Kind::Forest,
+                crate::industry::Kind::Sawmill,
+                Cargo::Timber,
+            ),
+            (
+                crate::industry::Kind::Farm,
+                crate::industry::Kind::FoodPlant,
+                Cargo::Grain,
+            ),
+            (
+                crate::industry::Kind::IronOreMine,
+                crate::industry::Kind::SteelMill,
+                Cargo::IronOre,
+            ),
+        ] {
+            for a in industries.iter().filter(|i| i.kind == maker) {
+                for b in industries.iter().filter(|i| i.kind == user) {
+                    let d = dist(a.centre(), b.centre());
+                    // Close to home, and a worthwhile distance apart.
+                    let home_d = dist(a.centre(), centre(home));
+                    if (25.0..=140.0).contains(&d) && best.is_none_or(|(s, ..)| d + home_d < s) {
+                        best = Some((d + home_d, a.id, b.id, cargo));
+                    }
+                }
+            }
+        }
+        if let Some((_, a, b, cargo)) = best {
+            let (ia, ib) = (&industries[a], &industries[b]);
+            ends.push((Endpoint::Industry(a), Endpoint::Industry(b)));
+            contracts.push(company::Contract::supply(
+                cargo,
+                &near_name(ia.centre(), ia.kind.name()),
+                &near_name(ib.centre(), ib.kind.name()),
+                20_000,
+                30_000,
+                100,
+            ));
+        }
+        self.contract_ends = ends;
         if let Some(text) = self.company.offer_contracts(contracts) {
             let now = self.last_time;
             self.show_message(&text, now + 4.0);
         }
     }
 
-    /// Which of the company's stations serve a town, and whether two towns' stations are joined by track.
-    fn link_facts(&self, a: TownId, b: TownId) -> company::LinkFacts {
-        let serving = |town: TownId| -> Vec<crate::stations::StationId> {
+    /// Which of the company's stations serve each end of a contract, and whether they are joined by track.
+    fn link_facts(&self, a: Endpoint, b: Endpoint, cargo: Cargo) -> company::LinkFacts {
+        let serving = |end: Endpoint| -> Vec<crate::stations::StationId> {
             self.stations
                 .list
                 .values()
-                .filter(|s| {
-                    let (x, z) = s.centre();
-                    self.towns.nearest((x as i32, z as i32), 30) == Some(town)
-                        && self.towns.population_near(&s.tiles) > 0
+                .filter(|s| match end {
+                    Endpoint::Town(town) => {
+                        let (x, z) = s.centre();
+                        self.towns.nearest((x as i32, z as i32), 30) == Some(town)
+                            && self.towns.population_near(&s.tiles) > 0
+                    }
+                    Endpoint::Industry(i) => self
+                        .industries
+                        .get(i)
+                        .is_some_and(|ind| ind.near(&s.tiles, crate::industry::CATCHMENT)),
                 })
                 .map(|s| s.id)
                 .collect()
@@ -99,6 +171,7 @@ impl StarcityApp {
             station_a: !sa.is_empty(),
             station_b: !sb.is_empty(),
             connected,
+            train: self.trains.list.iter().any(|t| t.cargo == cargo),
         }
     }
 
@@ -214,10 +287,11 @@ impl StarcityApp {
             vehicles: self.assets.trains + self.assets.ferries + self.assets.planes,
         };
         let active = self.company.contracts.iter().position(|c| !c.done);
-        self.link = match active.and_then(|i| self.contract_towns.get(i)) {
-            Some(&(a, b)) => self.link_facts(a, b),
-            None => company::LinkFacts::default(),
-        };
+        self.link =
+            match active.and_then(|i| Some((self.contract_ends.get(i)?, self.company.contracts.get(i)?.cargo()))) {
+                Some((&(a, b), cargo)) => self.link_facts(a, b, cargo),
+                None => company::LinkFacts::default(),
+            };
         let messages = self.company.update_contract(&self.link, &self.facts);
         let now = self.last_time;
         for m in messages {
@@ -282,14 +356,14 @@ impl StarcityApp {
         boarded: Option<(f32, f32, f64)>,
         at: (f32, f32),
     ) {
-        let Some((x, z, since)) = boarded else { return };
         if units == 0 {
             return;
         }
+        self.company.delivered[cargo.index()] += units;
+        let Some((x, z, since)) = boarded else { return };
         let tiles = ((at.0 - x).powi(2) + (at.1 - z).powi(2)).sqrt();
         let seconds = (self.clock.days() - since).max(0.0) as f32;
         let item = if cargo == crate::cargo::Cargo::Passengers {
-            self.company.carried += units;
             Item::Passengers
         } else {
             Item::Freight

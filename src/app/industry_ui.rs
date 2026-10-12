@@ -1,0 +1,154 @@
+//! Industries in the app: the monthly production step that feeds stations, the room
+//! they have for deliveries, and the industry window (GAME-DESIGN.md §5).
+
+use super::StarcityApp;
+use crate::cargo::Cargo;
+use crate::exchange;
+use crate::industry::{CATCHMENT, Industry};
+use crate::ui::win95;
+use eframe::egui;
+
+impl StarcityApp {
+    /// Once an economy month: industries make their cargo and the stations that serve them collect it.
+    pub(super) fn industry_month(&mut self) {
+        let made = self.industries.month();
+        let mut moved = vec![0u32; self.industries.list.len()];
+        for (id, cargo, units) in made {
+            let ind = &self.industries.list[id];
+            let mut serving: Vec<&mut crate::stations::Station> = self
+                .stations
+                .list
+                .values_mut()
+                .filter(|s| ind.near(&s.tiles, CATCHMENT))
+                .collect();
+            moved[id] += exchange::collect(&mut serving, cargo, units);
+        }
+        for (ind, m) in self.industries.list.iter_mut().zip(moved) {
+            ind.moved_last_month = m;
+        }
+    }
+
+    /// Hands delivered cargo to the industries a station serves, filling them one after another.
+    pub(super) fn deliver_to_industries(&mut self, tiles: &[(i32, i32)], cargo: Cargo, mut units: u32) {
+        for id in self.industries.near(tiles) {
+            if units == 0 {
+                break;
+            }
+            units -= self.industries.deliver(id, cargo, units);
+        }
+    }
+
+    pub(super) fn industry_window(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_industry else { return };
+        let Some(ind) = self.industries.get(id).cloned() else {
+            self.selected_industry = None;
+            return;
+        };
+        let serving: Vec<String> = self
+            .stations
+            .list
+            .values()
+            .filter(|s| ind.near(&s.tiles, CATCHMENT))
+            .map(|s| s.name.clone())
+            .collect();
+        let town = self
+            .towns
+            .nearest((ind.centre().0 as i32, ind.centre().1 as i32), 60)
+            .map(|t| self.towns.list[t as usize].name.clone());
+        let mut open = true;
+        win95::window(
+            ctx,
+            &ind.kind.name().to_string(),
+            &mut open,
+            egui::pos2(420.0, 110.0),
+            |ui| {
+                ui.set_width(260.0);
+                if let Some(town) = &town {
+                    ui.label(format!("Near {town}"));
+                }
+                describe(ui, &ind);
+                ui.separator();
+                if serving.is_empty() {
+                    ui.label(
+                        egui::RichText::new(
+                            "No station serves it yet: build one within three tiles to collect or deliver cargo.",
+                        )
+                        .color(egui::Color32::from_rgb(0x90, 0x30, 0x10)),
+                    );
+                } else {
+                    ui.label(format!("Served by {}", serving.join(", ")));
+                }
+            },
+        );
+        if !open {
+            self.selected_industry = None;
+        }
+    }
+}
+
+/// How many units of `cargo` the industries by a station would take (people and mail: any number).
+pub(super) fn room_for(industries: &crate::industry::Industries, tiles: &[(i32, i32)], cargo: Cargo) -> u32 {
+    if matches!(cargo, Cargo::Passengers | Cargo::Mail) {
+        return u32::MAX;
+    }
+    industries
+        .near(tiles)
+        .into_iter()
+        .map(|id| industries.list[id].room(cargo))
+        .sum()
+}
+
+fn describe(ui: &mut egui::Ui, ind: &Industry) {
+    let kind = ind.kind;
+    if !kind.outputs().is_empty() {
+        let list: Vec<String> = kind
+            .outputs()
+            .iter()
+            .map(|&(c, n)| format!("{} {}", n, c.name()))
+            .collect();
+        if kind.is_primary() {
+            ui.label(format!(
+                "Makes {} up to {} a month",
+                list.first().map_or("", |_| kind.outputs()[0].0.name()),
+                kind.batches() * kind.outputs()[0].1
+            ));
+        } else {
+            ui.label(format!("Turns {} into {}", inputs_text(ind), list.join(" and ")));
+        }
+    } else {
+        ui.label("Burns coal to make electricity for industry within 30 tiles");
+    }
+    for &(cargo, _) in kind.inputs() {
+        ui.label(format!(
+            "{}: {} / {} {} waiting",
+            cargo.name(),
+            ind.stock[cargo.index()],
+            crate::industry::STOCK_CAP,
+            cargo.unit()
+        ));
+    }
+    if kind.power_mw() > 0.0 {
+        ui.label(match ind.power {
+            p if p >= 0.99 => format!("Power: {} MW, fully supplied", kind.power_mw()),
+            p if p > 0.0 => format!(
+                "Power: {:.0}% supplied: a power station nearby is short of coal",
+                p * 100.0
+            ),
+            _ => "Power: none in reach. Running on its generator (30% speed). Build a power station within 30 tiles."
+                .to_string(),
+        });
+    }
+    ui.label(format!(
+        "Last month: made {}, collected by stations {}",
+        ind.made_last_month, ind.moved_last_month
+    ));
+}
+
+fn inputs_text(ind: &Industry) -> String {
+    ind.kind
+        .inputs()
+        .iter()
+        .map(|&(c, n)| format!("{} {}", n, c.name()))
+        .collect::<Vec<_>>()
+        .join(" + ")
+}

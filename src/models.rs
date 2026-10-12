@@ -34,6 +34,8 @@ pub enum Role {
     Prop,
     /// A company headquarters; `kind` is `hq_<level>`.
     Hq,
+    /// A mine, mill, farm, power station...; `kind` is the industry's key.
+    Industry,
 }
 
 impl Role {
@@ -47,6 +49,7 @@ impl Role {
             "terminal" | "terminals" => Role::Terminal,
             "prop" | "props" => Role::Prop,
             "hq" | "headquarters" => Role::Hq,
+            "industry" | "industries" => Role::Industry,
             _ => return None,
         })
     }
@@ -469,6 +472,8 @@ mod tests {
                 Role::Prop => ((1.1, 1.1), 1.1, 1.1, 1.5),
                 // Headquarters stand on a 4 x 4 plot.
                 Role::Hq => ((2.1, 2.1), 2.1, 2.1, 8.0),
+                // Industries are 3 x 3 or 4 x 4.
+                Role::Industry => ((2.1, 2.1), 2.1, 2.1, 8.0),
             };
             let _ = limit;
             if meta.kind == "airport" {
@@ -502,7 +507,7 @@ mod tests {
         for (meta, mesh) in models.meta.iter().zip(&models.meshes) {
             let tris = mesh.indices.len() / 3;
             let budget = match meta.role {
-                Role::Building | Role::Hq => 4000,
+                Role::Building | Role::Hq | Role::Industry => 4000,
                 Role::RoadVehicle | Role::TrainCar | Role::Prop => 1500,
                 Role::Boat | Role::Plane => 3000,
                 Role::Terminal => 8000,
@@ -533,6 +538,20 @@ mod tests {
                 (Role::Plane, &["airliner"][..]),
                 (Role::Terminal, &["port", "airport"][..]),
                 (Role::Hq, &["hq_0", "hq_1", "hq_2"][..]),
+                (
+                    Role::Industry,
+                    &[
+                        "coal_mine",
+                        "iron_ore_mine",
+                        "forest",
+                        "farm",
+                        "power_station",
+                        "steel_mill",
+                        "sawmill",
+                        "food_plant",
+                        "factory",
+                    ][..],
+                ),
                 (
                     Role::Prop,
                     &["signal_red", "signal_green", "station_platform", "station_building"][..],

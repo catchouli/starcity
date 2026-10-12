@@ -1,5 +1,6 @@
 mod company_ui;
 mod craft;
+mod industry_ui;
 
 use crate::boats::Boats;
 use crate::camera::Camera;
@@ -10,6 +11,7 @@ use crate::company::{self, Assets, Company, Facts, Item};
 use crate::daylight::{self, Light};
 use crate::exchange;
 use crate::hq::Hq;
+use crate::industry::Industries;
 use crate::input::PhysicalKeys;
 use crate::models::Models;
 use crate::network::{Blocked, Layer, Plan};
@@ -128,9 +130,13 @@ pub struct StarcityApp {
     facts: Facts,
     /// How the current council contract is going, and which towns each contract links.
     link: company::LinkFacts,
-    contract_towns: Vec<(TownId, TownId)>,
+    contract_ends: Vec<(company_ui::Endpoint, company_ui::Endpoint)>,
     /// Seconds since the people near each station were last counted.
     catchment_age: u32,
+    industries: Industries,
+    selected_industry: Option<usize>,
+    /// Seconds into the current economy month for the industries.
+    industry_clock: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
     /// Picking a new site for the headquarters.
@@ -247,9 +253,12 @@ impl StarcityApp {
             assets: Assets::default(),
             facts: Facts::default(),
             link: company::LinkFacts::default(),
-            contract_towns: Vec::new(),
+            contract_ends: Vec::new(),
             player_roads: 0,
             catchment_age: 0,
+            industries: Industries::default(),
+            selected_industry: None,
+            industry_clock: 0.0,
             proj_morph: 0.0,
             relocating: false,
             assets_version: u64::MAX,
@@ -579,6 +588,18 @@ impl StarcityApp {
         self.selected_station = None;
         self.selected_town = None;
         self.towns = Towns::generate(&self.world, &mut self.roads, &self.rails, self.params.seed, self.year);
+        // Industries level their sites, so the terrain they moved needs meshing again.
+        let (industries, levelled) = Industries::generate(
+            &mut self.world,
+            &mut self.towns,
+            &self.roads,
+            &self.rails,
+            self.params.seed,
+        );
+        self.industries = industries;
+        self.selected_industry = None;
+        self.industry_clock = 0.0;
+        self.remesh_tiles(rs, &levelled);
         self.vehicles = Vehicles::new(self.params.seed as u64);
         self.sea = None;
         self.terminals = Terminals::default();
@@ -852,8 +873,10 @@ impl StarcityApp {
         if best.is_none() && self.selected_craft.is_none() {
             if let Some(t) = self.hover_tile {
                 self.selected_terminal = self.terminals.at(t);
+                self.selected_industry = self.industries.at(t);
                 if self.hq.is_some_and(|h| h.contains(t)) {
                     self.ui.show_hq = true;
+                } else if self.selected_industry.is_some() {
                 } else if self.selected_terminal.is_none() {
                     self.selected_station = self.stations.at(t);
                     if self.selected_station.is_none() {
@@ -1037,6 +1060,11 @@ impl StarcityApp {
             exchange::accrue(station, people, now);
         }
         self.tick_terminals();
+        self.industry_clock += 1.0;
+        if self.industry_clock >= crate::company::MONTH_SECONDS {
+            self.industry_clock -= crate::company::MONTH_SECONDS;
+            self.industry_month();
+        }
     }
 
     /// Trains that have just pulled in: unload everyone, then load from the platform.
@@ -1046,8 +1074,11 @@ impl StarcityApp {
                 continue;
             };
             let t = self.trains.train(train);
-            let d = exchange::arrive(st, t, self.clock.days(), self.year);
+            let room = industry_ui::room_for(&self.industries, &st.tiles, t.cargo);
+            let d = exchange::arrive(st, t, self.clock.days(), self.year, room);
             let (cargo, delivered, (x, z)) = (d.cargo, d.units, d.at);
+            let tiles = st.tiles.clone();
+            self.deliver_to_industries(&tiles, cargo, delivered);
             self.pay_fare(cargo, delivered, d.boarded, (x, z));
             if cargo == Cargo::Passengers {
                 if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
@@ -1094,6 +1125,7 @@ impl StarcityApp {
             let mut placed = props::stations(&self.models, &self.world, &self.rails, &self.stations, self.year);
             placed.extend(props::buildings(&self.models, &self.world, &self.towns));
             placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
+            placed.extend(props::industries(&self.models, &self.world, &self.industries));
             if let Some(hq) = &self.hq {
                 placed.extend(props::hq(&self.models, &self.world, hq, self.company.hq_level));
             }
@@ -1201,7 +1233,7 @@ impl StarcityApp {
                 egui::ComboBox::from_id_salt(("cargo", id))
                     .selected_text(format!("Carries: {}", cargo.name()))
                     .show_ui(ui, |ui| {
-                        for c in [Cargo::Passengers, Cargo::Mail] {
+                        for c in Cargo::ALL {
                             if ui.selectable_label(c == cargo, c.name()).clicked() {
                                 action = Some(Action::SetCargo(c));
                             }
@@ -1332,6 +1364,27 @@ impl StarcityApp {
             self.selected_station = None;
             return;
         };
+        // Passengers and mail, plus whatever the industries nearby make.
+        let near = self.industries.near(&station.tiles);
+        let mut shown = vec![Cargo::Passengers, Cargo::Mail];
+        let mut accepts = Vec::new();
+        for &i in &near {
+            let ind = &self.industries.list[i];
+            for &(c, _) in ind.kind.outputs() {
+                if !shown.contains(&c) {
+                    shown.push(c);
+                }
+            }
+            for &(c, _) in ind.kind.inputs() {
+                if ind.room(c) > 0 && !accepts.contains(&c.name()) {
+                    accepts.push(c.name());
+                }
+            }
+        }
+        let serves: Vec<String> = near
+            .iter()
+            .map(|&i| self.industries.list[i].kind.name().to_string())
+            .collect();
         let mut open = true;
         ui::win95::window(ctx, "Station", &mut open, egui::pos2(420.0, 110.0), |ui| {
             ui.set_width(220.0);
@@ -1346,14 +1399,20 @@ impl StarcityApp {
                 ui.label("Waiting");
                 ui.label("Rating");
                 ui.end_row();
-                for cargo in [Cargo::Passengers, Cargo::Mail] {
+                for &cargo in &shown {
                     ui.label(cargo.name());
                     ui.label(format!("{} {}", station.stock.get(cargo), cargo.unit()));
                     ui.label(format!("{:.0}%", station.service[cargo.index()].rating * 100.0));
                     ui.end_row();
                 }
             });
-            ui.weak("Faster, more frequent, newer trains and a short queue raise the rating, and with it how many people and bags turn up.");
+            if !serves.is_empty() {
+                ui.label(format!("Serves: {}", serves.join(", ")));
+            }
+            if !accepts.is_empty() {
+                ui.label(format!("Accepts: {}", accepts.join(", ")));
+            }
+            ui.weak("Faster, more frequent, newer trains and a short queue raise the rating, and with it how much cargo turns up.");
             ui.label(match calling {
                 0 => "No trains call here yet".to_string(),
                 1 => "1 train calls here".to_string(),
@@ -1995,6 +2054,7 @@ impl eframe::App for StarcityApp {
         }
         self.town_window(&ctx);
         self.station_window(&ctx);
+        self.industry_window(&ctx);
         self.craft_windows(&ctx);
         self.terminal_window(&ctx);
 

@@ -2,6 +2,7 @@
 //! its levels, and the "next step" the game suggests. Pure data and rules,
 //! so the economy can be tested without a window (GAME-DESIGN.md §2, §9.1, §9.2).
 
+use crate::cargo::{self, Cargo};
 use crate::ui::Tool;
 
 pub const START_CASH: i64 = 40_000;
@@ -256,28 +257,59 @@ pub fn pounds(n: i64) -> String {
 /// What a contract from the town council asks for (GAME-DESIGN.md §9.3): link two towns by
 /// rail and carry some people between them. The council pays `seed` money when it starts, to
 /// get you going, and `reward` when it's done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractKind {
+    /// Join two towns and carry people between them.
+    Link,
+    /// Haul a cargo from one industry to another.
+    Supply(Cargo),
+}
+
 #[derive(Clone, Debug)]
 pub struct Contract {
+    pub kind: ContractKind,
     pub from: String,
     pub to: String,
     pub seed: u32,
     pub reward: u32,
-    /// Passengers to carry once the contract has started.
+    /// Units (passengers, tonnes...) to deliver once the contract has started.
     pub carry: u32,
     pub done: bool,
-    started_carried: u32,
+    started: u32,
 }
 
 impl Contract {
     pub fn link(from: &str, to: &str, seed: u32, reward: u32, carry: u32) -> Contract {
         Contract {
+            kind: ContractKind::Link,
             from: from.into(),
             to: to.into(),
             seed,
             reward,
             carry,
             done: false,
-            started_carried: 0,
+            started: 0,
+        }
+    }
+
+    pub fn supply(cargo: Cargo, from: &str, to: &str, seed: u32, reward: u32, units: u32) -> Contract {
+        Contract {
+            kind: ContractKind::Supply(cargo),
+            from: from.into(),
+            to: to.into(),
+            seed,
+            reward,
+            carry: units,
+            done: false,
+            started: 0,
+        }
+    }
+
+    /// What has to be delivered.
+    pub fn cargo(&self) -> Cargo {
+        match self.kind {
+            ContractKind::Link => Cargo::Passengers,
+            ContractKind::Supply(c) => c,
         }
     }
 }
@@ -288,6 +320,8 @@ pub struct LinkFacts {
     pub station_a: bool,
     pub station_b: bool,
     pub connected: bool,
+    /// A train that can do the job (any train for a link; one carrying the cargo for a supply contract).
+    pub train: bool,
 }
 
 pub struct Company {
@@ -310,8 +344,8 @@ pub struct Company {
     pub bankrupt: bool,
     /// Contracts from the council, the one being worked on first.
     pub contracts: Vec<Contract>,
-    /// Passengers carried in all.
-    pub carried: u32,
+    /// Units delivered in all, by cargo.
+    pub delivered: [u32; cargo::COUNT],
 }
 
 impl Company {
@@ -331,7 +365,7 @@ impl Company {
             months_in_red: 0,
             bankrupt: false,
             contracts: Vec::new(),
-            carried: 0,
+            delivered: [0; cargo::COUNT],
         }
     }
 
@@ -347,14 +381,16 @@ impl Company {
     }
 
     fn start_next(&mut self) -> Option<String> {
-        let carried = self.carried;
+        let delivered = self.delivered;
         let c = self.contracts.iter_mut().find(|c| !c.done)?;
-        c.started_carried = carried;
+        c.started = delivered[c.cargo().index()];
+        let job = match c.kind {
+            ContractKind::Link => format!("link {} and {}", c.from, c.to),
+            ContractKind::Supply(cargo) => format!("send {} from {} to {}", cargo.name().to_lowercase(), c.from, c.to),
+        };
         let (text, seed) = (
             format!(
-                "New contract: link {} and {}. The council pays {} now and {} when it's done.",
-                c.from,
-                c.to,
+                "New contract: {job}. The council pays {} now and {} when it's done.",
                 pounds(c.seed as i64),
                 pounds(c.reward as i64)
             ),
@@ -366,16 +402,30 @@ impl Company {
     }
 
     /// What the current contract asks, and how far along it is.
-    pub fn contract_requirements(&self, link: &LinkFacts, facts: &Facts) -> Vec<Requirement> {
+    pub fn contract_requirements(&self, link: &LinkFacts, _facts: &Facts) -> Vec<Requirement> {
         let Some(c) = self.contract() else { return Vec::new() };
-        let carried = self.carried.saturating_sub(c.started_carried).min(c.carry);
+        let done = self.delivered[c.cargo().index()].saturating_sub(c.started).min(c.carry);
+        let (place_a, place_b, train, deliver) = match c.kind {
+            ContractKind::Link => (
+                format!("A station in {}", c.from),
+                format!("A station in {}", c.to),
+                "A train running".to_string(),
+                format!("Carry {} passengers ({done} so far)", c.carry),
+            ),
+            ContractKind::Supply(cargo) => (
+                format!("A station by {}", c.from),
+                format!("A station by {}", c.to),
+                format!("A train set to carry {}", cargo.name().to_lowercase()),
+                format!("Deliver {} {} ({done} so far)", c.carry, cargo.unit()),
+            ),
+        };
         vec![
             Requirement {
-                text: format!("A station in {}", c.from),
+                text: place_a,
                 met: link.station_a,
             },
             Requirement {
-                text: format!("A station in {}", c.to),
+                text: place_b,
                 met: link.station_b,
             },
             Requirement {
@@ -383,12 +433,12 @@ impl Company {
                 met: link.connected,
             },
             Requirement {
-                text: "A train running".into(),
-                met: facts.trains > 0,
+                text: train,
+                met: link.train,
             },
             Requirement {
-                text: format!("Carry {} passengers ({carried} so far)", c.carry),
-                met: carried >= c.carry,
+                text: deliver,
+                met: done >= c.carry,
             },
         ]
     }
@@ -404,9 +454,14 @@ impl Company {
         let (reward, text) = (
             c.reward,
             format!(
-                "Contract complete: {} and {} are linked. The council pays {}.",
+                "Contract complete: {} and {} are {}. The council pays {}.",
                 c.from,
                 c.to,
+                if c.kind == ContractKind::Link {
+                    "linked"
+                } else {
+                    "supplied"
+                },
                 pounds(c.reward as i64)
             ),
         );
@@ -608,6 +663,8 @@ impl Company {
         }
         if let Some(c) = self.contract() {
             let (from, to) = (&c.from, &c.to);
+            let supply = matches!(c.kind, ContractKind::Supply(_));
+            let near = if supply { "by" } else { "in" };
             if facts.rail_pieces < 12 {
                 return NextStep::tool(
                     &format!("Contract: lay a railway from {from} towards {to}"),
@@ -620,15 +677,29 @@ impl Company {
             }
             if !link.station_a {
                 return NextStep::tool(
-                    &format!("Contract: build a station in {from}"),
-                    &format!("Pick the Build station tool and drag along the track at the edge of {from}."),
+                    &format!("Contract: build a station {near} {from}"),
+                    &format!(
+                        "Pick the Build station tool and drag along the track {}.",
+                        if supply {
+                            format!("within three tiles of {from}")
+                        } else {
+                            format!("at the edge of {from}")
+                        }
+                    ),
                     Tool::Station,
                 );
             }
             if !link.station_b {
                 return NextStep::tool(
-                    &format!("Contract: build a station in {to}"),
-                    &format!("Pick the Build station tool and drag along the track at the edge of {to}."),
+                    &format!("Contract: build a station {near} {to}"),
+                    &format!(
+                        "Pick the Build station tool and drag along the track {}.",
+                        if supply {
+                            format!("within three tiles of {to}")
+                        } else {
+                            format!("at the edge of {to}")
+                        }
+                    ),
                     Tool::Station,
                 );
             }
@@ -642,14 +713,20 @@ impl Company {
             if facts.trains < 1 {
                 return NextStep::tool(
                     "Contract: buy a train",
-                    "Pick the Place train tool and click plain track. Then click the train and add both stations to its orders.",
+                    "Pick the Place train tool and click plain track. Then click the train to give it orders.",
                     Tool::Train,
                 );
             }
+            if !link.train {
+                return NextStep::plain(
+                    &format!("Contract: set a train to carry {}", c.cargo().name().to_lowercase()),
+                    "Click your train and choose what it carries in its window.",
+                );
+            }
             return NextStep::plain(
-                &format!("Contract: carry {} passengers", c.carry),
+                &format!("Contract: deliver {} {}", c.carry, c.cargo().unit()),
                 &format!(
-                    "Click your train and add the stations in {from} and {to} to its orders. When it has carried enough, the council pays you {}.",
+                    "Click your train and add the stations by {from} and {to} to its orders. When enough has arrived, the council pays you {}.",
                     pounds(c.reward as i64)
                 ),
             );
@@ -928,9 +1005,10 @@ mod tests {
         assert!(c.next_step(&a, &f, &link).title.contains("station in Brookley"));
         link.station_b = true;
         link.connected = true;
+        link.train = true;
         f.trains = 1;
         assert!(c.update_contract(&link, &f).is_empty(), "nobody carried anyone yet");
-        c.carried = 60;
+        c.delivered[Cargo::Passengers.index()] = 60;
         let before = c.cash;
         let messages = c.update_contract(&link, &f);
         assert!(messages[0].contains("complete"), "{messages:?}");
