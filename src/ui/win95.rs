@@ -187,8 +187,21 @@ pub fn separator(ui: &mut Ui, height: f32) {
 
 /// A square toolbar button with a custom-painted icon. Stays pressed while `selected`.
 pub fn tool_button(ui: &mut Ui, size: f32, selected: bool, icon: impl FnOnce(&Painter, Rect)) -> Response {
+    tool_button_ex(ui, size, selected, true, false, icon)
+}
+
+/// A toolbar button that can be greyed out (`enabled` false: the headquarters
+/// hasn't unlocked it) or outlined to point the player at it (`suggested`).
+pub fn tool_button_ex(
+    ui: &mut Ui,
+    size: f32,
+    selected: bool,
+    enabled: bool,
+    suggested: bool,
+    icon: impl FnOnce(&Painter, Rect),
+) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    let pressed = selected || response.is_pointer_button_down_on();
+    let pressed = enabled && (selected || response.is_pointer_button_down_on());
     let p = ui.painter();
     p.rect_filled(rect, 0.0, FACE);
     if selected {
@@ -206,6 +219,46 @@ pub fn tool_button(ui: &mut Ui, size: f32, selected: bool, icon: impl FnOnce(&Pa
     bevel(p, rect, !pressed);
     let offset = if pressed { vec2(1.0, 1.0) } else { Vec2::ZERO };
     icon(p, rect.shrink(5.0).translate(offset));
+    if !enabled {
+        // Win95 greys things out with a dither of white over the icon.
+        let mut y = rect.min.y + 3.0;
+        while y < rect.max.y - 3.0 {
+            let mut x = rect.min.x + 3.0 + ((y - rect.min.y) as i32 % 2) as f32;
+            while x < rect.max.x - 3.0 {
+                p.rect_filled(Rect::from_min_size(pos2(x, y), Vec2::splat(1.0)), 0.0, FACE);
+                x += 2.0;
+            }
+            y += 1.0;
+        }
+    }
+    if suggested {
+        p.rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(2.0, Color32::from_rgb(0xf0, 0xb0, 0x00)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response
+}
+
+/// A sunken pane showing the company's cash; click it for the finance window.
+pub fn money_pane(ui: &mut Ui, width: f32, text: &str, in_the_red: bool) -> Response {
+    let height = ui.spacing().interact_size.y;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    let p = ui.painter();
+    edge(p, rect, SHADOW, HIGHLIGHT);
+    p.text(
+        pos2(rect.max.x - 6.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        text,
+        egui::FontId::proportional(13.0),
+        if in_the_red {
+            Color32::from_rgb(0xc0, 0x10, 0x10)
+        } else {
+            Color32::BLACK
+        },
+    );
     response
 }
 

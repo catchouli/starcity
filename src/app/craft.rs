@@ -158,6 +158,9 @@ impl StarcityApp {
                     self.show_message(why.message(kind), now);
                     return Vec::new();
                 }
+                if !self.pay(Item::Construction, plan.cost()) {
+                    return Vec::new();
+                }
                 let tiles = edit::apply(&mut self.world, &plan.terraform);
                 let site = plan.site.unwrap();
                 let id = self.terminals.build(site, String::new());
@@ -172,8 +175,12 @@ impl StarcityApp {
             }
             Tool::Boat => {
                 if self.sea().is_water(tile.0, tile.1) {
+                    if !self.can_add_vehicle(company::FERRY) {
+                        return Vec::new();
+                    }
                     let sea = self.sea.as_ref().unwrap();
                     if let Some(id) = self.boats.spawn(sea, tile) {
+                        self.company.spend(Item::Vehicles, company::FERRY);
                         self.selected_craft = Some(Craft::Boat(id));
                         self.props_changed = true;
                     }
@@ -185,7 +192,11 @@ impl StarcityApp {
             Tool::Plane => {
                 match self.terminals.at(tile) {
                     Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::Airport) => {
+                        if !self.can_add_vehicle(company::PLANE) {
+                            return Vec::new();
+                        }
                         if let Some(id) = self.planes.spawn(&self.terminals, at) {
+                            self.company.spend(Item::Vehicles, company::PLANE);
                             self.selected_craft = Some(Craft::Plane(id));
                             self.props_changed = true;
                         }
@@ -283,21 +294,26 @@ impl StarcityApp {
             let Some(terminal) = self.terminals.list.get_mut(&at) else {
                 continue;
             };
-            let (passengers, capacity) = match craft {
+            let (passengers, boarded, capacity) = match craft {
                 Craft::Boat(id) => match self.boats.get_mut(id) {
-                    Some(b) => (&mut b.passengers, boats::CAPACITY),
+                    Some(b) => (&mut b.passengers, &mut b.boarded, boats::CAPACITY),
                     None => continue,
                 },
                 Craft::Plane(id) => match self.planes.get_mut(id) {
-                    Some(p) => (&mut p.passengers, planes::CAPACITY),
+                    Some(p) => (&mut p.passengers, &mut p.boarded, planes::CAPACITY),
                     None => continue,
                 },
             };
             let delivered = std::mem::take(passengers);
+            let came_from = boarded.take();
             let boarding = (terminal.waiting as u32).min(capacity);
             *passengers = boarding;
             terminal.waiting -= boarding as f32;
             let c = terminal.centre();
+            if boarding > 0 {
+                *boarded = Some((c.x, c.y, self.clock.days()));
+            }
+            self.pay_fare(delivered, came_from, (c.x, c.y));
             if let Some(town) = self.towns.nearest((c.x as i32, c.y as i32), 40) {
                 let town = &mut self.towns.list[town as usize];
                 town.served += delivered as f32;

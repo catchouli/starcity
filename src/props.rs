@@ -135,6 +135,18 @@ pub fn buildings(models: &Models, world: &World, towns: &Towns) -> Placed {
     out
 }
 
+/// The headquarters, in the model for its level (or the nearest lower one).
+pub fn hq(models: &Models, world: &World, hq: &crate::hq::Hq, level: u8) -> Placed {
+    let (cx, cz) = hq.centre();
+    let model = (0..=level)
+        .rev()
+        .find_map(|l| models.pick(Role::Hq, &format!("hq_{l}"), 2000, 0));
+    model
+        .map(|m| (m, ModelInstance::at([cx, world.height_at(cx, cz), cz], 0.0)))
+        .into_iter()
+        .collect()
+}
+
 /// Cars, buses and trucks, in the look of the year they were bought, in their own colours.
 pub fn road_vehicles(models: &Models, world: &World, vehicles: &Vehicles) -> Placed {
     let mut out = Vec::with_capacity(vehicles.list.len());

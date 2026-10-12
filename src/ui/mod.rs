@@ -101,6 +101,10 @@ pub struct UiState {
     pub speed: Speed,
     pub show_debug: bool,
     pub show_about: bool,
+    pub show_finance: bool,
+    pub show_hq: bool,
+    /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
+    pub show_next_step: bool,
     /// Set for one frame when the player asks to centre the view on the island.
     pub go_home: bool,
 }
@@ -139,7 +143,18 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
             ui.separator();
             ui.checkbox(&mut s.show_debug, "Debug window\tF3");
         });
+        ui.menu_button("Company", |ui| {
+            if ui.button("Finances").clicked() {
+                s.show_finance = true;
+                ui.close();
+            }
+            if ui.button("Headquarters").clicked() {
+                s.show_hq = true;
+                ui.close();
+            }
+        });
         ui.menu_button("Help", |ui| {
+            ui.checkbox(&mut s.show_next_step, "Next step panel");
             if ui.button("About Starcity").clicked() {
                 s.show_about = true;
             }
@@ -148,7 +163,19 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
     actions
 }
 
-pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str, daylight: f32) {
+/// What the toolbar needs to know about the company.
+pub struct ToolbarInfo<'a> {
+    pub clock: &'a str,
+    pub daylight: f32,
+    pub cash: &'a str,
+    pub in_the_red: bool,
+    /// Which tools the headquarters has unlocked.
+    pub unlocked: &'a dyn Fn(Tool) -> bool,
+    /// The tool the next step points at.
+    pub suggested: Option<Tool>,
+}
+
+pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     const SIZE: f32 = 30.0;
     let groups: [(&str, &[Tool]); 5] = [
         ("", &[Tool::Pointer]),
@@ -177,11 +204,17 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str, daylight: f32) {
             }
             for &tool in *tools {
                 let selected = s.tool == tool;
-                let response = win95::tool_button(ui, SIZE, selected, |p, r| tool.icon(p, r));
-                if response.clicked() {
+                let enabled = (info.unlocked)(tool);
+                let suggested = info.suggested == Some(tool) && !selected;
+                let response = win95::tool_button_ex(ui, SIZE, selected, enabled, suggested, |p, r| tool.icon(p, r));
+                if response.clicked() && enabled {
                     s.tool = if selected { Tool::Pointer } else { tool };
                 }
-                response.on_hover_text(tool.name());
+                if enabled {
+                    response.on_hover_text(tool.name());
+                } else {
+                    response.on_hover_text(format!("{}: needs a Regional office", tool.name()));
+                }
             }
         }
         // Game speed, at the right-hand end.
@@ -199,7 +232,13 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str, daylight: f32) {
                 });
             }
             // The date and time, beside the controls that change how fast it runs.
-            win95::clock_pane(ui, 160.0, clock, daylight);
+            win95::clock_pane(ui, 160.0, info.clock, info.daylight);
+            if win95::money_pane(ui, 110.0, info.cash, info.in_the_red)
+                .on_hover_text("Your money. Click for the finance window")
+                .clicked()
+            {
+                s.show_finance = true;
+            }
         });
     });
 }

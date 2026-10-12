@@ -58,6 +58,8 @@ pub struct Plane {
     pub orders: Orders,
     pub stopped: bool,
     pub passengers: u32,
+    /// Where and when (game seconds) the passengers on board got on, for the fare.
+    pub boarded: Option<(f32, f32, f64)>,
     speed: f32,
     stage: Stage,
 }
@@ -117,6 +119,7 @@ impl Planes {
             orders: Orders::default(),
             stopped: false,
             passengers: 0,
+            boarded: None,
             speed: 0.0,
             stage: Stage::Parked {
                 at,

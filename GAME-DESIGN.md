@@ -20,7 +20,8 @@
 | Time | ✅ Calendar (a day a second), independent day/night light, speeds 1×–8× and pause, date slider (2000–2050) in the debug window. |
 | Eras and chrome | ✅ `era.rs` (chrome 0 at 2025 → 1 at 2050), chrome roads and track in the terrain shader, metallic/emissive models, evolving towns. |
 | Assets | ✅ glTF pipeline: 60 placeholder `.glb` models embedded at build time, artist guide in `assets/models/README.md`, tests for size, triangle budget and year coverage. |
-| Economy | ❌ No money, cargo, industries, vehicle catalogue, goals or events yet. Costs are displayed but not charged; passengers are the only cargo and aren't paid for. |
+| Company and money | ✅ (Phase 4) A tiny company (£30,000) with a garage headquarters in the starting town; building, vehicles, ports and airports are charged; passengers pay by distance and time (§3); monthly running costs, upkeep and loan interest; the Finances window; HQ levels 0–2 with their checklists; tools locked behind the HQ; the Next Step panel and stuck hints. Sandbox/demo mode is free and unlocked. |
+| Cargo, industries, vehicle catalogue, goals, events | ❌ Not yet. Passengers are the only cargo. |
 | Power, data centres, space | ❌ Design only (§5.7, §5.8, §10.4). |
 | UI by era | ❌ Win95 theme only (§10.3). |
 
@@ -531,9 +532,9 @@ The company has a **headquarters**, a real building in a town of your choice, up
 
 | Level | Name | Needs | Unlocks |
 |---|---|---|---|
-| 0 | **Garage** (2000) | Already built at the start | Roads, bus stops, the minibus. £30k, no loan, up to 6 vehicles |
-| 1 | **Depot office** (2000) | £10k; deliver Goods; earn your first £1,000 | Rail, trains, signals. Loan £200k; up to 40 vehicles; goals and the Assistant |
-| 2 | **Regional office** | Company value £250k; town ≥ 2,000 | Ports, ferries, airports and planes; first industries funded; 150 vehicles; loan £500k; hosting program |
+| 0 | **Garage** (2000) | Already built at the start | Roads, railways, stations, signals and trains (buses and bus stops arrive with the vehicle catalogue, Phase 7). £30k, no loan, up to 6 vehicles ✅ |
+| 1 | **Depot office** (2000) | £10k; earn your first £1,000 from passengers (a Goods delivery joins once cargo exists, Phase 5) ✅ | Loan £200k; up to 40 vehicles; goals and the Assistant |
+| 2 | **Regional office** | £40k; earned £20,000; company value £100k; a town of 1,000 served by one of your stations (tuned down from the first draft; a dial) ✅ | Ports, ferries, airports and planes; first industries funded; 150 vehicles; loan £500k; hosting program |
 | 3 | **Corporate tower** | Value £1M; metropolis ≥ 20,000 | Industry deliveries at scale, goals, Forecast (year ahead); 400 vehicles; server farms |
 | 4 | **Data campus HQ** (2012+) | Own a data centre; Training tier 1 | The Compute meter becomes the headline; fleet optimiser, autonomy; power grid planning |
 | 5 | **Glass spire** (2025+) | An AI campus; tier 2; delivered Chips and Goods | Agents (one line at a time), generative design, spaceport permits, sub-orbital pads |

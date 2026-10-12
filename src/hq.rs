@@ -1,0 +1,169 @@
+//! The company headquarters: a building on a 4 x 4 plot in the starting
+//! town, there from the first frame as a garage and upgraded in levels
+//! (GAME-DESIGN.md §9.1).
+
+use crate::network::Layer;
+use crate::terrain::World;
+use crate::towns::{TownId, Towns};
+
+/// Side of the plot, in tiles. Every level's model fits inside it.
+pub const PLOT: i32 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hq {
+    /// North-west tile of the plot.
+    pub anchor: (i32, i32),
+    pub town: TownId,
+}
+
+impl Hq {
+    pub fn contains(&self, tile: (i32, i32)) -> bool {
+        (self.anchor.0..self.anchor.0 + PLOT).contains(&tile.0)
+            && (self.anchor.1..self.anchor.1 + PLOT).contains(&tile.1)
+    }
+
+    pub fn tiles(&self) -> Vec<(i32, i32)> {
+        let mut out = Vec::with_capacity((PLOT * PLOT) as usize);
+        for dz in 0..PLOT {
+            for dx in 0..PLOT {
+                out.push((self.anchor.0 + dx, self.anchor.1 + dz));
+            }
+        }
+        out
+    }
+
+    /// Middle of the plot in world coordinates.
+    pub fn centre(&self) -> (f32, f32) {
+        (
+            self.anchor.0 as f32 + PLOT as f32 / 2.0,
+            self.anchor.1 as f32 + PLOT as f32 / 2.0,
+        )
+    }
+}
+
+/// The company town: a modest one (about 700 people) with another town a
+/// walk away (40 to 130 tiles), so a first route exists.
+pub fn choose_town(towns: &Towns) -> Option<TownId> {
+    let dist = |a: (i32, i32), b: (i32, i32)| (((a.0 - b.0).pow(2) + (a.1 - b.1).pow(2)) as f32).sqrt();
+    towns
+        .list
+        .iter()
+        .map(|t| {
+            let neighbour = towns
+                .list
+                .iter()
+                .filter(|o| o.id != t.id)
+                .any(|o| (40.0..=130.0).contains(&dist(t.centre, o.centre)));
+            let pop = towns.population(t.id) as i32;
+            // Lower is better: a town far from 700 people, or with no neighbour, ranks behind.
+            let score = (pop - 700).abs() + if neighbour { 0 } else { 100_000 };
+            (score, t.id)
+        })
+        .min()
+        .map(|(_, id)| id)
+}
+
+/// Finds flat, clear ground for the plot close to the town centre, clears any
+/// houses on it, and reserves it. `None` if the town has no room.
+pub fn place(world: &World, towns: &mut Towns, roads: &Layer, rails: &Layer, town: TownId) -> Option<Hq> {
+    let centre = towns.list.get(town as usize)?.centre;
+    let fits = |ax: i32, az: i32, towns: &Towns| -> bool {
+        let Some((level, _)) = world.surface(ax, az) else {
+            return false;
+        };
+        (0..PLOT).all(|dz| {
+            (0..PLOT).all(|dx| {
+                let (x, z) = (ax + dx, az + dz);
+                world
+                    .surface(x, z)
+                    .is_some_and(|(base, shape)| shape.0 == 0 && base == level && base > world.sea_level)
+                    && roads.get(x, z) == 0
+                    && rails.get(x, z) == 0
+                    // 1 is a house (cleared below); anything else is a port or airport.
+                    && towns.occupied.get(x, z) <= 1
+            })
+        })
+    };
+    // Square rings around the centre, nearest first.
+    for ring in 0..40i32 {
+        let mut best: Option<((i32, i32), i32)> = None;
+        for dz in -ring..=ring {
+            for dx in -ring..=ring {
+                if dx.abs().max(dz.abs()) != ring {
+                    continue;
+                }
+                let anchor = (centre.0 + dx - PLOT / 2, centre.1 + dz - PLOT / 2);
+                if !fits(anchor.0, anchor.1, towns) {
+                    continue;
+                }
+                // Prefer plots with fewer houses to knock down.
+                let houses = (0..PLOT)
+                    .flat_map(|z| (0..PLOT).map(move |x| (x, z)))
+                    .filter(|&(x, z)| towns.occupied.get(anchor.0 + x, anchor.1 + z) == 1)
+                    .count() as i32;
+                if best.is_none_or(|(_, h)| houses < h) {
+                    best = Some((anchor, houses));
+                }
+            }
+        }
+        if let Some((anchor, _)) = best {
+            let hq = Hq { anchor, town };
+            towns.demolish(anchor, (anchor.0 + PLOT - 1, anchor.1 + PLOT - 1));
+            for (x, z) in hq.tiles() {
+                towns.occupied.set(x, z, 2);
+            }
+            return Some(hq);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terrain::generation::{self, GenParams};
+
+    fn generated(seed: u32) -> (World, Towns, Layer, Layer) {
+        let params = GenParams {
+            seed,
+            ..GenParams::default()
+        };
+        let world = generation::generate(&params);
+        let mut roads = Layer::new(world.size_x, world.size_z);
+        let rails = Layer::new(world.size_x, world.size_z);
+        let towns = Towns::generate(&world, &mut roads, &rails, seed, 2000);
+        (world, towns, roads, rails)
+    }
+
+    #[test]
+    fn every_map_gets_a_garage_in_a_modest_town_with_room() {
+        for seed in [1u32, 7, 42, 2024, 99] {
+            let (world, mut towns, roads, rails) = generated(seed);
+            let town = choose_town(&towns).expect("a town");
+            let hq = place(&world, &mut towns, &roads, &rails, town).unwrap_or_else(|| panic!("no room, seed {seed}"));
+            let level = world.surface(hq.anchor.0, hq.anchor.1).unwrap().0;
+            for (x, z) in hq.tiles() {
+                assert_eq!(towns.occupied.get(x, z), 2);
+                assert!(!towns.buildings.contains_key(&(x, z)), "house left on the plot");
+                assert_eq!(world.surface(x, z).unwrap().0, level);
+                assert_eq!(roads.get(x, z), 0);
+            }
+            let c = towns.list[town as usize].centre;
+            assert!(
+                (hq.centre().0 - c.0 as f32).abs() < 30.0,
+                "seed {seed}: HQ is far from its town"
+            );
+        }
+    }
+
+    #[test]
+    fn the_plot_contains_its_tiles() {
+        let hq = Hq {
+            anchor: (10, 20),
+            town: 0,
+        };
+        assert!(hq.contains((10, 20)) && hq.contains((13, 23)));
+        assert!(!hq.contains((14, 20)) && !hq.contains((9, 20)));
+        assert_eq!(hq.tiles().len(), 16);
+    }
+}

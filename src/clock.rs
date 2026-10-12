@@ -96,6 +96,11 @@ impl Default for Clock {
 }
 
 impl Clock {
+    /// Calendar days (one per simulated second) since the game began.
+    pub fn days(&self) -> f64 {
+        self.days
+    }
+
     /// A clock at the start date, with the light at this hour of the day.
     pub fn starting_at(hour: f64) -> Clock {
         Clock {

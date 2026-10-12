@@ -65,6 +65,8 @@ pub struct Boat {
     pub orders: Orders,
     pub stopped: bool,
     pub passengers: u32,
+    /// Where and when (game seconds) the passengers on board got on, for the fare.
+    pub boarded: Option<(f32, f32, f64)>,
     state: State,
 }
 
@@ -123,6 +125,7 @@ impl Boats {
             orders: Orders::default(),
             stopped: false,
             passengers: 0,
+            boarded: None,
             state: State::Idle,
         });
         Some(id)

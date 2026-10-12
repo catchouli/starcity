@@ -95,6 +95,11 @@ impl Layer {
         }
     }
 
+    /// Tiles with anything on them.
+    pub fn count(&self) -> u32 {
+        self.bits.iter().filter(|&&b| b != 0).count() as u32
+    }
+
     pub fn get(&self, x: i32, z: i32) -> u8 {
         if x < 0 || z < 0 || x as usize >= self.size_x || z as usize >= self.size_z {
             return 0;
@@ -145,6 +150,8 @@ pub struct Plan {
 }
 
 /// Price of one new piece of road or track.
+/// Superseded in play by the per-network prices in `company.rs`; kept for tests.
+#[allow(dead_code)]
 pub const PIECE_COST: u32 = 100;
 /// Price of moving one terrain corner by one block. Levelling a tile costs
 /// several times more than the track laid on it.
@@ -162,6 +169,7 @@ impl Plan {
         self.terraform_steps * TERRAFORM_COST
     }
 
+    #[allow(dead_code)]
     pub fn cost(&self) -> u32 {
         self.pieces.len() as u32 * PIECE_COST + self.terraform_cost()
     }

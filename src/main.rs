@@ -3,10 +3,12 @@ mod boats;
 mod camera;
 mod clock;
 mod clouds;
+mod company;
 mod daylight;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
 mod era;
+mod hq;
 mod input;
 mod models;
 mod network;

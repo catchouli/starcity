@@ -637,6 +637,49 @@ pier("props/pier_2030", (2030, 2100), 1)
 shadow("props/plane_shadow")
 
 
+# --- Headquarters (GAME-DESIGN.md 9.1): one model per level, centred on a 4 x 4 plot ----------
+
+
+def hq_garage(name):
+    parts = [box("Yard", CONCRETE, (0, 0.015, 0), (3.7, 0.03, 3.7)),
+             box("Shed", mat("GarageWall", "#c9c2b0"), (-0.4, 0.34, -0.5), (1.9, 0.68, 1.3)),
+             box("ShedRoof", ROOF_GREY, (-0.4, 0.7, -0.5), (2.05, 0.06, 1.45)),
+             box("Door", mat("GarageDoor", "#8a8f99", metallic=0.4, roughness=0.5), (-0.4, 0.26, 0.17), (1.1, 0.5, 0.03)),
+             box("SignPost", WOOD, (1.2, 0.3, 1.3), (0.06, 0.6, 0.06)),
+             box("Sign", mat("SignBoard", "#2a4f9e"), (1.2, 0.62, 1.3), (0.7, 0.28, 0.05))]
+    model(name, "hq", "hq_0", parts, **{"from": 1900, "to": 2200, "level": 0, "tiles_x": 4, "tiles_z": 4, "weight": 1})
+
+
+def hq_depot_office(name):
+    parts = [box("Yard", CONCRETE, (0, 0.015, 0), (3.8, 0.03, 3.8)),
+             box("Office", mat("OfficeWall", "#d6d0c2"), (-0.3, 0.55, -0.4), (2.0, 1.1, 1.5)),
+             box("Windows", GLASS, (-0.3, 0.7, 0.355), (1.7, 0.35, 0.02)),
+             box("Windows2", GLASS, (-0.3, 0.3, 0.355), (1.7, 0.3, 0.02)),
+             box("Roof", ROOF_GREY, (-0.3, 1.12, -0.4), (2.14, 0.06, 1.64)),
+             box("Depot", mat("DepotWall", "#a9b0bb"), (1.15, 0.3, -0.3), (1.0, 0.6, 1.8)),
+             box("DepotDoor", BLACK, (1.15, 0.22, 0.61), (0.7, 0.42, 0.03)),
+             box("SignPost", WOOD, (-1.5, 0.35, 1.4), (0.06, 0.7, 0.06)),
+             box("Sign", mat("SignBoard", "#2a4f9e"), (-1.5, 0.72, 1.4), (0.8, 0.3, 0.05))]
+    model(name, "hq", "hq_1", parts, **{"from": 1900, "to": 2200, "level": 1, "tiles_x": 4, "tiles_z": 4, "weight": 1})
+
+
+def hq_regional_office(name):
+    parts = [box("Plaza", mat("Plaza", "#b9b9bf"), (0, 0.015, 0), (3.9, 0.03, 3.9)),
+             box("Block", mat("TowerWall", "#c4c8d0", metallic=0.35, roughness=0.3), (-0.2, 1.1, -0.3), (2.2, 2.2, 1.8)),
+             box("GlassFront", GLASS, (-0.2, 1.1, 0.605), (2.0, 2.0, 0.02)),
+             box("GlassSide", GLASS, (0.905, 1.1, -0.3), (0.02, 2.0, 1.6)),
+             box("Roof", STEEL, (-0.2, 2.24, -0.3), (2.3, 0.08, 1.9)),
+             box("Wing", mat("WingWall", "#d6d0c2"), (1.4, 0.4, 0.2), (1.0, 0.8, 1.4)),
+             box("SignBoard", mat("SignBoard", "#2a4f9e"), (-0.2, 2.0, 0.63), (1.2, 0.2, 0.03)),
+             box("LobbyGlow", GLOW_WARM, (-0.2, 0.2, 0.62), (0.9, 0.3, 0.02))]
+    model(name, "hq", "hq_2", parts, **{"from": 1900, "to": 2200, "level": 2, "tiles_x": 4, "tiles_z": 4, "weight": 1})
+
+
+hq_garage("buildings/hq_0_garage")
+hq_depot_office("buildings/hq_1_depot_office")
+hq_regional_office("buildings/hq_2_regional_office")
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

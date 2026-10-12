@@ -158,6 +158,8 @@ pub struct Train {
     /// Told to stop by the player.
     pub stopped: bool,
     pub passengers: u32,
+    /// Where and when (game seconds) the passengers on board got on, for the fare.
+    pub boarded: Option<(f32, f32, f64)>,
     /// Distance to the target station from each segment, and the target and
     /// track version it was computed for.
     routing: Option<Routing>,
@@ -387,6 +389,7 @@ impl Trains {
             loading: None,
             stopped: false,
             passengers: 0,
+            boarded: None,
             routing: None,
         });
         Ok(id)

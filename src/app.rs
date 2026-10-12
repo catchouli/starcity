@@ -1,10 +1,13 @@
+mod company_ui;
 mod craft;
 
 use crate::boats::Boats;
 use crate::camera::Camera;
 use crate::clock::{Clock, Speed};
 use crate::clouds;
+use crate::company::{self, Assets, Company, Facts, Item};
 use crate::daylight::{self, Light};
+use crate::hq::Hq;
 use crate::input::PhysicalKeys;
 use crate::models::Models;
 use crate::network::{Blocked, Layer, Plan};
@@ -111,6 +114,15 @@ pub struct StarcityApp {
     props_changed: bool,
     trains_moving: bool,
     clock: Clock,
+    company: Company,
+    /// The headquarters, in the company town.
+    hq: Option<Hq>,
+    /// What the company owns and can do, refreshed once a second.
+    assets: Assets,
+    facts: Facts,
+    /// Road pieces the player has built (towns' own roads don't cost upkeep).
+    player_roads: u32,
+    assets_version: u64,
     /// The speed to go back to when un-pausing with Space.
     resume_speed: Speed,
     /// The light the scene was last drawn with.
@@ -170,6 +182,9 @@ impl StarcityApp {
                 #[cfg(target_arch = "wasm32")]
                 show_debug: false,
                 show_about: false,
+                show_finance: false,
+                show_hq: false,
+                show_next_step: true,
                 go_home: false,
             },
             physical_keys: PhysicalKeys::default(),
@@ -210,6 +225,12 @@ impl StarcityApp {
             props_changed: false,
             trains_moving: false,
             clock: Clock::default(),
+            company: Company::new(2000),
+            hq: None,
+            assets: Assets::default(),
+            facts: Facts::default(),
+            player_roads: 0,
+            assets_version: u64::MAX,
             resume_speed: Speed::X1,
             light: daylight::NOON,
             light_strength: 1.0,
@@ -227,6 +248,7 @@ impl StarcityApp {
             params,
         };
         app.regenerate(rs);
+        app.company.sandbox = demo;
         if demo {
             app.start_demo();
             let tiles = std::mem::take(&mut app.demo_levelled);
@@ -237,6 +259,10 @@ impl StarcityApp {
         }
         let c = app.params.size as f32 / 2.0;
         app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
+        if !demo {
+            // A new game opens on your garage.
+            app.look_at_hq();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         app.dev_setup(c as i32);
         app
@@ -246,6 +272,9 @@ impl StarcityApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn dev_setup(&mut self, c: i32) {
         use crate::devtools::DevTools;
+        if DevTools::demo().is_some() {
+            self.company.sandbox = true;
+        }
         if let Some(year) = DevTools::year() {
             self.seek_to(year as f64);
         }
@@ -534,6 +563,7 @@ impl StarcityApp {
         self.planes = Planes::default();
         self.selected_craft = None;
         self.selected_terminal = None;
+        self.new_company();
         self.set_year(self.year);
         self.props_changed = true;
         self.static_changed = true;
@@ -626,6 +656,9 @@ impl StarcityApp {
         // Every building tool works by dragging from a start tile to the cursor.
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
+        if !self.company.tool_unlocked(self.ui.tool) {
+            self.ui.tool = Tool::Pointer;
+        }
         let tool = self.ui.tool;
         if tool == Tool::Pointer && response.clicked_by(primary) {
             self.select_at(ctx, rect, view_proj);
@@ -639,8 +672,14 @@ impl StarcityApp {
                 (tx - fx) * view.x + (tz - fz) * view.z >= 0.0
             };
             let now = ctx.input(|i| i.time);
+            if !self.can_add_vehicle(company::TRAIN) {
+                return changes;
+            }
             match self.trains.spawn(&self.rails, t, forward, 3) {
-                Ok(_) => self.props_changed = true,
+                Ok(_) => {
+                    self.company.spend(Item::Vehicles, company::TRAIN);
+                    self.props_changed = true;
+                }
                 Err(SpawnError::NoTrack) => self.show_message("Trains go on track", now),
                 Err(SpawnError::Junction) => self.show_message("Place trains on plain track, not junctions", now),
                 Err(SpawnError::TooShort) => self.show_message("Not enough track behind here for a train", now),
@@ -653,7 +692,10 @@ impl StarcityApp {
                 let ((fx, fz), (tx, tz)) = rails::piece_ends(self.rails.get(t.0, t.1));
                 let view = self.camera.forward();
                 let forward = (tx - fx) * view.x + (tz - fz) * view.z >= 0.0;
-                self.props_changed |= self.signals.click(&self.rails, t, forward);
+                let new = matches!(self.signals.click_effect(&self.rails, t), rails::SignalClick::Place);
+                if !new || self.pay(Item::Construction, company::SIGNAL) {
+                    self.props_changed |= self.signals.click(&self.rails, t, forward);
+                }
             } else if response.clicked_by(egui::PointerButton::Secondary) {
                 self.props_changed |= self.signals.remove(t);
             }
@@ -794,7 +836,9 @@ impl StarcityApp {
         if best.is_none() && self.selected_craft.is_none() {
             if let Some(t) = self.hover_tile {
                 self.selected_terminal = self.terminals.at(t);
-                if self.selected_terminal.is_none() {
+                if self.hq.is_some_and(|h| h.contains(t)) {
+                    self.ui.show_hq = true;
+                } else if self.selected_terminal.is_none() {
                     self.selected_station = self.stations.at(t);
                     if self.selected_station.is_none() {
                         self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
@@ -812,6 +856,13 @@ impl StarcityApp {
             Tool::RemoveRail => self.clear(a, b, Clear::Rails),
             Tool::Road => {
                 let plan = roads::plan(&self.world, &self.roads, &self.rails, &self.towns.occupied, a, b);
+                if plan.blocked.is_none() && !plan.is_empty() {
+                    let cost = plan.pieces.len() as u32 * company::ROAD_PIECE;
+                    if !self.pay(Item::Construction, cost) {
+                        return Changes::default();
+                    }
+                    self.player_roads += plan.pieces.len() as u32;
+                }
                 Changes {
                     infra: plan.build(&mut self.roads),
                     ..Default::default()
@@ -827,6 +878,12 @@ impl StarcityApp {
                     a,
                     b,
                 );
+                if plan.blocked.is_none() && !plan.is_empty() {
+                    let cost = plan.pieces.len() as u32 * company::RAIL_PIECE + plan.terraform_cost();
+                    if !self.pay(Item::Construction, cost) {
+                        return Changes::default();
+                    }
+                }
                 let terrain = if plan.blocked.is_none() {
                     crate::terrain::edit::apply(&mut self.world, &plan.terraform)
                 } else {
@@ -852,6 +909,12 @@ impl StarcityApp {
                     a,
                     b,
                 );
+                if plan.blocked.is_none() && !plan.tiles.is_empty() {
+                    let cost = plan.tiles.len() as u32 * company::STATION_TILE;
+                    if !self.pay(Item::Construction, cost) {
+                        return Changes::default();
+                    }
+                }
                 if plan.blocked.is_none() {
                     // Platforms on existing track change routing without changing the track.
                     self.track_version += 1;
@@ -931,6 +994,7 @@ impl StarcityApp {
             return;
         }
         self.town_clock -= 1.0;
+        self.refresh_assets();
         let (road_tiles, built) = self
             .towns
             .update(1.0, &self.world, &mut self.roads, &self.rails, &self.models);
@@ -954,10 +1018,15 @@ impl StarcityApp {
             };
             let t = self.trains.train(train);
             let delivered = std::mem::take(&mut t.passengers);
+            let came_from = t.boarded.take();
             let boarding = (st.waiting as u32).min(t.capacity());
             t.passengers = boarding;
             st.waiting -= boarding as f32;
             let (x, z) = st.centre();
+            if boarding > 0 {
+                t.boarded = Some((x, z, self.clock.days()));
+            }
+            self.pay_fare(delivered, came_from, (x, z));
             if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
                 let town = &mut self.towns.list[town as usize];
                 town.served += delivered as f32;
@@ -998,6 +1067,9 @@ impl StarcityApp {
             let mut placed = props::stations(&self.models, &self.world, &self.rails, &self.stations, self.year);
             placed.extend(props::buildings(&self.models, &self.world, &self.towns));
             placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
+            if let Some(hq) = &self.hq {
+                placed.extend(props::hq(&self.models, &self.world, hq, self.company.hq_level));
+            }
             self.renderer
                 .set_models(&rs.device, &rs.queue, ModelLayer::Static, &mut placed);
             self.scene_dirty = true;
@@ -1631,9 +1703,21 @@ impl StarcityApp {
             .show(ui, |ui| ui::menu_bar(ui, &mut self.ui))
             .inner;
         let clock_text = self.clock.date().date_string();
+        let cash_text = company_ui::money(self.company.cash);
+        let step = self.company.next_step(&self.assets, &self.facts);
+        let company = &self.company;
+        let unlocked = |t: Tool| company.tool_unlocked(t);
+        let info = ui::ToolbarInfo {
+            clock: &clock_text,
+            daylight: self.light.day,
+            cash: &cash_text,
+            in_the_red: company.cash < 0,
+            unlocked: &unlocked,
+            suggested: step.tool.filter(|_| self.ui.show_next_step),
+        };
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
-            .show(ui, |ui| ui::toolbar(ui, &mut self.ui, &clock_text, self.light.day));
+            .show(ui, |ui| ui::toolbar(ui, &mut self.ui, &info));
         let plan = &self.plan;
         let status = if !plan.is_empty() {
             let what = match self.plan_network {
@@ -1641,13 +1725,33 @@ impl StarcityApp {
                 Network::Rail => "track",
             };
             match plan.blocked {
-                None if plan.terraform_steps > 0 => format!(
-                    "Build {what}: {} tiles, £{} (£{} levelling the ground)",
-                    plan.pieces.len(),
-                    plan.cost(),
-                    plan.terraform_cost()
-                ),
-                None => format!("Build {what}: {} tiles, £{}", plan.pieces.len(), plan.cost()),
+                None => {
+                    let unit = match (self.plan_network, self.ui.tool) {
+                        (_, Tool::Station) => company::STATION_TILE,
+                        (Network::Road, _) => company::ROAD_PIECE,
+                        (Network::Rail, _) => company::RAIL_PIECE,
+                    };
+                    let cost = plan.pieces.len() as u32 * unit + plan.terraform_cost();
+                    let short = if self.company.can_afford(cost) {
+                        ""
+                    } else {
+                        " (not enough money)"
+                    };
+                    if plan.terraform_steps > 0 {
+                        format!(
+                            "Build {what}: {} tiles, {} ({} levelling the ground){short}",
+                            plan.pieces.len(),
+                            company_ui::money(cost as i64),
+                            company_ui::money(plan.terraform_cost() as i64)
+                        )
+                    } else {
+                        format!(
+                            "Build {what}: {} tiles, {}{short}",
+                            plan.pieces.len(),
+                            company_ui::money(cost as i64)
+                        )
+                    }
+                }
                 Some(Blocked::Water) => format!("Can't build {what} on water"),
                 Some(Blocked::Slope) => format!("Can't build {what} here: the ground is too steep"),
                 Some(Blocked::Occupied) => "Roads and track can't share a tile yet".to_string(),
@@ -1753,6 +1857,7 @@ impl eframe::App for StarcityApp {
                 .trains
                 .update(step, &self.rails, &self.signals, &self.stations, self.track_version);
             self.tick_towns(step);
+            self.tick_company(step);
             vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
             craft_moved |= self.step_craft(step);
             changed.extend(self.sim.advance(&mut self.world, step));
@@ -1775,6 +1880,15 @@ impl eframe::App for StarcityApp {
         }
         ui::about_window(&ctx, &mut self.ui.show_about);
         self.train_window(&ctx);
+        self.finance_window(&ctx);
+        self.hq_window(&ctx);
+        if self.ui.show_next_step {
+            self.next_step_window(&ctx);
+        }
+        if self.bankrupt_window(&ctx) {
+            self.params.seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
+            self.regenerate(&rs);
+        }
         self.town_window(&ctx);
         self.station_window(&ctx);
         self.craft_windows(&ctx);

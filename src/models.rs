@@ -32,6 +32,8 @@ pub enum Role {
     Plane,
     Terminal,
     Prop,
+    /// A company headquarters; `kind` is `hq_<level>`.
+    Hq,
 }
 
 impl Role {
@@ -44,6 +46,7 @@ impl Role {
             "plane" | "planes" => Role::Plane,
             "terminal" | "terminals" => Role::Terminal,
             "prop" | "props" => Role::Prop,
+            "hq" | "headquarters" => Role::Hq,
             _ => return None,
         })
     }
@@ -464,6 +467,8 @@ mod tests {
                 // An airport's origin is its north-west corner.
                 Role::Terminal => ((11.0, 4.0), 11.0, 4.0, 1.5),
                 Role::Prop => ((1.1, 1.1), 1.1, 1.1, 1.5),
+                // Headquarters stand on a 4 x 4 plot.
+                Role::Hq => ((2.1, 2.1), 2.1, 2.1, 8.0),
             };
             let _ = limit;
             if meta.kind == "airport" {
@@ -497,7 +502,7 @@ mod tests {
         for (meta, mesh) in models.meta.iter().zip(&models.meshes) {
             let tris = mesh.indices.len() / 3;
             let budget = match meta.role {
-                Role::Building => 4000,
+                Role::Building | Role::Hq => 4000,
                 Role::RoadVehicle | Role::TrainCar | Role::Prop => 1500,
                 Role::Boat | Role::Plane => 3000,
                 Role::Terminal => 8000,
@@ -527,6 +532,7 @@ mod tests {
                 (Role::Boat, &["ferry"][..]),
                 (Role::Plane, &["airliner"][..]),
                 (Role::Terminal, &["port", "airport"][..]),
+                (Role::Hq, &["hq_0", "hq_1", "hq_2"][..]),
                 (
                     Role::Prop,
                     &["signal_red", "signal_green", "station_platform", "station_building"][..],
