@@ -16,7 +16,7 @@ pub const WN: u8 = 1 << 5;
 pub const DIAGONALS: u8 = NE | ES | SW | WN;
 
 /// The diagonal piece joining two adjacent edges.
-fn diagonal_piece(a: u8, b: u8) -> u8 {
+pub fn diagonal_piece(a: u8, b: u8) -> u8 {
     match a | b {
         x if x == N | E => NE,
         x if x == E | S => ES,

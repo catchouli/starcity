@@ -7,7 +7,7 @@
 //! straight, then 45°, then straight again. A line is kept only if a train
 //! could actually run between the stations; otherwise it's rolled back.
 
-use crate::network::Layer;
+use crate::network::{self, Layer, Piece, Plan};
 use crate::rails::{self, Signals};
 use crate::stations::{StationId, Stations};
 use crate::terrain::World;
@@ -86,33 +86,13 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
     let station_b = place_station(rw, to_uv(b), -s, &to_xz)?;
     let (a_end, b_end) = (*station_a.last().unwrap(), *station_b.last().unwrap());
 
-    // Straight, 45°, straight between the facing platform ends.
-    let du = (b_end.0 - a_end.0) * s;
-    let dv = b_end.1 - a_end.1;
-    if du < dv.abs() + 2 {
-        return None;
-    }
-    let k = (du - dv.abs()) / 2;
-    let p1 = (a_end.0 + s * k, a_end.1);
-    let p2 = (p1.0 + s * dv.abs(), b_end.1);
-    for (from, to) in [(a_end, p1), (p1, p2), (p2, b_end)] {
-        if from == to {
-            continue;
-        }
-        let plan = rails::plan(
-            rw.world,
-            rw.rails,
-            rw.roads,
-            rw.buildings,
-            rw.signals,
-            to_xz(from.0, from.1),
-            to_xz(to.0, to.1),
-        );
-        if plan.blocked.is_some() {
-            return None;
-        }
-        plan.build(rw.rails);
-    }
+    // Join the facing platform ends: out of one, round the hills, into the other.
+    let dir = to_xz(s, 0);
+    let start = (to_xz(a_end.0 + s, a_end.1), dir);
+    let goal = to_xz(b_end.0 - s, b_end.1);
+    let pieces = route(rw, start.0, dir, goal)?;
+    let plan = Plan { pieces, blocked: None };
+    plan.build(rw.rails);
 
     let (from, to) = (
         rw.stations.at(to_xz(a_end.0, a_end.1))?,
@@ -129,6 +109,78 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
         start: to_xz(start.0, start.1),
         forward: s > 0,
     })
+}
+
+const DIRS: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+
+/// Finds track from `start` (entered travelling `dir`) to `goal`, leaving
+/// `goal` in direction `dir` too. Every tile is a straight piece or a curve
+/// (a diagonal piece joining two adjacent edges); curves need flat ground and
+/// straights on a slope must run up it, so the route winds round hills.
+fn route(rw: &Railway, start: (i32, i32), dir: (i32, i32), goal: (i32, i32)) -> Option<Vec<Piece>> {
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashMap};
+
+    let size = rw.world.size_x as i32;
+    let heading = |d: (i32, i32)| DIRS.iter().position(|&x| x == d).unwrap();
+    let h = |t: (i32, i32)| (t.0 - goal.0).abs() + (t.1 - goal.1).abs();
+    // What a tile would hold if the track went in by `d_in` and out by `d_out`.
+    let piece = |d_in: usize, d_out: usize| {
+        if d_in == d_out {
+            if d_in % 2 == 0 { rails::X } else { rails::Y }
+        } else {
+            let (i, o) = (DIRS[d_in], DIRS[d_out]);
+            rails::diagonal_piece(
+                network::opposite(network::edge_towards(i.0, i.1)),
+                network::edge_towards(o.0, o.1),
+            )
+        }
+    };
+
+    type State = ((i32, i32), usize);
+    let first: State = (start, heading(dir));
+    let mut best: HashMap<State, u32> = HashMap::from([(first, 0)]);
+    let mut from: HashMap<State, (State, u8)> = HashMap::new();
+    let mut open = BinaryHeap::from([Reverse((h(start) as u32, 0u32, first))]);
+    let mut expanded = 0;
+    while let Some(Reverse((_, cost, state))) = open.pop() {
+        if best.get(&state).is_some_and(|&c| c < cost) {
+            continue;
+        }
+        expanded += 1;
+        if expanded > 300_000 {
+            return None;
+        }
+        let (tile, d_in) = state;
+        if !(0..size).contains(&tile.0) || !(0..size).contains(&tile.1) || rw.rails.get(tile.0, tile.1) != 0 {
+            continue;
+        }
+        for d_out in [d_in, (d_in + 1) % 4, (d_in + 3) % 4] {
+            let bits = piece(d_in, d_out);
+            if rails::check(rw.world, rw.roads, rw.buildings, tile.0, tile.1, bits).is_err() {
+                continue;
+            }
+            let step = 1 + if d_out == d_in { 0 } else { 2 };
+            if tile == goal && DIRS[d_out] == dir {
+                // Done: walk the path back.
+                let mut pieces = vec![Piece::add(tile, bits)];
+                let mut at = state;
+                while let Some(&(prev, bits)) = from.get(&at) {
+                    pieces.push(Piece::add(prev.0, bits));
+                    at = prev;
+                }
+                return Some(pieces);
+            }
+            let next = ((tile.0 + DIRS[d_out].0, tile.1 + DIRS[d_out].1), d_out);
+            let c = cost + step;
+            if best.get(&next).is_none_or(|&old| c < old) {
+                best.insert(next, c);
+                from.insert(next, (state, bits));
+                open.push(Reverse((c + h(next.0) as u32, c, next)));
+            }
+        }
+    }
+    None
 }
 
 /// Finds and builds a 4-tile station a little way from `centre` in direction
@@ -162,4 +214,46 @@ fn place_station(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terrain::generation::{self, GenParams};
+
+    #[test]
+    fn builds_lines_on_a_generated_map() {
+        let p = GenParams::default();
+        let world = generation::generate(&p);
+        let (sx, sz) = (world.size_x, world.size_z);
+        let mut roads = Layer::new(sx, sz);
+        let mut rails = Layer::new(sx, sz);
+        let towns = Towns::generate(&world, &mut roads, &rails, p.seed);
+        let signals = Signals::default();
+        let mut stations = Stations::default();
+        let mut rw = Railway {
+            world: &world,
+            roads: &roads,
+            buildings: &towns.occupied,
+            signals: &signals,
+            rails: &mut rails,
+            stations: &mut stations,
+        };
+        let lines = build_lines(&mut rw, &towns, 12);
+        assert!(!lines.is_empty(), "no lines among {} towns", towns.list.len());
+        for line in &lines {
+            assert!(trains::reachable(&rails, &stations, line.from, line.to));
+            assert!(stations.at(line.start).is_some(), "trains start on a platform");
+        }
+        let mut tr = trains::Trains::new(1);
+        for line in &lines {
+            let id = tr.spawn(&rails, line.start, line.forward, 3).unwrap();
+            tr.set_orders(id, vec![line.to, line.from], 0);
+        }
+        // Two minutes of running shouldn't crash anything.
+        for _ in 0..1200 {
+            tr.update(0.1, &rails, &signals, &stations, 1);
+        }
+        assert!(tr.list.iter().all(|t| t.crashed.is_none()));
+    }
 }

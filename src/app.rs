@@ -94,7 +94,7 @@ pub struct StarcityApp {
 }
 
 impl StarcityApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> StarcityApp {
+    pub fn new(cc: &eframe::CreationContext<'_>, demo: bool) -> StarcityApp {
         let rs = cc
             .wgpu_render_state
             .as_ref()
@@ -163,6 +163,9 @@ impl StarcityApp {
             params,
         };
         app.regenerate(rs);
+        if demo {
+            app.start_demo();
+        }
         let c = app.params.size as f32 / 2.0;
         app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
         #[cfg(not(target_arch = "wasm32"))]
@@ -272,6 +275,37 @@ impl StarcityApp {
             self.last_hover_tile = Some((c - 4, c + 10));
             self.ui.tool = Tool::Road;
         }
+    }
+
+    /// Demo mode (`--demo` / `?demo`): rail lines between neighbouring towns,
+    /// each with a train running back and forth.
+    fn start_demo(&mut self) {
+        let mut railway = crate::scenario::Railway {
+            world: &self.world,
+            roads: &self.roads,
+            buildings: &self.towns.occupied,
+            signals: &self.signals,
+            rails: &mut self.rails,
+            stations: &mut self.stations,
+        };
+        let lines = crate::scenario::build_lines(&mut railway, &self.towns, 12);
+        let mut running = 0;
+        for line in &lines {
+            if let Ok(id) = self.trains.spawn(&self.rails, line.start, line.forward, 3) {
+                self.trains.set_orders(id, vec![line.to, line.from], 0);
+                running += 1;
+            }
+        }
+        let ids: Vec<StationId> = self.stations.list.keys().copied().collect();
+        for id in ids {
+            self.name_station(id);
+        }
+        let last = self.world.size_x as i32 - 1;
+        self.infra_dirty = Some([0, 0, last, self.world.size_z as i32 - 1]);
+        self.static_changed = true;
+        self.props_changed = true;
+        self.track_version += 1;
+        self.message = Some((format!("Demo: {} lines, {running} trains", lines.len()), 10.0));
     }
 
     fn regenerate(&mut self, rs: &RenderState) {

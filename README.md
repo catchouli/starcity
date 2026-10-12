@@ -20,6 +20,9 @@ trunk serve --release     # http://127.0.0.1:8080
 trunk build --release     # static site in dist/
 ```
 
+Demo mode builds rail lines between neighbouring towns, with a train on each:
+`cargo run --release -- --demo`, or add `?demo` to the web URL.
+
 Pushing to `main` builds the static site and deploys it to GitHub Pages
 (enable Pages with "GitHub Actions" as the source in the repo settings).
 
@@ -65,6 +68,8 @@ Movement keys go by physical position, so WASD/QE stay in the same place on Dvor
 - `src/network.rs`: shared road/rail layers, edges and build plans
 - `src/roads.rs`, `src/rails.rs`: road and track pieces, drag planning, signals
 - `src/trains.rs`: train movement, routing, path-signal reservations, crashes
+- `src/vehicles.rs`: cars, buses and trucks on the road graph
+- `src/scenario.rs`: demo rail lines between towns (`--demo` / `?demo`)
 - `src/stations.rs`: stations and platform planning
 - `src/towns.rs`: town founding, names, growth, buildings, catchment
 - `src/clouds.rs`: tiling voxel cloud field

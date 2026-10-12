@@ -29,10 +29,11 @@ fn main() -> eframe::Result {
             .with_title("Starcity"),
         ..Default::default()
     };
+    let demo = std::env::args().any(|a| a == "--demo");
     eframe::run_native(
         "Starcity",
         options,
-        Box::new(|cc| Ok(Box::new(app::StarcityApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::StarcityApp::new(cc, demo)))),
     )
 }
 
@@ -52,11 +53,14 @@ fn main() {
             .dyn_into::<eframe::web_sys::HtmlCanvasElement>()
             .expect("#starcity is not a canvas");
 
+        let demo = eframe::web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .is_some_and(|q| q.contains("demo"));
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|cc| Ok(Box::new(app::StarcityApp::new(cc)))),
+                Box::new(move |cc| Ok(Box::new(app::StarcityApp::new(cc, demo)))),
             )
             .await;
 
