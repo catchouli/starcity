@@ -351,7 +351,7 @@ The tension for the player (about compute): an AI campus draws as much power as 
 
 The shape is: slow and legible for the first twenty years, a visible kink at the boom (2024–28), a flat spell at the correction (2029, the *rate* dips though the total keeps rising, as with the efficiency gains that rescued real AI after similar scares), then steeper than ever.
 
-**When compute becomes the currency.** Around 2035 the economy re-prices itself in compute: construction, vehicles and services are quoted in CU as well as £, and Synthesis (§5.8) lets compute pay for things directly. £ doesn't vanish; it becomes the unit of the old world, and the Finance window shows both. Mechanically this just means the cost tables have a CU column that starts at zero and becomes the main price; narratively it's the moment the player notices that the game has changed what it is about.
+**When compute becomes the currency.** When the **AI Citadel** wakes (headquarters level 6, §9.1: earliest 2032, typically around 2035) the economy re-prices itself in compute: construction, vehicles and services are quoted in CU as well as £, and Synthesis (§5.8) lets compute pay for things directly. £ doesn't vanish; it becomes the unit of the old world, and the Finance window shows both. Mechanically this just means the cost tables have a CU column that starts at zero and becomes the main price; narratively it's the moment the player notices that the game has changed what it is about. A company that has not built the Citadel stays in £ with limited agents, and the world nudges it (§10.13).
 
 **Training tiers** (capability thresholds on the cumulative total; names are placeholders). Each unlocks a program (§5.8) and a line in the news ticker.
 
@@ -518,6 +518,37 @@ The game is a sandbox first, but a little structure keeps sessions interesting:
 - **Yearly goals** shown in a window, three at a time, rotating: "Carry 5,000 passengers this year", "Deliver 1,000 t of coal", "Connect two towns of 1,000+", "Reach company value £250,000". Completing one pays a small bonus (£5,000) and unlocks the next tier. They're suggestions, never forced.
 - **Company rating** (0–100%) from vehicle age, profit and goals met; a sensible scoreboard line.
 - **Scenario modes** later: "Reach £1M", "Supply every town with goods", on a fixed seed.
+
+### 9.1 The headquarters: the company's body, and its gate
+
+The company has a **headquarters**, a real building in a town of your choice, upgraded in stages. It is both the player's progress bar and the main way the game paces what is available. It is also a place: it appears on the map, changes its shape with every level, and by the late game is the tallest thing in the city.
+
+**Placing it.** You pick the town once, at the start (a free 2×2 office). Choosing is a real decision: the HQ gives its town a Prosperity bonus that grows with its level (a company town, §5.10), and later levels need space, power and a large city to support them. It can be relocated, at the cost of the progress in the building.
+
+**Levels.** Each upgrade is a *construction project*: you pay money (or, later, compute) and **deliver materials to the site** (Steel, Goods, then Chips, Lunar glass...). Work shows as scaffolding on the model, then the new model replaces it. Each level also has requirements (a checklist in the HQ window, lit green as met), and a technology year, so a level can't be reached before its time.
+
+| Level | Name | Needs | Unlocks |
+|---|---|---|---|
+| 1 | **Depot office** (2000) | Free at the start | Roads, rail, buses, trains. Loan £200k; up to 40 vehicles |
+| 2 | **Regional office** | Company value £250k; town ≥ 2,000 | Ports, ferries, airports and planes; first industries funded; 150 vehicles; loan £500k; hosting program |
+| 3 | **Corporate tower** | Value £1M; metropolis ≥ 20,000 | Industry deliveries at scale, goals, Forecast (year ahead); 400 vehicles; server farms |
+| 4 | **Data campus HQ** (2012+) | Own a data centre; Training tier 1 | The Compute meter becomes the headline; fleet optimiser, autonomy; power grid planning |
+| 5 | **Glass spire** (2025+) | An AI campus; tier 2; delivered Chips and Lunar-free glass | Agents (one line at a time), generative design, spaceport permits, sub-orbital pads |
+| 6 | **The AI Citadel** (2032+) | Megacity ≥ 200,000; tier 4; a dedicated 400 MW; Lunar glass and Chips delivered | **Compute becomes the default currency** (below), charters, agents that run whole towns, the moon |
+| 7 | **Orbital Citadel** (2044+) | A spaceport and tier 5 | A second seat in orbit: Mars, the system map, space drones |
+| 8 | **The Convergence seat** (2048+) | The Convergence Array | The singularity (§10.5) |
+
+**The AI Citadel is the turning point.** A fully autonomous tower of chrome and light (a 4×4 landmark, `buildings/hq_citadel`), it runs the company: from the day it wakes, **compute is the currency of the game** (§5.9): costs are quoted in CU first and £ second, synthesis and agents are available, charters appear (§1.2), and the player becomes a governor (§1.1). The wake-up is a set piece: a banner, the lights come on floor by floor, the Holo interface of §10.3 fades in on that save regardless of the date, and the first autonomous project is started by itself. It is the game's clearest "everything changed" moment, and it is also the player's own doing.
+
+**Not a wall.** The HQ's job is pacing and a goal; it must not be a frustrating lock:
+- Basic play (roads, rail, a few buses) is level 1; the early game isn't gated by a building.
+- Requirements are *visible, specific and achievable by playing* (value, size, delivery), never random.
+- A level's tech year is the same year the models come out anyway (§10.1); the HQ never delays a thing the world already has by more than the player's own progress.
+- A sandbox option unlocks every level, for testing and for players who just want to build.
+
+**Vehicles and slots.** Each level raises the vehicle cap and the loan limit and opens slots for compute programs (§5.8) so the HQ governs company size, not only features.
+
+**Look.** One `.glb` per level in `assets/models/buildings/` (`hq_1_depot` ... `hq_8_convergence`), with `role = hq` and `level = N` custom properties; artists can change any of them. The scaffolding stage is a shared model. Sizes grow from 2×2 to 6×6 (the placement checks the room, as the megastructure merge does).
 
 ## 10. Eras: from the web to the singularity
 
@@ -747,6 +778,7 @@ Each new stage (the moon, Mars, the system map, the galaxy, the globe) is **the 
 - **Dangled rewards.** Each stage needs a visible, specific thing the old stage can't provide: lunar glass for chrome cities, Helium-3 for fusion, Rare metals for Nano-goods. The industry windows show them as locked inputs ("Needs Rare metals: asteroid mining 2040").
 - **Pressure from success.** The ceilings of the Earth economy are real: grid power, land and heat cap compute (§5.9), and the news ticker says so ("*Ashford's grid is at its limit*"). The easiest way to keep the number growing is up.
 - **The banner.** The first time the prerequisite is met, a single pop-up: "**The lunar landing site is ready**: go there?" with a button. It never nags afterwards.
+- **The headquarters.** Each HQ level (§9.1) is the next visible goal: the Citadel for compute, the Orbital Citadel for Mars and the system. The checklist in the HQ window tells the player exactly what is missing.
 - **A small head start.** The first build on a new map is cheap and its first deliveries pay a bonus, so trying it is rewarded, not punished.
 
 **Staying and returning.** The Earth map keeps simulating while the player is away, in a **cheap abstract mode** (monthly economy only, no vehicles moving; §12 globe notes) when it isn't on screen, and the vehicle and train positions are restored on return. A single status-bar switcher (Earth · Moon · Mars · System · Galaxy) goes anywhere already unlocked, and the company's totals (money, compute, charter) are shared. A player who hates the moon can play Earth for 50 years and still see the singularity; a player who loves it can leave Earth on autopilot (agents), a design in itself.
@@ -774,7 +806,7 @@ Each phase is playable and testable on its own; later phases lean on earlier one
 
 **Phase 7 — Vehicle catalogue and the build window.** The `Model` table (§7) with `from`/`to` years in the glb files; the Build Vehicle window with "coming around 2031" entries; vehicles read their stats from the table; boats and planes use the same table. Players choose the generation they buy.
 
-**Phase 8 — Towns as customers, goals, industry life.** §5.5, §5.2 closures and spawning, fund-a-new-industry, §9 goals.
+**Phase 8 — Towns as customers, goals, industry life, the headquarters (levels 1–3).** §5.5, §5.2 closures and spawning, fund-a-new-industry, §9 goals, and the HQ: placement, the checklist window, the construction-project mechanic (deliveries to a site), vehicle and loan caps per level, `role = hq` models. Levels 4–8 arrive with the systems they unlock (Phases 9, 11, 13).
 
 **Phase 9 — Data centres and compute.** *Start with the meter:* the Compute meter, rate and log sparkline in the toolbar, driven by the formula of §5.9 with the Servers-era numbers, so the idle-game feel is there before the economy is.  The silica → chips → data-centre chain (§5.8) as ordinary industries; `compute.rs` with the CU pool (decay, allocation sliders) and the Compute window; first programs (hosting, analytics, forecasting, fleet optimiser); the Tech Pace meter shifting introduction years. *Test:* compute pays; brownouts cut CU; the allocation of a program changes its effect with diminishing returns. Later programs (autonomy, generative design, agents, synthesis) are added one at a time as the systems they touch arrive.
 
@@ -848,4 +880,5 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 11. ~~**Compute scale.**~~ Decided: keep the unit-change spectacle (kCU → ... → Brim), as idle-game players already read it. A log-axis meter option stays a cheap fallback if playtests find it confusing.
 12. **How far to take the twist?** Charters and endings (§1.2) assume the agents' behaviour can be steered and tested; the first version could ship with two ledgers and three endings, with agents as hand-written heuristics. Is that enough, or should agents be more surprising (they have a mind of their own)?
 13. **Revisions:** rewinding is powerful, and might undermine consequence. Limited use (three per game) and a heavy compute price are the proposal.
+15. **HQ gating strength:** the proposal is soft (visible checklists, sandbox unlock). Should levels 2–3 be skippable by paying more, and is a relocation penalty right?
 14. ~~**The moon and the globe: same save?**~~ Decided: same save, optional, and reversible (§10.13).
