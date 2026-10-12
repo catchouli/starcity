@@ -148,7 +148,7 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
     actions
 }
 
-pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
+pub fn toolbar(ui: &mut Ui, s: &mut UiState, clock: &str) {
     const SIZE: f32 = 30.0;
     let groups: [(&str, &[Tool]); 5] = [
         ("", &[Tool::Pointer]),
@@ -198,19 +198,19 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState) {
                     _ => format!("Game speed {}", speed.label()),
                 });
             }
-            ui.label("Speed");
+            // The date and time, beside the controls that change how fast it runs.
+            win95::status_pane(ui, 172.0, clock);
         });
     });
 }
 
-pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str, clock: &str) {
+pub fn status_bar(ui: &mut Ui, s: &UiState, right: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let (right_width, clock_width) = (230.0, 150.0);
-        let left = (ui.available_width() - right_width - clock_width - 4.0).max(50.0);
+        let right_width = 260.0;
+        let left = (ui.available_width() - right_width - 2.0).max(50.0);
         win95::status_pane(ui, left, s.tool.hint());
         win95::status_pane(ui, right_width, right);
-        win95::status_pane(ui, clock_width, clock);
     });
 }
 

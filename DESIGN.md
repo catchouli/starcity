@@ -144,11 +144,15 @@ Simple vehicles that follow a list of stops, as a base for the different models 
 
 ## 7b. Time and light
 
-- **Clock** ✅: a real calendar (leap years, weekday names) starting Sunday 1 January 1950, 08:00. One game hour is 2 s of simulation: a day is 48 s at normal speed, a year about 4¾ hours. The status bar shows the date and the time to the nearest quarter hour, like a Win95 tray clock.
+- **Clock** ✅: a real calendar (leap years, weekday names) starting Saturday 1 January 2000, 08:00. One game hour is 2 s of simulation: a day is 48 s at normal speed, a year about 4¾ hours. The date and the time (to the nearest quarter hour) are shown at the top right, in a sunken pane beside the speed buttons.
 - **Speed** ✅: pause, 1×, 2×, 4×, 8× buttons at the right of the toolbar; Space pauses and resumes at the previous speed. Speed scales the clock, trains, road vehicles, town growth and regrowth together. Each frame simulates at most 0.4 s, in steps of at most 0.1 s, so a slow frame at 8× slows the game down for a moment instead of making vehicle physics unstable or the frame worse.
 - **Day/night** ✅ (`daylight.rs`): the sun crosses the sky from east to west, the sky and fog colour change with it, the light is warm at sunrise and sunset and cool and dim by moonlight, and clouds go dusky. Night is a mood, not an obstacle: the scene stays readable (about half the brightness of noon). Lamps (signals) are unshaded, so they glow. To keep it unobtrusive the cycle eases off at high speeds (full strength at 1×, 40% at 8×, so it never strobes) and **N** or View → Day/night cycle turns it off.
 - **Cost on the web**: the light is a pure function of the time of day plus three uniform colours, with no shadow maps or extra passes. The scene is only re-rendered when the light has visibly changed (a colour step of one 8-bit channel, or the sun moving a few degrees), at most 10 times a second, and not at all while paused. Measured over a full day (`daylight::tests::idle_redraws_stay_rare`): about 4 scene redraws a second at 1× and at most 10 at 8×, where vehicles are redrawing the scene every frame anyway. That's well under the 15 a second the drifting clouds already cost.
 - Later: lit windows at night, street and station lamps, cloud shadows, seasons.
+
+## 7c. Eras and style (planned)
+
+The game runs from 2000 to 2050. As the years pass, models, buildings and industries advance, the look turns **chrome** (a little from 2025, extremely by 2050, applied through a single era value in the shader and the UI theme), and the late game opens **space**: spaceports, rockets to off-map destinations, and space resources (Rare Metals, Helium-3, Water Ice) feeding new industries on the map, ending in a 2050 singularity goal. See GAME-DESIGN.md §10. Open question first: how fast the calendar should run for a 50-year arc to be playable (GAME-DESIGN.md §12).
 
 ## 8. UI
 
@@ -161,7 +165,7 @@ Simple vehicles that follow a list of stops, as a base for the different models 
   - Later: terraform (raise, lower, level, dig), stations, demolish.
 - Dialogs and info panels (town info, train orders) are Win95 windows inside the game view.
 - The debug window (F3) stays separate from the game UI.
-- **Status bar** ✅: hint, status (tile, build cost, messages), and the date and time at the right.
+- **Status bar** ✅: hint and status (tile, build cost, messages). The date and time live in the toolbar, next to the speed buttons.
 
 ## 9. Tech stack
 
@@ -255,6 +259,7 @@ Terrain generation was never really started: it only produced random noise for o
 - Industry spawning, cargo chains, growth feedback.
 
 **Later**
+- Eras, chrome styling and space (§7c).
 - Visible cars and people, merging conurbations, save/load, bridges, rivers.
 
 ## 12. Open questions

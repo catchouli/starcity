@@ -6,12 +6,12 @@
 //! at 8× a day is 6 s and a year about 36 minutes.
 //!
 //! The calendar is the real Gregorian one, with leap years, starting on
-//! Sunday 1 January 1950. Weeks and months are for display and, later, for
+//! Saturday 1 January 2000. Weeks and months are for display and, later, for
 //! the economy's accounting periods (see GAME-DESIGN.md).
 
 /// Simulation seconds in one game hour.
 pub const SECONDS_PER_HOUR: f64 = 2.0;
-const START_YEAR: i32 = 1950;
+const START_YEAR: i32 = 2000;
 /// Time of day the game starts at, so the first view is in morning light.
 pub const START_HOUR: f64 = 8.0;
 
@@ -168,9 +168,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn starts_on_a_sunday_morning_in_1950() {
+    fn starts_on_a_saturday_morning_in_2000() {
         let t = Clock::default().date_time();
-        assert_eq!(t.date_string(), "Sun 1 Jan 1950");
+        assert_eq!(t.date_string(), "Sat 1 Jan 2000");
         assert_eq!(t.time_string(), "08:00");
     }
 
@@ -179,17 +179,23 @@ mod tests {
         let mut c = Clock::starting_at(0.0);
         let at = |c: &Clock| c.date_time().date_string();
         c.advance(48.0, Speed::X1);
-        assert_eq!(at(&c), "Mon 2 Jan 1950");
+        assert_eq!(at(&c), "Sun 2 Jan 2000");
         // Faster speeds pass the same game time in less real time.
         let mut d = Clock::starting_at(0.0);
         d.advance(6.0, Speed::X8);
-        assert_eq!(at(&d), "Mon 2 Jan 1950");
-        // 1952 was a leap year: 1 Jan 1952 + 59 days is 29 Feb.
+        assert_eq!(at(&d), "Sun 2 Jan 2000");
+        // 2000 was a leap year (divisible by 400): 1 Jan + 59 days is 29 Feb.
         let mut c = Clock::starting_at(0.0);
-        c.advance((365.0 + 365.0 + 59.0) * 48.0, Speed::X1);
-        assert_eq!(at(&c), "Fri 29 Feb 1952");
+        c.advance(59.0 * 48.0, Speed::X1);
+        assert_eq!(at(&c), "Tue 29 Feb 2000");
         c.advance(48.0, Speed::X1);
-        assert_eq!(at(&c), "Sat 1 Mar 1952");
+        assert_eq!(at(&c), "Wed 1 Mar 2000");
+        // 2100 is not: the day after 28 Feb 2100 is 1 Mar.
+        let mut c = Clock::starting_at(0.0);
+        c.advance((100.0 * 365.0 + 25.0 + 31.0 + 27.0) * 48.0, Speed::X1);
+        assert_eq!(at(&c).split_once(' ').unwrap().1, "28 Feb 2100");
+        c.advance(48.0, Speed::X1);
+        assert_eq!(at(&c).split_once(' ').unwrap().1, "1 Mar 2100");
         // Paused time doesn't move.
         let before = c.date_time();
         assert_eq!(c.advance(100.0, Speed::Paused), 0.0);

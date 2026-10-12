@@ -1527,9 +1527,11 @@ impl StarcityApp {
             .frame(panel)
             .show(ui, |ui| ui::menu_bar(ui, &mut self.ui))
             .inner;
+        let when = self.clock.date_time();
+        let clock_text = format!("{}  {}", when.date_string(), when.time_string());
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
-            .show(ui, |ui| ui::toolbar(ui, &mut self.ui));
+            .show(ui, |ui| ui::toolbar(ui, &mut self.ui, &clock_text));
         let plan = &self.plan;
         let status = if !plan.is_empty() {
             let what = match self.plan_network {
@@ -1577,11 +1579,9 @@ impl StarcityApp {
                 None => format!("Zoom {:.0}", self.camera.view_height),
             }
         };
-        let when = self.clock.date_time();
-        let clock_text = format!("{}  {}", when.date_string(), when.time_string());
         egui::Panel::bottom("status_bar")
             .frame(panel)
-            .show(ui, |ui| ui::status_bar(ui, &self.ui, &status, &clock_text));
+            .show(ui, |ui| ui::status_bar(ui, &self.ui, &status));
 
         // The menus and keyboard edit `self.ui`; apply those to the renderer and camera.
         if self.settings.wireframe != self.ui.wireframe || self.settings.grid != self.ui.grid {

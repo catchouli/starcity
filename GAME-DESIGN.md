@@ -18,11 +18,11 @@ The tone to aim for is "one more line": simple rules that interlock, never a spr
 - **Few cargo types, each with a clear role.** Twelve cargoes in four classes (§4).
 - **Two-input recipes, not deep trees.** Chains are at most three steps (mine → mill → factory → town).
 - **No hidden state.** Every number the economy uses is shown in a window: production, stock, rating, income per trip.
-- **Cheap to simulate.** The whole economy ticks once per economy month (30 simulated seconds); vehicles only touch it when they load or unload (§10).
+- **Cheap to simulate.** The whole economy ticks once per economy month (30 simulated seconds); vehicles only touch it when they load or unload (§11).
 
 ## 2. Time and money
 
-- **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Sunday 1 January 1950, 08:00. One game hour is 2 seconds of simulation, so at normal speed a day takes 48 s, a week about 5½ minutes, a year about 4¾ hours. The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*, the clock included: at 8× a day is 6 s and a year about 36 minutes. The date shows in the status bar and drives the day/night light (DESIGN.md §7a).
+- **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000, 08:00. One game hour is 2 seconds of simulation, so at normal speed a day takes 48 s, a week about 5½ minutes, a year about 4¾ hours. The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*, the clock included: at 8× a day is 6 s and a year about 36 minutes. The date and time show in the toolbar beside the speed buttons and drive the day/night light (DESIGN.md §7a).
 - **Economy time is separate from the calendar.** The economy is paid per second of simulated time, so its rules don't care what the calendar says. In this document, *a tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s* (6 minutes at 1×, 45 s at 8×). That's why a year of running costs and a year of income stay in proportion at any game speed, and why the calendar can be long enough for a day/night cycle to look good. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
 - **Starting position:** £100,000 cash, a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
 - **Income:** paid on delivery, to the company, when cargo is unloaded at a station that accepts it. See §3.
@@ -203,7 +203,7 @@ Every mode has two or three models. Cheaper ones are slower, smaller and cost le
 - **Big and fast** wins on long routes and busy ones: the `time_factor` (§3) and capacity both scale in its favour, but its price and running costs are paid even when it runs half empty.
 - **Break-even guidance** is in each table: roughly, the dearer model should earn 2–3× more per year on a long, busy route and *less* than the cheap one on a short, thin one.
 
-All numbers are per vehicle. Speeds are in tiles per second (the unit the code already uses; trains today run at 3.0, road vehicles 1.1–1.6). Running cost is per year. Models are all available from the start; **eras** (models appearing over the years) are a possible later layer (§11).
+All numbers are per vehicle. Speeds are in tiles per second (the unit the code already uses; trains today run at 3.0, road vehicles 1.1–1.6). Running cost is per year. Models appear by year, in eras (§10); the tables below are the models of the opening era plus the tier each later generation slots into.
 
 ### 7.1 Trains
 
@@ -303,7 +303,67 @@ The game is a sandbox first, but a little structure keeps sessions interesting:
 - **Company rating** (0–100%) from vehicle age, profit and goals met; a sensible scoreboard line.
 - **Scenario modes** later: "Reach £1M", "Supply every town with goods", on a fixed seed.
 
-## 10. Implementation plan
+## 10. Eras: from the web to the singularity
+
+The game starts on **1 January 2000**, as the web is taking off, and runs to **2050**, when technology reaches the singularity. The calendar is the story: models, buildings, industries, the interface and the look of the world all change with the year, so a long game feels like moving through a future, not just buying bigger vehicles. The 2000 start also suits the Win95-style UI, which reads as the early-2000s desktop it's imitating.
+
+### 10.1 The arc
+
+| Era | Years | Feel | What arrives |
+|---|---|---|---|
+| **Dot-com** | 2000–2012 | Grounded and plain. Win2000 grey UI, boxy vehicles. | The §7 models as they are: diesel trains, buses, turboprops and jets, ferries. Mail still matters. |
+| **Broadband** | 2012–2025 | Cleaner and flatter. Glossy buttons give way to flat ones. | Electric trains and buses, hybrid trucks, larger jets, container-style ships. Faster everything, higher running costs falling. |
+| **Chrome dawn** | 2025–2038 | The first metal appears: vehicles and tall buildings gain a sheen. | Maglev trains, autonomous trucks, electric and VTOL aircraft, hydrofoil ferries. Industries get automated (more output per tile, fewer closures). **Sub-orbital rockets** appear around 2032. |
+| **Chrome age** | 2038–2048 | Everything reflective: towers of mirrored glass, polished vehicles, a chrome UI. | Hyperloop pods, autonomous convoys, fusion power. **Orbital lifters** (2038) and **spaceports** open the space economy (§10.4). |
+| **Singularity** | 2048–2050 | Gleaming, strange, accelerating. | The final megaproject (§10.5). Production and growth curves steepen. |
+
+Dates are the *centre* of each introduction; each game shifts every model by a random ±3 years, so no two games unlock in the same order and the player can't plan from a memorised list. A model shows as "Coming around 2031" in the buy window, so there's something to look forward to.
+
+### 10.2 Technology and models
+
+Models (§7) gain an **introduction year** and a **retirement year**. A new generation doesn't replace the old: it joins it, with its own price and its own place on the cheap-to-expensive scale (§7). That keeps §7's rule that the cheap option can still be right. Old models can still be bought until they retire; vehicles already running keep running, with higher running costs as they age.
+
+Technology also moves the world: a new model can need new infrastructure (maglev needs maglev track, electric trains need overhead wire, spaceports need a launch complex), and costs fall about 3% a year for established kit, so mid-game purchases get cheaper while new models start dear.
+
+Keying this to the calendar is deliberate. The pace problem it creates is in §12.
+
+### 10.3 Chrome: the look of the future
+
+Visuals shift with a single **era value** from 0 (2000–2025) rising to 1 (2050). A little chrome starts creeping in from 2025, and everything is extremely chrome by 2050.
+
+- **Props** (vehicles, buildings, stations, terminals): boxes already carry a colour; a *gloss* amount joins it (the alpha byte, which today only marks unshaded lamps, becomes lamp bit plus gloss). The shader adds a fake **environment reflection**: look up an analytic sky gradient (horizon to zenith, plus a bright sun streak) with the reflected view direction, mix it in by the gloss and the era, and add a sharp highlight. No textures, no extra passes, only box fragments pay.
+- **Per era:** dot-com boxes are matte (gloss 0); from 2025 new models and tall buildings get a little gloss; by 2040 mirrored glass towers and fully chromed vehicles; the sea gets a brighter sky reflection and the fog/sky palette cools towards steel-blue and white.
+- **The UI follows**: the Win95 theme interpolates through eras by year, like the desktops of the time: grey bevels (2000), a smoother blue-and-green Luna look (2001–2006), glossy glass (2007–2012), flat (2013–2024), then brushed-metal bevels and gradient chrome title bars (2025+), until the whole interface is polished chrome by 2050. Layout never changes, only colours, bevel styles and title bars (`ui/win95.rs` already centralises them), so muscle memory survives.
+- **Day/night** (DESIGN.md §7b) gets chrome too: highlights catch the low sun, and late eras get lit windows and glowing vehicle lines at night.
+- **Cost on the web:** one extra uniform (the era value) and a few lines in the box fragment shader. Terrain, water and clouds are unchanged, so the cost scales with the number of props on screen, which is already budgeted.
+
+### 10.4 Space
+
+Space is the late-game economy and the reason to keep playing after the roads and rails are done.
+
+- **Spaceports** are terminals (like ports and airports) with a launch complex footprint (about 12×12, levelled flat like an airport, £400,000). They need a flat site away from towns (a noise-and-safety zone of 15 tiles, or town growth stalls) and, for orbital lifters, a coastal or low-population aim line. From 2032 a **sub-orbital** pad (small, cheaper) and from 2038 a full **orbital** pad.
+- **Rockets** are vehicles that follow a route like planes do (a list of destinations), except the destination is **off-map**. A rocket stands on its pad, lifts off with a plume of boxes, climbs out of sight, and returns after a trip time with the cargo exchanged; landing is a powered descent to the pad. They're expensive (£500,000 and up) and carry a lot (100–400 units), and pay by a fixed "orbital distance" per destination, so a short route on the map can still be the best-paid thing you run.
+- **Off-map destinations** are virtual industries, always present once the era opens, and a few more appear over time (§10.1): an **Orbital Station** (accepts people, goods, food and fuel; produces *Solar Power Units*), a **Lunar Base** (accepts goods, food, people; produces *Helium-3* and *Regolith*), and **Asteroid Mining** (accepts fuel and goods; produces *Rare Metals* and *Water Ice*). A spaceport's catchment loads and unloads them exactly like a station loads industries.
+- **Space resources come down to the map** as new cargo: Rare Metals, Helium-3, Water Ice, Solar Power Units. New map industries use them:
+  - *Fusion plant* (Helium-3 → power for towns, like a power station, with a bigger growth bonus),
+  - *Nano-fabricator* (Rare Metals + Goods → **Nano-goods**, the best-paid cargo in the game, accepted by towns above 5,000 people),
+  - *Water works* (Water Ice → Food/Water for big towns),
+  - *Solar array* (Solar Power Units → a large, permanent boost to nearby growth).
+- **Chain depth stays at three**: space resources are an *extra step* feeding the existing economy, not a replacement for it, so a player who never goes to space still has a complete game.
+- **Cost on the web:** a handful of rockets (their props are a few boxes plus a short plume), no off-map world to simulate, and the off-map destinations are just a few numbers each.
+
+### 10.5 The singularity
+
+By 2048 a megaproject, the **Convergence Array**, becomes available to build: a large structure that needs enormous deliveries over a couple of game years (Rare Metals, Nano-goods, Helium-3, power). Finishing it before the end of 2050 triggers the singularity ending: the sky and UI complete their shift to full chrome, a short credits sequence plays, and the game offers to continue as a post-singularity sandbox (industries produce without inputs, towns grow without limit, the player keeps building). Missing it just continues the sandbox with a note. It's a goal (§9), never a gate.
+
+### 10.6 Implementation notes
+
+- `clock.rs` already runs from 2000 (`START_YEAR`). Add `year()`, then an `Era` helper mapping a date to the 0–1 chrome value and to the era name shown in the UI.
+- The model table (§7, `Model`) gains `intro: i32`, `retire: i32`, and a per-game `shift: i8`; availability is a pure function of the date.
+- The gloss/era uniform goes in `Globals` next to the light (`daylight::Light` is the model: a pure function of the date, applied in one place).
+- Space uses the existing terminal and orders machinery (`terminals.rs`): a `Site::Spaceport`, a `rockets.rs` modelled on `planes.rs` (a precomputed list of waypoints for lift-off and landing, plus a timed absence), and off-map destinations as entries in the industry table with no tile.
+
+## 11. Implementation plan
 
 Order of work, each step playable on its own:
 
@@ -345,9 +405,10 @@ The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed
 - **Vehicle counts stay bounded** (the existing cap of 900 road vehicles, small fleets for boats, planes and trains), and everything that moves is already drawn through the dynamic box buffer.
 - **Pathfinding is budgeted** (boats already do this: a fixed number of A* expansions per frame, with cached routes), and the same pattern applies to anything new that searches.
 
-## 11. Open questions
+## 12. Open questions
 
-1. **Eras or all models from day one?** All at once keeps the first session simple; eras give a long game a reason to keep buying. Proposed: all at once now, eras later.
+1. **Pacing of the 50-year arc.** Eras are keyed to the calendar (§10), and the calendar is tied to the day/night cycle: a day is 48 s at 1×, so a year is about 4¾ hours at 1× and about 36 minutes at 8×. Reaching 2050 would take around 30 hours at 8×, far more than a long session (OpenTTD's default is about 13 minutes a year). Options: (a) a shorter calendar year, for example 12 months of 10 days (about 12 minutes a year at 8×, 10 hours to 2050); (b) faster top speeds (16×, 32×) that the day/night cycle already mutes; (c) decouple the visual day/night from the calendar, so the calendar can run at 1 day per 2–3 s while the light cycles over a minute or two; (d) key era progress to the company (value, years of play) not the date. Recommendation: **(c)**, with the clock showing the date only plus a sun/moon indicator, and the year around 8–10 minutes at 1×, which gives 2050 in about 7–8 hours at normal speed and well under that with the speed buttons. This is a decision to make before building eras.
+2. **Eras: all models from day one, or by year?** Settled by §10: by year, with a per-game shift.
 2. **Distance: straight-line or route length?** Straight-line stops players padding routes but rewards the shortest track; route length rewards winding lines. Proposed: straight-line.
 3. **Competing companies.** The market-share split (§5.2) would let AI companies exist; do we want them, or is the split just a rule between a player's own stations?
 4. **Mail** might be cut if passengers alone give enough for aircraft to do.
