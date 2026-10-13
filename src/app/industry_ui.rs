@@ -229,6 +229,8 @@ impl StarcityApp {
                 self.company.earn(crate::company::Item::Launches, l.revenue);
                 self.company.charge(crate::company::Item::Running, l.cost);
                 self.space_launches += 1;
+                let (cx, cz) = self.industries.list[i].centre();
+                self.rockets.push((cx, cz, 0.0));
                 if l.failed {
                     self.industries.list[i].pad_closed = 1;
                     messages.push("A launch failed. The cargo is lost and the pad is shut for a month.".to_string());
@@ -246,6 +248,15 @@ impl StarcityApp {
         if let Some(m) = messages.last() {
             self.show_message(m, now + 5.0);
         }
+    }
+
+    /// Rockets climb away and are gone after a quarter of a minute. Returns whether any are in flight.
+    pub(super) fn step_rockets(&mut self, dt: f32) -> bool {
+        for r in &mut self.rockets {
+            r.2 += dt;
+        }
+        self.rockets.retain(|r| r.2 < 14.0);
+        !self.rockets.is_empty()
     }
 
     /// The server farms' month: batches of work become compute, which is also sold as hosting.

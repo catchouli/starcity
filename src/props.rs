@@ -230,6 +230,21 @@ pub fn boats(models: &Models, world: &World, boats: &Boats) -> Placed {
 }
 
 /// Planes, with a shadow on the ground while they're in the air.
+/// Rockets in flight, rising from their pads: each is (x, z, seconds since lift-off).
+pub fn rockets(models: &Models, world: &World, flights: &[(f32, f32, f32)]) -> Placed {
+    let Some(m) = models.pick(Role::Prop, "rocket", 2000, 0) else {
+        return Vec::new();
+    };
+    flights
+        .iter()
+        .map(|&(x, z, age)| {
+            let mut inst = ModelInstance::at([x, world.height_at(x, z) + 0.1 + 0.45 * age * age, z], 0.0);
+            inst.scale = 1.0 + age * 0.05;
+            (m, inst)
+        })
+        .collect()
+}
+
 pub fn planes(models: &Models, world: &World, planes: &Planes) -> Placed {
     let shadow = models.pick(Role::Prop, "shadow", 2000, 0);
     let mut out = Vec::with_capacity(planes.list.len() * 2);

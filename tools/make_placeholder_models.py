@@ -777,6 +777,13 @@ industry("spaceport", "spaceport", 5, [pad(5, CONCRETE),
     box("Control", mat("Control", "#9aa3b0"), (1.6, 0.35, 1.6), (1.0, 0.7, 0.8)), cyl("Tank", STEEL, (-1.6, 0.4, 1.6), 0.35, 0.8, seg=12)])
 
 
+model("props/launch_rocket", "prop", "rocket", [
+    cyl("Body", WHITE, (0.0, 1.9, 0.0), 0.2, 2.0, seg=12, rtop=0.14), cyl("Nose", mat("RocketNose", "#c9d0da", metallic=0.6), (0.0, 3.05, 0.0), 0.14, 0.3, seg=12, rtop=0.02),
+    box("Fin1", mat("RocketFin", "#2a3a5a"), (0.2, 1.1, 0.0), (0.15, 0.4, 0.04)), box("Fin2", mat("RocketFin", "#2a3a5a"), (-0.2, 1.1, 0.0), (0.15, 0.4, 0.04)),
+    cyl("Plume", mat("RocketPlume", "#ffb040", emissive=1.0), (0.0, 0.45, 0.0), 0.13, 0.9, seg=10, rtop=0.02)],
+    **{"from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

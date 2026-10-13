@@ -151,6 +151,8 @@ pub struct StarcityApp {
     news: Vec<usize>,
     /// Launches flown, and the rolls that decide whether they fail.
     space_launches: u32,
+    /// Rockets in flight: (x, z, seconds since lift-off).
+    rockets: Vec<(f32, f32, f32)>,
     launch_rng: u64,
     last_event_date: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
@@ -302,6 +304,7 @@ impl StarcityApp {
             compute_alloc: Default::default(),
             news: Vec::new(),
             space_launches: 0,
+            rockets: Vec::new(),
             launch_rng: 0x2545_F491_4F6C_DD1D,
             last_event_date: 2000.0,
             proj_morph: 0.0,
@@ -1254,6 +1257,7 @@ impl StarcityApp {
             placed.extend(props::road_vehicles(&self.models, &self.world, &self.vehicles));
             placed.extend(props::boats(&self.models, &self.world, &self.boats));
             placed.extend(props::planes(&self.models, &self.world, &self.planes));
+            placed.extend(props::rockets(&self.models, &self.world, &self.rockets));
             self.renderer
                 .set_models(&rs.device, &rs.queue, ModelLayer::Dynamic, &mut placed);
             self.scene_dirty = true;
@@ -2233,6 +2237,7 @@ impl eframe::App for StarcityApp {
             self.tick_company(step);
             vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
             craft_moved |= self.step_craft(step);
+            craft_moved |= self.step_rockets(step);
             changed.extend(self.sim.advance(&mut self.world, step));
         }
         self.last_time = now;

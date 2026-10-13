@@ -488,6 +488,7 @@ mod tests {
                     meta.kind
                 );
             }
+            let max_y = if meta.kind == "rocket" { 3.5 } else { max_y };
             assert!(hi.y <= max_y, "{name} is {} tall", hi.y);
             for v in &mesh.vertices {
                 assert!(
