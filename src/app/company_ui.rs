@@ -297,6 +297,8 @@ impl StarcityApp {
     pub(super) fn refresh_assets(&mut self) {
         self.assets = Assets {
             trains: self.trains.list.len() as u32,
+            train_value: self.trains.list.iter().map(|t| t.price).sum(),
+            train_running: self.trains.list.iter().map(|t| t.running).sum(),
             ferries: self.boats.list.len() as u32,
             planes: self.planes.list.len() as u32,
             road_pieces: self.player_roads,

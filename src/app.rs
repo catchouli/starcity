@@ -1,3 +1,4 @@
+mod catalog_ui;
 mod company_ui;
 mod craft;
 mod industry_ui;
@@ -133,6 +134,8 @@ pub struct StarcityApp {
     contract_ends: Vec<(company_ui::Endpoint, company_ui::Endpoint)>,
     /// Seconds since the people near each station were last counted.
     catchment_age: u32,
+    /// The train chosen in the Buy window.
+    buy: crate::catalog::TrainOrder,
     industries: Industries,
     selected_industry: Option<usize>,
     /// Seconds into the current economy month for the industries.
@@ -263,6 +266,7 @@ impl StarcityApp {
             contract_ends: Vec::new(),
             player_roads: 0,
             catchment_age: 0,
+            buy: crate::catalog::TrainOrder::default(),
             industries: Industries::default(),
             selected_industry: None,
             industry_clock: 0.0,
@@ -756,12 +760,19 @@ impl StarcityApp {
                 (tx - fx) * view.x + (tz - fz) * view.z >= 0.0
             };
             let now = ctx.input(|i| i.time);
-            if !self.can_add_vehicle(company::TRAIN) {
+            let order = self.buy;
+            if !self.can_add_vehicle(order.price()) {
                 return changes;
             }
-            match self.trains.spawn(&self.rails, t, forward, 3) {
-                Ok(_) => {
-                    self.company.spend(Item::Vehicles, company::TRAIN);
+            match self.trains.spawn(&self.rails, t, forward, order.cars()) {
+                Ok(id) => {
+                    self.company.spend(Item::Vehicles, order.price());
+                    let train = self.trains.train(id);
+                    train.cargo = order.cargo;
+                    train.max_speed = order.speed();
+                    train.price = order.price();
+                    train.running = order.running();
+                    train.loco = order.loco;
                     self.props_changed = true;
                 }
                 Err(SpawnError::NoTrack) => self.show_message("Trains go on track", now),
@@ -859,7 +870,7 @@ impl StarcityApp {
             self.show_cost(cost, company::terraform_cost(&plan));
         } else if let Some(t) = self.hover_tile {
             match tool {
-                Tool::Train if self.rails.get(t.0, t.1) != 0 => self.show_cost(company::TRAIN, 0),
+                Tool::Train if self.rails.get(t.0, t.1) != 0 => self.show_cost(self.buy.price(), 0),
                 Tool::Signal if matches!(self.signals.click_effect(&self.rails, t), rails::SignalClick::Place) => {
                     self.show_cost(company::SIGNAL, 0)
                 }
@@ -2162,6 +2173,7 @@ impl eframe::App for StarcityApp {
         ui::about_window(&ctx, &mut self.ui.show_about);
         self.train_window(&ctx);
         self.finance_window(&ctx);
+        self.train_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {
             self.params.seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);

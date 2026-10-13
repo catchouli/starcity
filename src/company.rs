@@ -121,6 +121,9 @@ impl Ledger {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Assets {
     pub trains: u32,
+    /// What the trains cost to buy, and cost to run per year.
+    pub train_value: u32,
+    pub train_running: u32,
     pub ferries: u32,
     pub planes: u32,
     pub road_pieces: u32,
@@ -134,7 +137,7 @@ impl Assets {
     /// What the vehicles and infrastructure would cost new; half of the
     /// infrastructure and all of the vehicles count towards company value.
     pub fn value(&self) -> i64 {
-        let vehicles = self.trains * TRAIN + self.ferries * FERRY + self.planes * PLANE;
+        let vehicles = self.train_value + self.ferries * FERRY + self.planes * PLANE;
         let infra = self.road_pieces * ROAD_PIECE
             + self.rail_pieces * RAIL_PIECE
             + self.station_tiles * STATION_TILE
@@ -618,8 +621,7 @@ impl Company {
     fn month(&mut self, assets: &Assets, messages: &mut Vec<String>) {
         if !self.sandbox {
             let running =
-                (assets.trains * TRAIN_RUNNING + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32
-                    / 12.0;
+                (assets.train_running + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32 / 12.0;
             let upkeep = ((assets.road_pieces + assets.rail_pieces) as f32 * PIECE_UPKEEP
                 + (assets.station_tiles * STATION_UPKEEP) as f32 / 3.0
                 + (assets.ports * PORT_UPKEEP + assets.airports * AIRPORT_UPKEEP) as f32)
@@ -907,6 +909,7 @@ mod tests {
         c.borrow();
         let assets = Assets {
             trains: 2,
+            train_running: 1_200,
             ..Default::default()
         };
         let before = c.cash;

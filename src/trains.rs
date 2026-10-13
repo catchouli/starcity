@@ -172,6 +172,12 @@ pub struct Train {
     pub cargo: Cargo,
     /// What happened at the last stop, for the loading animation.
     pub flow: Flow,
+    /// Top speed (tiles per second), set by the locomotive; what it cost and costs to run per year.
+    pub max_speed: f32,
+    pub price: u32,
+    pub running: u32,
+    /// Which locomotive model (an index into `catalog::LOCOS`).
+    pub loco: usize,
     /// Where and when (game seconds) the passengers on board got on, for the fare.
     pub boarded: Option<(f32, f32, f64)>,
     /// Distance to the target station from each segment, and the target and
@@ -404,6 +410,10 @@ impl Trains {
             stopped: false,
             load: 0,
             flow: Flow::default(),
+            max_speed: MAX_SPEED,
+            price: 0,
+            running: 0,
+            loco: 0,
             cargo: Cargo::Passengers,
             boarded: None,
             routing: None,
@@ -570,7 +580,8 @@ impl Trains {
         let arriving = station_stop.is_some_and(|d| d < 1e-3) && t.speed < 0.05;
 
         // Speed: accelerate to cruising speed, or brake to stop at the stop point.
-        let target = stop_at.map_or(MAX_SPEED, |d| (2.0 * BRAKING * d.max(0.0)).sqrt().min(MAX_SPEED));
+        let top = t.max_speed;
+        let target = stop_at.map_or(top, |d| (2.0 * BRAKING * d.max(0.0)).sqrt().min(top));
         t.speed = if t.speed < target {
             (t.speed + ACCELERATION * dt).min(target)
         } else {

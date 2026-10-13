@@ -2,6 +2,7 @@ mod app;
 mod boats;
 mod camera;
 mod cargo;
+mod catalog;
 mod clock;
 mod clouds;
 mod company;
