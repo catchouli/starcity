@@ -105,6 +105,19 @@ impl Kind {
         }
     }
 
+    /// What the council charges to found one (GAME-DESIGN.md §5.4).
+    pub fn fund_cost(self) -> u32 {
+        match self {
+            Kind::ServerFarm => 30_000,
+            Kind::PowerStation => 60_000,
+            Kind::ChipFab => 80_000,
+            Kind::DataCentre => 100_000,
+            Kind::AiCampus => 250_000,
+            k if k.is_primary() => 20_000,
+            _ => 40_000,
+        }
+    }
+
     /// The first year it can be built.
     pub fn from_year(self) -> i32 {
         match self {
@@ -226,6 +239,20 @@ pub struct Industry {
     pub moved_last_month: u32,
     /// How much of its full output a primary industry makes now: it drifts with how well it is served.
     pub production: f32,
+    /// Months in a row its best station has rated it under 15% (or nothing has served it).
+    pub neglected: u32,
+    /// Months left before it shuts, once it has announced it will.
+    pub closing: Option<u32>,
+    pub closed: bool,
+}
+
+/// Something that happened to an industry this month.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event {
+    /// It has been neglected too long and will shut within the year.
+    Closing(usize),
+    /// It has shut: its ground is free and a replacement should be founded.
+    Closed(usize),
 }
 
 impl Industry {
@@ -276,6 +303,10 @@ pub struct Industries {
     drift_rng: u64,
 }
 
+/// A primary industry closes after this many months of poor service, if its output has shrunk below this.
+pub const CLOSE_AFTER_MONTHS: u32 = 24;
+pub const CLOSE_BELOW: f32 = 0.5;
+
 /// The mark industries leave on `Towns::occupied`.
 pub const OCCUPIED: u8 = 3;
 
@@ -285,7 +316,7 @@ impl Industries {
     }
 
     pub fn get(&self, id: usize) -> Option<&Industry> {
-        self.list.get(id)
+        self.list.get(id).filter(|i| !i.closed)
     }
 
     pub fn add(&mut self, kind: Kind, tile: (i32, i32)) -> usize {
@@ -299,6 +330,9 @@ impl Industries {
             made_last_month: 0,
             moved_last_month: 0,
             production: 1.0,
+            neglected: 0,
+            closing: None,
+            closed: false,
         };
         for t in ind.tiles() {
             self.by_tile.insert(t, id);
@@ -307,11 +341,22 @@ impl Industries {
         id
     }
 
+    /// A closed industry's ground is free again: returns its tiles.
+    pub fn release(&mut self, id: usize) -> Vec<(i32, i32)> {
+        let tiles = self.list[id].tiles();
+        for t in &tiles {
+            if self.by_tile.get(t) == Some(&id) {
+                self.by_tile.remove(t);
+            }
+        }
+        tiles
+    }
+
     /// Industries within a station's catchment.
     pub fn near(&self, tiles: &[(i32, i32)]) -> Vec<usize> {
         self.list
             .iter()
-            .filter(|i| i.near(tiles, CATCHMENT))
+            .filter(|i| !i.closed && i.near(tiles, CATCHMENT))
             .map(|i| i.id)
             .collect()
     }
@@ -330,7 +375,7 @@ impl Industries {
         let mut sources = Vec::new();
         let mut consumers = Vec::new();
         let mut consumer_ids = Vec::new();
-        for ind in &self.list {
+        for ind in self.list.iter().filter(|i| !i.closed) {
             let mw = ind.kind.power_mw();
             if mw < 0.0 {
                 // A power station makes power in proportion to the coal it has to burn.
@@ -355,13 +400,36 @@ impl Industries {
     /// Once a month each primary industry has a small chance of a production change: up (3% to 15%)
     /// with 70% odds when its best station rates over 60%, down otherwise (GAME-DESIGN.md §5.2).
     /// `ratings[i]` is the best rating of the stations that serve industry `i`.
-    pub fn drift(&mut self, ratings: &[f32]) {
+    pub fn drift(&mut self, ratings: &[f32]) -> Vec<Event> {
+        let mut events = Vec::new();
         if self.drift_rng == 0 {
             self.drift_rng = 0x9E37_79B9_7F4A_7C15;
         }
         for ind in &mut self.list {
-            if !ind.kind.is_primary() {
+            if !ind.kind.is_primary() || ind.closed {
                 continue;
+            }
+            // Neglect: two years of poor service and a shrunken output, and it announces it is closing.
+            if ratings.get(ind.id).is_some_and(|&r| r < 0.15) {
+                ind.neglected += 1;
+            } else {
+                ind.neglected = 0;
+                ind.closing = None;
+            }
+            match ind.closing {
+                Some(0) | Some(1) => {
+                    ind.closing = None;
+                    ind.closed = true;
+                    ind.made_last_month = 0;
+                    events.push(Event::Closed(ind.id));
+                    continue;
+                }
+                Some(n) => ind.closing = Some(n - 1),
+                None if ind.neglected >= CLOSE_AFTER_MONTHS && ind.production < CLOSE_BELOW => {
+                    ind.closing = Some(12);
+                    events.push(Event::Closing(ind.id));
+                }
+                None => {}
             }
             let mut next = || {
                 self.drift_rng ^= self.drift_rng << 13;
@@ -378,6 +446,7 @@ impl Industries {
             ind.production = if up { ind.production * (1.0 + step) } else { ind.production * (1.0 - step) }
                 .clamp(0.1, 3.0);
         }
+        events
     }
 
     /// One economy month. Power stations burn coal; secondaries turn stock into
@@ -386,7 +455,7 @@ impl Industries {
     pub fn month(&mut self) -> Vec<(usize, Cargo, u32)> {
         let grid = self.grid();
         let mut made = Vec::new();
-        for ind in &mut self.list {
+        for ind in self.list.iter_mut().filter(|i| !i.closed) {
             ind.power = grid[ind.id];
             let efficiency = if ind.kind.power_mw() > 0.0 {
                 power::efficiency(ind.power)
@@ -638,16 +707,30 @@ impl Industries {
         seed: u32,
         year: i32,
     ) -> Vec<(i32, i32)> {
-        let mut moved = Vec::new();
         let size = world.size_x as i32;
         // Counts for the default 512 x 512 map, scaled by area.
         let scale = (size * size) as f32 / (512.0 * 512.0);
         let want = |n: f32| ((n * scale).round() as usize).max(1);
         let plan: Vec<(Kind, usize)> = Kind::ALL
             .iter()
-            .filter(|k| k.available(year) && !self.list.iter().any(|i| i.kind == **k))
+            .filter(|k| k.available(year) && !self.list.iter().any(|i| i.kind == **k && !i.closed))
             .map(|&k| (k, want(k.count())))
             .collect();
+        self.found_plan(world, towns, roads, rails, seed, plan)
+    }
+
+    /// Founds `count` of each kind in `plan`, wherever suits best.
+    pub fn found_plan(
+        &mut self,
+        world: &mut World,
+        towns: &mut Towns,
+        roads: &Layer,
+        rails: &Layer,
+        seed: u32,
+        plan: Vec<(Kind, usize)>,
+    ) -> Vec<(i32, i32)> {
+        let mut moved = Vec::new();
+        let size = world.size_x as i32;
         if plan.is_empty() {
             return moved;
         }
@@ -919,5 +1002,37 @@ mod tests {
         }
         assert!(served / 20.0 > 1.5, "served {}", served / 20.0);
         assert!(neglected / 20.0 < 0.8, "neglected {}", neglected / 20.0);
+    }
+
+    #[test]
+    fn a_neglected_shrunken_mine_announces_then_closes_and_frees_its_ground() {
+        let mut ind = Industries::default();
+        let a = ind.add(Kind::CoalMine, (0, 0));
+        let b = ind.add(Kind::CoalMine, (50, 0));
+        ind.list[a].production = 0.3;
+        let (mut closing, mut closed) = (None, None);
+        for month in 0..60 {
+            for e in ind.drift(&[0.0, 0.9]) {
+                match e {
+                    Event::Closing(id) => closing = closing.or(Some((month, id))),
+                    Event::Closed(id) => closed = closed.or(Some((month, id))),
+                }
+            }
+        }
+        let (m1, id1) = closing.expect("announced");
+        let (m2, id2) = closed.expect("closed");
+        assert_eq!((id1, id2), (a, a));
+        assert!(m1 >= CLOSE_AFTER_MONTHS as usize - 1 && m2 - m1 >= 11, "{m1} {m2}");
+        assert!(!ind.list[b].closed, "a served mine never closes");
+        assert!(ind.get(a).is_none() && ind.near(&[(1, 1)]).is_empty());
+        ind.release(a);
+        assert_eq!(ind.at((1, 1)), None);
+        // Starting to be served again cancels the closure.
+        let c = ind.add(Kind::Forest, (90, 0));
+        ind.list[c].production = 0.2;
+        for _ in 0..30 {
+            ind.drift(&[0.0, 0.9, 0.0, 0.0][..c.min(3) + 1]);
+        }
+        assert!(ind.list[c].closing.is_some() || ind.list[c].closed);
     }
 }

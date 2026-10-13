@@ -168,7 +168,7 @@ pub struct Level {
 }
 
 /// Levels 0 to 2 are playable; the rest arrive with the systems they unlock.
-pub const LEVELS: [Level; 3] = [
+pub const LEVELS: [Level; 4] = [
     Level {
         name: "Garage",
         cost: 0,
@@ -199,11 +199,21 @@ pub const LEVELS: [Level; 3] = [
         vehicles: 150,
         unlocks: "Ports, ferries, airports and planes; a loan of up to £500,000; 150 vehicles",
     },
+    Level {
+        name: "Corporate tower",
+        cost: 150_000,
+        income: 150_000,
+        value: 1_000_000,
+        town: 5_000,
+        loan: 1_000_000,
+        vehicles: 400,
+        unlocks: "A loan of up to £1,000,000, up to 400 vehicles and yearly goals",
+    },
 ];
 
 /// Levels that exist in the design but are not built yet.
 pub const LATER_LEVELS: &str =
-    "Corporate tower, Data campus, Glass spire and the AI Citadel come with the systems they unlock.";
+    "The Data campus, Glass spire and the AI Citadel come with the systems they unlock.";
 
 /// What moving the headquarters costs: a flat fee and half of what the building has cost so far.
 /// Only from the Regional office on, so it is a late choice and never the first thing to try.
@@ -355,6 +365,10 @@ pub struct Company {
     pub delivered: [u32; cargo::COUNT],
     /// What the compute programs are doing for the company this month.
     pub effects: crate::compute::Effects,
+    /// This year's goals (GAME-DESIGN.md §9), and what had been delivered when the year began.
+    pub goals: Vec<Goal>,
+    goals_year: i32,
+    goal_base: [u32; cargo::COUNT],
 }
 
 impl Company {
@@ -374,6 +388,9 @@ impl Company {
             months_in_red: 0,
             bankrupt: false,
             effects: Default::default(),
+            goals: Vec::new(),
+            goals_year: 0,
+            goal_base: [0; cargo::COUNT],
             contracts: Vec::new(),
             delivered: [0; cargo::COUNT],
         }
@@ -811,6 +828,91 @@ impl Company {
     }
 }
 
+/// A yearly goal: a suggestion that pays a small bonus, never forced (GAME-DESIGN.md §9).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GoalKind {
+    /// Deliver this many units of a cargo during the year.
+    Carry(cargo::Cargo, u32),
+    /// Company value at least this.
+    Value(i64),
+    /// Serve a town of this many people with a station.
+    Town(u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Goal {
+    pub kind: GoalKind,
+    pub done: bool,
+}
+
+pub const GOAL_REWARD: u32 = 5_000;
+
+impl Company {
+    /// Three goals for the year, scaled to how far the company has got. Deterministic in the year.
+    fn new_goals(&self, year: i32, assets: &Assets, facts: &Facts) -> Vec<Goal> {
+        use cargo::Cargo;
+        let n = (year - 2000).clamp(0, 50) as u32;
+        let freight = [Cargo::Coal, Cargo::IronOre, Cargo::Timber, Cargo::Grain, Cargo::Steel, Cargo::Goods]
+            [n as usize % 6];
+        let third = if year % 2 == 0 {
+            let v = self.value(assets);
+            GoalKind::Value(((v as f64 * 1.5) as i64).max(100_000) / 25_000 * 25_000)
+        } else {
+            GoalKind::Town((facts.town_served * 3 / 2).max(1_000) / 100 * 100)
+        };
+        [
+            GoalKind::Carry(Cargo::Passengers, 1_000 + 500 * n),
+            GoalKind::Carry(freight, 300 + 100 * n),
+            third,
+        ]
+        .into_iter()
+        .map(|kind| Goal { kind, done: false })
+        .collect()
+    }
+
+    /// How far along a goal is, as (done so far, target, text).
+    pub fn goal_progress(&self, g: &Goal, assets: &Assets, facts: &Facts) -> (String, bool) {
+        match g.kind {
+            GoalKind::Carry(c, n) => {
+                let have = self.delivered[c.index()].saturating_sub(self.goal_base[c.index()]);
+                (
+                    format!("Deliver {n} {} this year ({})", c.name().to_lowercase(), have.min(n)),
+                    have >= n,
+                )
+            }
+            GoalKind::Value(v) => (format!("Reach a company value of {}", pounds(v)), self.value(assets) >= v),
+            GoalKind::Town(p) => (
+                format!("Serve a town of {p} people with a station"),
+                facts.town_served >= p,
+            ),
+        }
+    }
+
+    /// Once a second or so: new goals when the year turns, and bonuses for the ones just met.
+    /// Goals start with the Depot office.
+    pub fn update_goals(&mut self, year: i32, assets: &Assets, facts: &Facts) -> Vec<String> {
+        let mut messages = Vec::new();
+        if self.sandbox || self.hq_level < 1 {
+            return messages;
+        }
+        if self.goals_year != year {
+            self.goals_year = year;
+            self.goal_base = self.delivered;
+            self.goals = self.new_goals(year, assets, facts);
+        }
+        for i in 0..self.goals.len() {
+            let g = self.goals[i];
+            let (text, met) = self.goal_progress(&g, assets, facts);
+            if met && !g.done {
+                self.goals[i].done = true;
+                self.earn(Item::Contracts, GOAL_REWARD);
+                messages.push(format!("Goal met: {}. The council adds {}.", text.to_lowercase(), pounds(GOAL_REWARD as i64)));
+            }
+        }
+        messages
+    }
+}
+
 /// A suggestion for the Next Step panel.
 #[derive(Clone, Debug)]
 pub struct NextStep {
@@ -1052,5 +1154,38 @@ mod tests {
         full.month(&assets, &mut Vec::new());
         cut.month(&assets, &mut Vec::new());
         assert!(cut.ledger.get(Item::Running) < full.ledger.get(Item::Running));
+    }
+
+    #[test]
+    fn yearly_goals_pay_once_and_renew_with_the_year() {
+        let mut c = Company::new(2001);
+        let (assets, facts) = (Assets::default(), Facts::default());
+        assert!(c.update_goals(2001, &assets, &facts).is_empty(), "goals begin with the Depot office");
+        c.hq_level = 1;
+        assert!(c.update_goals(2001, &assets, &facts).is_empty());
+        assert_eq!(c.goals.len(), 3);
+        let GoalKind::Carry(cargo::Cargo::Passengers, n) = c.goals[0].kind else { panic!() };
+        c.delivered[cargo::Cargo::Passengers.index()] = n;
+        let before = c.cash;
+        assert_eq!(c.update_goals(2001, &assets, &facts).len(), 1);
+        assert_eq!(c.cash - before, GOAL_REWARD as i64);
+        assert!(c.update_goals(2001, &assets, &facts).is_empty(), "paid once");
+        // A new year, new goals counted from what has been delivered by then.
+        c.update_goals(2002, &assets, &facts);
+        assert!(!c.goals[0].done);
+        let (text, met) = c.goal_progress(&c.goals[0].clone(), &assets, &facts);
+        assert!(!met, "{text}");
+    }
+
+    #[test]
+    fn the_corporate_tower_is_a_real_next_level() {
+        let mut c = Company::new(2010);
+        c.hq_level = 2;
+        let reqs = c.requirements(&Assets::default(), &Facts::default());
+        assert!(reqs.len() >= 4 && reqs.iter().any(|r| r.text.contains("5000")));
+        assert_eq!(level(3).vehicles, 400);
+        c.hq_level = 3;
+        assert!(c.requirements(&Assets::default(), &Facts::default()).is_empty());
+        assert!(relocation_cost(3) > relocation_cost(2));
     }
 }

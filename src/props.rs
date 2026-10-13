@@ -150,7 +150,7 @@ pub fn hq(models: &Models, world: &World, hq: &crate::hq::Hq, level: u8) -> Plac
 /// Mines, forests, farms, power stations, mills and the factory.
 pub fn industries(models: &Models, world: &World, industries: &crate::industry::Industries) -> Placed {
     let mut out = Vec::with_capacity(industries.list.len());
-    for i in &industries.list {
+    for i in industries.list.iter().filter(|i| !i.closed) {
         let Some(model) = models.pick(Role::Industry, i.kind.key(), 2000, 0) else {
             continue;
         };

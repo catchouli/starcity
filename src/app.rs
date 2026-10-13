@@ -224,6 +224,10 @@ impl StarcityApp {
                 show_compute: crate::devtools::DevTools::window("compute"),
                 #[cfg(target_arch = "wasm32")]
                 show_compute: false,
+                #[cfg(not(target_arch = "wasm32"))]
+                show_fund: crate::devtools::DevTools::window("fund"),
+                #[cfg(target_arch = "wasm32")]
+                show_fund: false,
                 show_next_step: true,
                 assistant_expanded: true,
                 go_hq: false,
@@ -2226,6 +2230,7 @@ impl eframe::App for StarcityApp {
         self.train_window(&ctx);
         self.finance_window(&ctx);
         self.compute_window(&ctx);
+        self.fund_window(&ctx);
         self.train_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {

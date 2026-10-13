@@ -28,7 +28,9 @@ impl StarcityApp {
                 })
             })
             .collect();
-        self.industries.drift(&ratings);
+        let events = self.industries.drift(&ratings);
+        self.industry_events(events);
+        self.power_towns();
         let made = self.industries.month();
         self.compute_month();
         let mut moved = vec![0u32; self.industries.list.len()];
@@ -44,6 +46,131 @@ impl StarcityApp {
         }
         for (ind, m) in self.industries.list.iter_mut().zip(moved) {
             ind.moved_last_month = m;
+        }
+    }
+
+    /// Industries that announce they are closing, or have shut: say so, free the ground, and found a
+    /// replacement somewhere else so there is always a new place to build (GAME-DESIGN.md §5.2).
+    fn industry_events(&mut self, events: Vec<crate::industry::Event>) {
+        use crate::industry::Event;
+        for e in events {
+            let now = self.clock.days();
+            match e {
+                Event::Closing(id) => {
+                    let ind = &self.industries.list[id];
+                    let town = self
+                        .towns
+                        .nearest((ind.centre().0 as i32, ind.centre().1 as i32), 80)
+                        .map(|t| format!(" near {}", self.towns.list[t as usize].name))
+                        .unwrap_or_default();
+                    let text = format!("{}{town} is closing: nothing serves it any more", ind.kind.name());
+                    self.show_message(&text, now + 5.0);
+                }
+                Event::Closed(id) => {
+                    let kind = self.industries.list[id].kind;
+                    for t in self.industries.release(id) {
+                        self.towns.occupied.set(t.0, t.1, 0);
+                    }
+                    if self.selected_industry == Some(id) {
+                        self.selected_industry = None;
+                    }
+                    let moved = self.industries.found_plan(
+                        &mut self.world,
+                        &mut self.towns,
+                        &self.roads,
+                        &self.rails,
+                        self.params.seed ^ id as u32,
+                        vec![(kind, 1)],
+                    );
+                    self.levelled_pending.extend(moved);
+                    self.static_changed = true;
+                    self.show_message(&format!("A {} has shut. A new one opens elsewhere.", kind.name().to_lowercase()), now + 5.0);
+                }
+            }
+        }
+    }
+
+    /// Towns with a working power station within 40 tiles grow a little faster (GAME-DESIGN.md §5.5).
+    fn power_towns(&mut self) {
+        let stations: Vec<(f32, f32)> = self
+            .industries
+            .list
+            .iter()
+            .filter(|i| !i.closed && i.kind == crate::industry::Kind::PowerStation && i.made_last_month > 0)
+            .map(|i| i.centre())
+            .collect();
+        for t in &mut self.towns.list {
+            t.powered = stations
+                .iter()
+                .any(|s| ((s.0 - t.centre.0 as f32).powi(2) + (s.1 - t.centre.1 as f32).powi(2)).sqrt() <= 40.0);
+        }
+    }
+
+    /// Pays the council to found an industry on the best site the map has.
+    pub(super) fn fund_industry(&mut self, kind: crate::industry::Kind) {
+        let now = self.clock.days();
+        if !self.company.sandbox && self.company.hq_level < 2 {
+            self.show_message("Funding industries needs the Regional office", now);
+            return;
+        }
+        let cost = kind.fund_cost();
+        if !self.company.can_afford(self.company.build_price(cost)) {
+            self.show_message(&format!("Not enough money: {} needed", super::company_ui::money(cost as i64)), now);
+            return;
+        }
+        let before = self.industries.list.len();
+        let moved = self.industries.found_plan(
+            &mut self.world,
+            &mut self.towns,
+            &self.roads,
+            &self.rails,
+            self.params.seed ^ (before as u32).wrapping_mul(2654435761),
+            vec![(kind, 1)],
+        );
+        if self.industries.list.len() == before {
+            self.show_message("The council can't find a suitable site for it", now);
+            return;
+        }
+        self.company.spend(crate::company::Item::Construction, cost);
+        self.levelled_pending.extend(moved);
+        self.static_changed = true;
+        self.selected_industry = Some(before);
+        let (x, z) = self.industries.list[before].centre();
+        self.camera.focus = glam::Vec3::new(x, self.world.height_at(x, z), z);
+        self.scene_dirty = true;
+        self.show_message(&format!("The council has founded a {}", kind.name().to_lowercase()), now + 4.0);
+    }
+
+    /// The Fund an industry window: what can be founded this year, and for how much.
+    pub(super) fn fund_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.ui.show_fund;
+        let year = self.year;
+        let cash = self.company.cash;
+        let (sandbox, level) = (self.company.sandbox, self.company.hq_level);
+        let mut chosen = None;
+        win95::window(ctx, "Fund an industry", &mut open, egui::pos2(300.0, 120.0), |ui| {
+            ui.set_width(300.0);
+            ui.label("The council founds it on the best site the map has. You then connect it.");
+            if !sandbox && level < 2 {
+                ui.label(egui::RichText::new("Needs the Regional office.").color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));
+            }
+            ui.separator();
+            for kind in crate::industry::Kind::ALL.into_iter().filter(|k| k.available(year)) {
+                let cost = kind.fund_cost();
+                ui.horizontal(|ui| {
+                    ui.label(kind.name());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let label = super::company_ui::money(cost as i64);
+                        if ui.add_enabled(cash >= cost as i64, egui::Button::new(label)).clicked() {
+                            chosen = Some(kind);
+                        }
+                    });
+                });
+            }
+        });
+        self.ui.show_fund = open;
+        if let Some(kind) = chosen {
+            self.fund_industry(kind);
         }
     }
 

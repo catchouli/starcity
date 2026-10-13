@@ -680,6 +680,18 @@ hq_depot_office("buildings/hq_1_depot_office")
 hq_regional_office("buildings/hq_2_regional_office")
 
 
+def hq_corporate_tower(name):
+    parts = [box("Plaza", mat("Plaza", "#b9b9bf"), (0, 0.015, 0), (3.9, 0.03, 3.9)),
+             box("Podium", mat("PodiumWall", "#9aa0ab", metallic=0.3, roughness=0.35), (0, 0.45, 0), (3.2, 0.9, 3.0)),
+             box("Tower", mat("TowerGlass", "#6f8fb8", metallic=0.6, roughness=0.15), (-0.2, 2.6, -0.2), (1.7, 3.6, 1.7)),
+             box("Crown", STEEL, (-0.2, 4.45, -0.2), (1.8, 0.1, 1.8)), cyl("Mast", STEEL, (-0.2, 4.9, -0.2), 0.04, 0.9, seg=6),
+             box("Entrance", GLOW_WARM, (0, 0.35, 1.52), (1.2, 0.4, 0.03)), box("SignBoard", mat("SignBoard", "#2a4f9e"), (0, 1.0, 1.52), (1.6, 0.18, 0.03))]
+    model(name, "hq", "hq_3", parts, **{"from": 1900, "to": 2200, "level": 3, "tiles_x": 4, "tiles_z": 4, "weight": 1})
+
+
+hq_corporate_tower("buildings/hq_3_corporate_tower")
+
+
 # --- Industries (GAME-DESIGN.md 5): centred on their footprint, 3 x 3 or 4 x 4 tiles ------------
 
 

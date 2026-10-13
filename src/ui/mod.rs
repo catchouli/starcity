@@ -106,6 +106,7 @@ pub struct UiState {
     pub show_finance: bool,
     pub show_hq: bool,
     pub show_compute: bool,
+    pub show_fund: bool,
     /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
     pub show_next_step: bool,
     /// The Assistant shows its whole checklist, not just a one-line pill.
@@ -169,6 +170,10 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
             }
             if ui.button("Compute").clicked() {
                 s.show_compute = true;
+                ui.close();
+            }
+            if ui.button("Fund an industry").clicked() {
+                s.show_fund = true;
                 ui.close();
             }
         });

@@ -118,8 +118,8 @@ impl StarcityApp {
                 Cargo::IronOre,
             ),
         ] {
-            for a in industries.iter().filter(|i| i.kind == maker) {
-                for b in industries.iter().filter(|i| i.kind == user) {
+            for a in industries.iter().filter(|i| i.kind == maker && !i.closed) {
+                for b in industries.iter().filter(|i| i.kind == user && !i.closed) {
                     let d = dist(a.centre(), b.centre());
                     // Close to home, and a worthwhile distance apart.
                     let home_d = dist(a.centre(), centre(home));
@@ -338,11 +338,32 @@ impl StarcityApp {
                 Some((&(a, b), cargo)) => self.link_facts(a, b, cargo),
                 None => company::LinkFacts::default(),
             };
-        let messages = self.company.update_contract(&self.link, &self.facts);
+        let mut messages = self.company.update_contract(&self.link, &self.facts);
+        messages.extend(self.company.update_goals(self.year, &self.assets, &self.facts));
         let now = self.last_time;
         for m in messages {
             self.show_message(&m, now + 4.0);
         }
+    }
+
+    /// A town the company serves that has grown to want food or goods and hasn't got it: the Assistant says so.
+    fn hungry_town_hint(&self) -> Option<String> {
+        if self.company.sandbox || self.company.hq_level < 1 {
+            return None;
+        }
+        self.towns
+            .list
+            .iter()
+            .filter(|t| t.pop > crate::towns::WANTS_FOOD && t.served > 1.0)
+            .find_map(|t| {
+                if t.food <= 0.0 {
+                    Some(format!("{} has grown to {} people and wants food. Haul some from a food plant to a station in town.", t.name, t.pop))
+                } else if t.pop > crate::towns::WANTS_GOODS && t.goods <= 0.0 {
+                    Some(format!("{} wants goods now. A factory's goods delivered to a station in town will help it grow.", t.name))
+                } else {
+                    None
+                }
+            })
     }
 
     /// The rail route for the preview, searched again only when the drag or the map changes.
@@ -644,7 +665,17 @@ impl StarcityApp {
         if self.ui.assistant_expanded {
             self.assistant_attention = false;
         }
-        let hint = self.company.stuck_hint(&self.facts);
+        let hint = self
+            .company
+            .stuck_hint(&self.facts)
+            .map(str::to_string)
+            .or_else(|| self.hungry_town_hint());
+        let goals: Vec<(String, bool)> = self
+            .company
+            .goals
+            .iter()
+            .map(|g| (self.company.goal_progress(g, &self.assets, &self.facts).0, g.done))
+            .collect();
         let contract = self
             .company
             .contract()
@@ -701,6 +732,13 @@ impl StarcityApp {
                         ));
                         for r in &reqs {
                             ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+                        }
+                    }
+                    if !goals.is_empty() {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("Goals this year").strong());
+                        for (text, done) in &goals {
+                            ui.label(format!("{} {text}", if *done { "[x]" } else { "[ ]" }));
                         }
                     }
                     if let Some(h) = hint {

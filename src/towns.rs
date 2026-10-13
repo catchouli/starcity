@@ -31,6 +31,8 @@ pub struct Town {
     /// Seconds of food and of goods the town has left in its shops.
     pub food: f32,
     pub goods: f32,
+    /// A working power station is within 40 tiles: a little faster growth.
+    pub powered: bool,
 }
 
 /// Above this many people a town wants food, and above the second it wants goods too (§5.5).
@@ -43,7 +45,7 @@ impl Town {
     /// How fast it grows compared with a town that has what it wants: slowed without food or goods,
     /// and a little faster while both are on the shelves.
     pub fn growth_factor(&self) -> f32 {
-        let mut f = 1.0;
+        let mut f = if self.powered { 1.15 } else { 1.0 };
         if self.pop > WANTS_FOOD {
             f *= if self.food > 0.0 { 1.25 } else { 0.4 };
         }
@@ -232,6 +234,7 @@ impl Towns {
             pop: 0,
             food: 0.0,
             goods: 0.0,
+            powered: false,
         });
         for dir in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let len = 3 + self.below(4) as i32;
@@ -735,6 +738,7 @@ mod tests {
             pop,
             food: 0.0,
             goods: 0.0,
+            powered: false,
         }
     }
 
