@@ -80,7 +80,10 @@ impl StarcityApp {
                     (lo, hi) = ((lo.0.min(x), lo.1.min(z)), (hi.0.max(x), hi.1.max(z)));
                 }
                 if plan.blocked.is_none() {
-                    self.show_cost(plan.cost(), plan.terraform_steps * crate::network::TERRAFORM_COST);
+                    self.show_cost(
+                        self.company.build_price(plan.cost()),
+                        self.company.build_price(plan.terraform_steps * crate::network::TERRAFORM_COST),
+                    );
                 }
                 self.site_hint = Some(match plan.blocked {
                     Some(why) => why.message(kind).to_string(),

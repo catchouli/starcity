@@ -467,6 +467,7 @@ impl StarcityApp {
             Item::Freight
         };
         let fare = crate::cargo::fare(cargo, units, tiles, seconds);
+        let fare = (fare as f32 * (1.0 + self.company.effects.fare_bonus)).round() as u32;
         self.company.earn(item, fare);
         fare
     }

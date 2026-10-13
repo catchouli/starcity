@@ -65,6 +65,114 @@ pub fn tier(total: f64) -> usize {
     TIERS.iter().take_while(|&&(_, t)| total >= t).count()
 }
 
+/// What the company's compute is spent on (GAME-DESIGN.md §5.8). Whatever isn't given to a program
+/// is sold as hosting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Program {
+    Analytics,
+    Optimiser,
+    Design,
+}
+
+pub const PROGRAMS: [Program; 3] = [Program::Analytics, Program::Optimiser, Program::Design];
+
+impl Program {
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Program::Analytics => "Route analytics",
+            Program::Optimiser => "Fleet optimiser",
+            Program::Design => "Generative design",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Program::Analytics => "Better timetables and loading: every fare pays more.",
+            Program::Optimiser => "Smoother running and fewer queues: lower running costs.",
+            Program::Design => "Plans cheaper cuts and routes: lower construction costs.",
+        }
+    }
+
+    pub fn from_year(self) -> i32 {
+        match self {
+            Program::Analytics => 2003,
+            Program::Optimiser => 2015,
+            Program::Design => 2026,
+        }
+    }
+
+    /// The most it can do (a fraction) at full strength in `year`: it starts as a curiosity and
+    /// grows with the era.
+    pub fn strongest(self, year: i32) -> f32 {
+        let (lo, hi, span) = match self {
+            Program::Analytics => (0.03, 0.12, 22.0),
+            Program::Optimiser => (0.05, 0.25, 20.0),
+            Program::Design => (0.10, 0.50, 14.0),
+        };
+        let t = ((year - self.from_year()) as f32 / span).clamp(0.0, 1.0);
+        lo + (hi - lo) * t
+    }
+
+    /// CU a month that it takes to run it properly on a company of this size.
+    pub fn need(self, year: i32, fleet: u32) -> f64 {
+        let base = match self {
+            Program::Analytics => 300.0,
+            Program::Optimiser => 500.0,
+            Program::Design => 800.0,
+        };
+        base * (1.0 + fleet as f64) * efficiency(year as f64 + 0.5).powf(0.8)
+    }
+
+    /// How much of its strongest effect `assigned` CU a month buys: diminishing returns, so a
+    /// whole month's compute on one program gives about 60% more than a third of it.
+    pub fn effect(self, year: i32, assigned: f64, fleet: u32) -> f32 {
+        if year < self.from_year() {
+            return 0.0;
+        }
+        let used = (assigned / self.need(year, fleet)).max(0.0);
+        self.strongest(year) * (1.0 - (-1.2 * used).exp()) as f32
+    }
+}
+
+/// How the monthly compute is shared: a fraction for each program, the rest sold as hosting.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Allocation {
+    pub share: [f32; 3],
+}
+
+impl Allocation {
+    pub fn hosting(&self) -> f32 {
+        (1.0 - self.share.iter().sum::<f32>()).max(0.0)
+    }
+
+    /// Sets one program's share, never taking more than is left after the others.
+    pub fn set(&mut self, p: Program, value: f32) {
+        let others: f32 = self.share.iter().sum::<f32>() - self.share[p.index()];
+        self.share[p.index()] = value.clamp(0.0, (1.0 - others).max(0.0));
+    }
+}
+
+/// What the running programs do to the company this month.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Effects {
+    pub fare_bonus: f32,
+    pub running_discount: f32,
+    pub build_discount: f32,
+}
+
+pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Effects {
+    let e = |p: Program| p.effect(year, monthly_cu * alloc.share[p.index()] as f64, fleet);
+    Effects {
+        fare_bonus: e(Program::Analytics),
+        running_discount: e(Program::Optimiser),
+        build_discount: e(Program::Design),
+    }
+}
+
 const HISTORY: usize = 120;
 
 #[derive(Clone, Debug, Default)]
@@ -141,5 +249,32 @@ mod tests {
         }
         assert_eq!(c.history.len(), HISTORY);
         assert!((c.history[0] - 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn programs_have_diminishing_returns_and_grow_with_the_era() {
+        let p = Program::Analytics;
+        let need = p.need(2010, 4);
+        let third = p.effect(2010, need / 3.0, 4);
+        let full = p.effect(2010, need, 4);
+        let double = p.effect(2010, need * 2.0, 4);
+        assert!(third > 0.0 && full > third && double > full);
+        assert!(double < 2.0 * full, "diminishing");
+        assert!(full / p.strongest(2010) > 0.6, "about 70% of the ceiling at the need");
+        assert_eq!(p.effect(2000, 1e9, 4), 0.0, "not unlocked yet");
+        assert!(Program::Design.strongest(2045) > 4.0 * Program::Analytics.strongest(2045));
+        assert!(Program::Analytics.strongest(2030) > Program::Analytics.strongest(2005));
+    }
+
+    #[test]
+    fn allocation_never_gives_out_more_than_everything() {
+        let mut a = Allocation::default();
+        assert_eq!(a.hosting(), 1.0);
+        a.set(Program::Analytics, 0.7);
+        a.set(Program::Optimiser, 0.7);
+        assert!((a.share[1] - 0.3).abs() < 1e-6);
+        assert!(a.hosting().abs() < 1e-6);
+        a.set(Program::Analytics, 0.1);
+        assert!((a.hosting() - 0.6).abs() < 1e-6);
     }
 }

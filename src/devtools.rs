@@ -2,6 +2,7 @@
 //!
 //! - `STARCITY_SCREENSHOT=out.png`: render a few frames, save a screenshot, exit.
 //!   `STARCITY_SHOT_FRAME=300` waits that many frames first (default 10).
+//! - `STARCITY_WINDOW=compute`: open the Compute window at startup.
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
 //! - `STARCITY_HOUR=22`: the game starts at this hour of the day (default 8).
@@ -46,6 +47,11 @@ impl DevTools {
 
     pub fn zoom() -> Option<f32> {
         std::env::var("STARCITY_ZOOM").ok()?.parse().ok()
+    }
+
+    /// `STARCITY_WINDOW=compute`: open that window at startup.
+    pub fn window(name: &str) -> bool {
+        std::env::var("STARCITY_WINDOW").is_ok_and(|v| v == name)
     }
 
     pub fn show_debug() -> bool {

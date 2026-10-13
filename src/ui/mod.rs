@@ -105,6 +105,7 @@ pub struct UiState {
     pub show_about: bool,
     pub show_finance: bool,
     pub show_hq: bool,
+    pub show_compute: bool,
     /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
     pub show_next_step: bool,
     /// The Assistant shows its whole checklist, not just a one-line pill.
@@ -166,6 +167,10 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
                 s.show_hq = true;
                 ui.close();
             }
+            if ui.button("Compute").clicked() {
+                s.show_compute = true;
+                ui.close();
+            }
         });
         ui.menu_button("Help", |ui| {
             ui.checkbox(&mut s.show_next_step, "Next step panel");
@@ -174,7 +179,12 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
             }
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            win95::compute_pane(ui, 270.0, meter.total, meter.rate, meter.spark).on_hover_text(meter.tip);
+            if win95::compute_pane(ui, 270.0, meter.total, meter.rate, meter.spark)
+                .on_hover_text(meter.tip)
+                .clicked()
+            {
+                s.show_compute = true;
+            }
         });
     });
     actions

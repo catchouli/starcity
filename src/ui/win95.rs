@@ -264,7 +264,7 @@ pub fn money_pane(ui: &mut Ui, width: f32, text: &str, in_the_red: bool) -> Resp
 
 /// The Compute meter: the running total, the rate, and a log-axis sparkline of the last months.
 pub fn compute_pane(ui: &mut Ui, width: f32, total: &str, rate: &str, spark: &[f32]) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::click());
     let p = ui.painter();
     edge(p, rect, SHADOW, HIGHLIGHT);
     let ink = Color32::from_rgb(0x10, 0x40, 0x90);

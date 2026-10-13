@@ -72,8 +72,10 @@ impl StarcityApp {
             }
         }
         self.company
-            .earn(crate::company::Item::Hosting, (batches * crate::compute::hosting_per_batch(self.year) as f64) as u32);
-        if let Some(tier) = self.compute.month(cu, crate::company::MONTH_SECONDS as f64) {
+            .earn(crate::company::Item::Hosting, (batches * self.compute_alloc.hosting() as f64 * crate::compute::hosting_per_batch(self.year) as f64) as u32);
+        let tier_reached = self.compute.month(cu, crate::company::MONTH_SECONDS as f64);
+        self.refresh_effects();
+        if let Some(tier) = tier_reached {
             let name = crate::compute::TIERS[tier - 1].0;
             let now = self.clock.days();
             self.show_message(&format!("Compute milestone: {name} ({})", crate::compute::show(self.compute.total)), now);

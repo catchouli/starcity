@@ -353,6 +353,8 @@ pub struct Company {
     pub contracts: Vec<Contract>,
     /// Units delivered in all, by cargo.
     pub delivered: [u32; cargo::COUNT],
+    /// What the compute programs are doing for the company this month.
+    pub effects: crate::compute::Effects,
 }
 
 impl Company {
@@ -371,6 +373,7 @@ impl Company {
             income_this_month: 0,
             months_in_red: 0,
             bankrupt: false,
+            effects: Default::default(),
             contracts: Vec::new(),
             delivered: [0; cargo::COUNT],
         }
@@ -504,7 +507,13 @@ impl Company {
     }
 
     /// Pays for something. Returns false (and charges nothing) if there isn't the money.
+    /// What a construction job costs after generative design has had a look at it.
+    pub fn build_price(&self, cost: u32) -> u32 {
+        (cost as f32 * (1.0 - self.effects.build_discount)).round() as u32
+    }
+
     pub fn spend(&mut self, item: Item, cost: u32) -> bool {
+        let cost = if item == Item::Construction { self.build_price(cost) } else { cost };
         if cost == 0 {
             return true;
         }
@@ -625,7 +634,8 @@ impl Company {
     fn month(&mut self, assets: &Assets, messages: &mut Vec<String>) {
         if !self.sandbox {
             let running =
-                (assets.train_running + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32 / 12.0;
+                (assets.train_running + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32 / 12.0
+                    * (1.0 - self.effects.running_discount);
             let upkeep = ((assets.road_pieces + assets.rail_pieces) as f32 * PIECE_UPKEEP
                 + (assets.station_tiles * STATION_UPKEEP) as f32 / 3.0
                 + (assets.ports * PORT_UPKEEP + assets.airports * AIRPORT_UPKEEP) as f32)
@@ -1025,5 +1035,22 @@ mod tests {
         assert!(c.ledger.get(Item::Contracts) >= 60_000);
         // Its passengers count from when it started, not before.
         assert!(!c.contract_requirements(&link, &f).last().unwrap().met);
+    }
+
+    #[test]
+    fn compute_programs_cut_what_building_and_running_cost() {
+        let mut c = Company::new(2030);
+        c.effects.build_discount = 0.5;
+        let before = c.cash;
+        assert!(c.spend(Item::Construction, 10_000));
+        assert_eq!(before - c.cash, 5_000);
+        assert_eq!(c.build_price(1_000), 500);
+        let assets = Assets { trains: 1, train_running: 1200, ..Default::default() };
+        let mut full = Company::new(2030);
+        let mut cut = Company::new(2030);
+        cut.effects.running_discount = 0.25;
+        full.month(&assets, &mut Vec::new());
+        cut.month(&assets, &mut Vec::new());
+        assert!(cut.ledger.get(Item::Running) < full.ledger.get(Item::Running));
     }
 }

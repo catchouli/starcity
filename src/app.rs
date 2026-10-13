@@ -1,5 +1,6 @@
 mod catalog_ui;
 mod company_ui;
+mod compute_ui;
 mod craft;
 mod industry_ui;
 
@@ -145,6 +146,7 @@ pub struct StarcityApp {
     levelled_pending: Vec<(i32, i32)>,
     /// The score: compute made by the server farms (GAME-DESIGN.md §5.9).
     pub(crate) compute: crate::compute::Compute,
+    compute_alloc: crate::compute::Allocation,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
     /// The Assistant's suggestion changed since the player last looked: its button glows.
@@ -218,6 +220,10 @@ impl StarcityApp {
                 show_about: false,
                 show_finance: false,
                 show_hq: false,
+                #[cfg(not(target_arch = "wasm32"))]
+                show_compute: crate::devtools::DevTools::window("compute"),
+                #[cfg(target_arch = "wasm32")]
+                show_compute: false,
                 show_next_step: true,
                 assistant_expanded: true,
                 go_hq: false,
@@ -278,6 +284,7 @@ impl StarcityApp {
             founded_year: 0,
             levelled_pending: Vec::new(),
             compute: Default::default(),
+            compute_alloc: Default::default(),
             proj_morph: 0.0,
             assistant_attention: false,
             last_step_title: String::new(),
@@ -649,6 +656,7 @@ impl StarcityApp {
         self.selected_industry = None;
         self.industry_clock = 0.0;
         self.compute = Default::default();
+        self.compute_alloc = Default::default();
         self.remesh_tiles(rs, &levelled);
         self.vehicles = Vehicles::new(self.params.seed as u64);
         self.sea = None;
@@ -877,12 +885,12 @@ impl StarcityApp {
         if !self.plan.is_empty() && self.plan.blocked.is_none() && self.drag_start.is_some() {
             let plan = self.plan.clone();
             let cost = self.plan_cost(&plan);
-            self.show_cost(cost, company::terraform_cost(&plan));
+            self.show_cost(self.company.build_price(cost), self.company.build_price(company::terraform_cost(&plan)));
         } else if let Some(t) = self.hover_tile {
             match tool {
                 Tool::Train if self.rails.get(t.0, t.1) != 0 => self.show_cost(self.buy.price(), 0),
                 Tool::Signal if matches!(self.signals.click_effect(&self.rails, t), rails::SignalClick::Place) => {
-                    self.show_cost(company::SIGNAL, 0)
+                    self.show_cost(self.company.build_price(company::SIGNAL), 0)
                 }
                 _ => {}
             }
@@ -2199,6 +2207,7 @@ impl eframe::App for StarcityApp {
         ui::about_window(&ctx, &mut self.ui.show_about);
         self.train_window(&ctx);
         self.finance_window(&ctx);
+        self.compute_window(&ctx);
         self.train_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {
