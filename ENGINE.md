@@ -225,7 +225,7 @@ Done: skeleton and CI, voxel engine, terrain generation, Win95 UI, roads, rail, 
 6. Name: "Starcity" is just the directory name for now.
 7. ~~Diagonal roads and rail~~: dedicated diagonal pieces (§4.2).
 
-## 13. Hand-off: where things stand (2026-10-12)
+## 13. Hand-off: where things stand (2026-10-13)
 
 ### Done in the latest sessions
 - **Demo mode** (`--demo` / `?demo`, `scenario.rs`, `StarcityApp::start_demo`): rail lines between neighbouring towns (A* routed round hills), ferry lines between coastal towns (a ferry at each end), and flights between the biggest cities (airports levelled flat beside them, a plane at each end of each route). On the default map: about 4 rail lines, 8 ferries, 10 planes.
@@ -247,16 +247,14 @@ Done: skeleton and CI, voxel engine, terrain generation, Win95 UI, roads, rail, 
 - **GAME-DESIGN.md**: the money game: costs, cargo, industries and supply chains, vehicle models in cheap/fast tiers, goals, and the implementation order. Written but not built.
 
 ### Next steps, in order
-1. **Replace the placeholders with art, and extend the era system** (GAME-DESIGN.md §10): textures and animation in the model loader; a buy window so the player picks vehicle models by year; the UI theme following the eras; events and the new industries and cargo; space.
-2. ~~**Money**~~ Done for passengers (Phase 4). Still to do: roads and stations levelling slopes like rail and airports, selling vehicles, upkeep per vehicle age, and tuning with a headless economy test (the payback targets in GAME-DESIGN.md §8).
-3. **Cargo and stations**, then **industries** (GAME-DESIGN.md plan steps 2–3), then the **vehicle catalogue**: the ferry, plane, train and road vehicle become the first tier of each mode.
-4. **Check performance on the web** at 512² with the demo, hundreds of vehicles, boats, planes and the day/night cycle, in a real browser. Everything above is measured natively only. The whole scene redraws every frame while anything moves, so watch generation/meshing time in wasm, the dynamic box upload size, and the town growth tick (`Towns::population` is O(buildings) per call, so cache per-town populations).
-5. **Not yet verified live in a browser**: the Finances, Headquarters and Next Step windows and the greyed-out toolbar buttons (only a native screenshot of the opening has been checked), passenger loading and unloading (`handle_arrivals`, `handle_craft_arrivals` have no tests), the train, station, town, ferry, plane and terminal windows, and the station, train, port, airport, ferry and plane tools.
-6. **Terraforming tools** (M4): raise, lower, level and dig tools, including sloped tunnels, with water filled by flood fill from the sea (§3.1). `terrain::edit::Corners::level` is the building block; `Sea::refresh` already follows terrain edits.
-7. Smaller items: cars and trains tilting on slopes, cloud shadows, lit windows at night, planes and ferries avoiding each other, bridges, settlement-site overlay (M2), save/load.
+1. **Playtest and design session with the user** (pending). Open questions 17 (this session's guesses: compute pace, HQ prices, charter strength, endings, space economics, city heights, news styles, how hard the sea floods) and 18 (the moon) in GAME-DESIGN.md. The moon, Mars, the solar system and the galaxy are not designed yet: don't build them before that session.
+2. **Verify the WebGPU path in a real Chrome window** after the night-lighting shader change (light map at binding 4, lit windows, city glow). `tools/web_check.sh` only covers WebGL2 (headless Chrome can't start WebGPU on macOS).
+3. **Demo**: late industries (data centres, AI campuses, spaceport chain) are only joined by 1–2 rail lines, so rockets and campuses often sit idle; country stations sometimes still read "Station N".
+4. Smaller, no design needed: secondary industries closing (§5.2), pumping flooded land dry, the follow camera tried in a running game, docs for the dev switches and the Blender workflow in README.
+5. Older items still open: terraforming tools (M4: raise, lower, dig, tunnels), save/load, bridges, vehicles tilting on slopes, planes and ferries avoiding each other, selling vehicles, road and station levelling.
 
 ### Working notes
-- `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page.
-- Dev hooks (native): `STARCITY_YEAR=2046` (start in a year, with the towns grown and rebuilt), `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_HOUR=22` (start hour), `STARCITY_DEMO=roads|towns`; pass `--demo` for the demo scenario. With `STARCITY_DEMO=towns` the camera centres on the biggest town, which is where the demo's first airport and port are.
+- `cargo test` validates the WGSL shader with naga. A shader error otherwise just blanks the web page. After shader or GPU changes run `tools/web_check.sh --build` (headless WebGL2) and look at WebGPU in a real Chrome window. `cargo test balance -- --nocapture` prints the fifty-year pacing report. The build and `cargo clippy` are warning-free; keep them so.
+- Dev hooks (native; full list at the top of `src/devtools.rs`): `STARCITY_THEN=2010` (seek again after `STARCITY_YEAR`, to try rewinding), `STARCITY_FLOOD=1` (seven months of rising sea at once), `STARCITY_HQ=6`, `STARCITY_LOOK=holo`, `STARCITY_WINDOW=compute|fund|charter|news|frames`, `STARCITY_YEAR=2046` (start in a year, with the towns grown and rebuilt), `STARCITY_SCREENSHOT=out.png`, `STARCITY_SHOT_FRAME=N`, `STARCITY_DEBUG=1`, `STARCITY_ZOOM`, `STARCITY_FOCUS=dx,dz`, `STARCITY_HOUR=22` (start hour), `STARCITY_DEMO=roads|towns`; pass `--demo` for the demo scenario. With `STARCITY_DEMO=towns` the camera centres on the biggest town, which is where the demo's first airport and port are.
 - `rustfmt.toml` sets 120 columns. A freshly built binary can take a while to launch on macOS, and screenshot runs sometimes take 30 s or more of wall time even though the app only uses about 2 s of CPU, so give them time (large `STARCITY_SHOT_FRAME` values can take minutes).
 - Generated seabed at height 0 has no blocks at all, so `World::surface` can return `None` for in-bounds sea tiles; `terrain::edit` and `sea` treat those as flat at height 0 / water.
