@@ -1153,11 +1153,16 @@ impl StarcityApp {
                 continue;
             };
             let t = self.trains.train(train);
-            let room = industry_ui::room_for(&self.industries, &st.tiles, t.cargo);
+            let room = industry_ui::room_for(&self.industries, &self.towns, &st.tiles, t.cargo);
             let d = exchange::arrive(st, t, self.clock.days(), self.year, room);
             let (cargo, delivered, (x, z)) = (d.cargo, d.units, d.at);
             let tiles = st.tiles.clone();
-            self.deliver_to_industries(&tiles, cargo, delivered);
+            let left = self.deliver_to_industries(&tiles, cargo, delivered);
+            if left > 0 && industry_ui::is_for_towns(cargo) {
+                if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
+                    self.towns.list[town as usize].stock(cargo == Cargo::Goods, left);
+                }
+            }
             let income = self.pay_fare(cargo, delivered, d.boarded, (x, z));
             let t = self.trains.train(train);
             t.flow = crate::trains::Flow {
@@ -1588,6 +1593,19 @@ impl StarcityApp {
             });
             ui.label(format!("Population {population} in {buildings} buildings"));
             ui.label(format!("{} passengers delivered by rail", town.delivered));
+            if town.pop > crate::towns::WANTS_FOOD {
+                let wants = |have: f32, what: &str| {
+                    if have > 0.0 {
+                        format!("Well stocked with {what}")
+                    } else {
+                        format!("Wants {what}: growing slowly without it")
+                    }
+                };
+                ui.label(wants(town.food, "food"));
+                if town.pop > crate::towns::WANTS_GOODS {
+                    ui.label(wants(town.goods, "goods"));
+                }
+            }
             ui.label(if town.served > 50.0 {
                 "Booming thanks to its rail service"
             } else if town.served > 5.0 {

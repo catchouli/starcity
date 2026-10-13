@@ -12,6 +12,23 @@ impl StarcityApp {
     /// Once an economy month: industries make their cargo and the stations that serve them collect it.
     pub(super) fn industry_month(&mut self) {
         self.found_industries();
+        let ratings: Vec<f32> = self
+            .industries
+            .list
+            .iter()
+            .map(|ind| {
+                let cargo = ind.kind.outputs().first().map(|&(c, _)| c);
+                cargo.map_or(0.0, |c| {
+                    self.stations
+                        .list
+                        .values()
+                        .filter(|s| ind.near(&s.tiles, CATCHMENT))
+                        .map(|s| s.service[c.index()].rating)
+                        .fold(0.0, f32::max)
+                })
+            })
+            .collect();
+        self.industries.drift(&ratings);
         let made = self.industries.month();
         self.compute_month();
         let mut moved = vec![0u32; self.industries.list.len()];
@@ -83,13 +100,15 @@ impl StarcityApp {
     }
 
     /// Hands delivered cargo to the industries a station serves, filling them one after another.
-    pub(super) fn deliver_to_industries(&mut self, tiles: &[(i32, i32)], cargo: Cargo, mut units: u32) {
+    /// Returns what was left over, which a town may take.
+    pub(super) fn deliver_to_industries(&mut self, tiles: &[(i32, i32)], cargo: Cargo, mut units: u32) -> u32 {
         for id in self.industries.near(tiles) {
             if units == 0 {
                 break;
             }
             units -= self.industries.deliver(id, cargo, units);
         }
+        units
     }
 
     pub(super) fn industry_window(&mut self, ctx: &egui::Context) {
@@ -141,15 +160,29 @@ impl StarcityApp {
 }
 
 /// How many units of `cargo` the industries by a station would take (people and mail: any number).
-pub(super) fn room_for(industries: &crate::industry::Industries, tiles: &[(i32, i32)], cargo: Cargo) -> u32 {
+pub(super) fn room_for(
+    industries: &crate::industry::Industries,
+    towns: &crate::towns::Towns,
+    tiles: &[(i32, i32)],
+    cargo: Cargo,
+) -> u32 {
     if matches!(cargo, Cargo::Passengers | Cargo::Mail) {
+        return u32::MAX;
+    }
+    // Towns take food, goods and fuel without limit (GAME-DESIGN.md §5.5).
+    if is_for_towns(cargo) && towns.population_near(tiles) > 0 {
         return u32::MAX;
     }
     industries
         .near(tiles)
         .into_iter()
         .map(|id| industries.list[id].room(cargo))
-        .sum()
+        .fold(0u32, u32::saturating_add)
+}
+
+/// What towns buy.
+pub(super) fn is_for_towns(cargo: Cargo) -> bool {
+    matches!(cargo, Cargo::Food | Cargo::Goods | Cargo::Fuel)
 }
 
 fn describe(ui: &mut egui::Ui, ind: &Industry) {
@@ -169,9 +202,10 @@ fn describe(ui: &mut egui::Ui, ind: &Industry) {
             .collect();
         if kind.is_primary() {
             ui.label(format!(
-                "Makes {} up to {} a month",
+                "Makes {} up to {} a month ({:.0}% of what it once did)",
                 list.first().map_or("", |_| kind.outputs()[0].0.name()),
-                kind.batches() * kind.outputs()[0].1
+                (kind.batches() as f32 * ind.production).round() as u32 * kind.outputs()[0].1,
+                ind.production * 100.0
             ));
         } else {
             ui.label(format!("Turns {} into {}", inputs_text(ind), list.join(" and ")));

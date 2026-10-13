@@ -224,6 +224,8 @@ pub struct Industry {
     pub power: f32,
     pub made_last_month: u32,
     pub moved_last_month: u32,
+    /// How much of its full output a primary industry makes now: it drifts with how well it is served.
+    pub production: f32,
 }
 
 impl Industry {
@@ -271,6 +273,7 @@ impl Industry {
 pub struct Industries {
     pub list: Vec<Industry>,
     by_tile: HashMap<(i32, i32), usize>,
+    drift_rng: u64,
 }
 
 /// The mark industries leave on `Towns::occupied`.
@@ -295,6 +298,7 @@ impl Industries {
             power: 1.0,
             made_last_month: 0,
             moved_last_month: 0,
+            production: 1.0,
         };
         for t in ind.tiles() {
             self.by_tile.insert(t, id);
@@ -348,6 +352,34 @@ impl Industries {
         out
     }
 
+    /// Once a month each primary industry has a small chance of a production change: up (3% to 15%)
+    /// with 70% odds when its best station rates over 60%, down otherwise (GAME-DESIGN.md §5.2).
+    /// `ratings[i]` is the best rating of the stations that serve industry `i`.
+    pub fn drift(&mut self, ratings: &[f32]) {
+        if self.drift_rng == 0 {
+            self.drift_rng = 0x9E37_79B9_7F4A_7C15;
+        }
+        for ind in &mut self.list {
+            if !ind.kind.is_primary() {
+                continue;
+            }
+            let mut next = || {
+                self.drift_rng ^= self.drift_rng << 13;
+                self.drift_rng ^= self.drift_rng >> 7;
+                self.drift_rng ^= self.drift_rng << 17;
+                (self.drift_rng >> 11) as f32 / (1u64 << 53) as f32
+            };
+            if next() > 0.12 {
+                continue;
+            }
+            let well_served = ratings.get(ind.id).is_some_and(|&r| r > 0.6);
+            let up = next() < if well_served { 0.7 } else { 0.3 };
+            let step = 0.03 + 0.12 * next();
+            ind.production = if up { ind.production * (1.0 + step) } else { ind.production * (1.0 - step) }
+                .clamp(0.1, 3.0);
+        }
+    }
+
     /// One economy month. Power stations burn coal; secondaries turn stock into
     /// output; primaries make their cargo. Returns what was made, to hand to the stations
     /// that serve each industry.
@@ -370,7 +402,7 @@ impl Industries {
                 continue;
             }
             let batches = if kind.is_primary() {
-                kind.batches()
+                (kind.batches() as f32 * ind.production).round() as u32
             } else {
                 // As many batches as every input allows, at most what the machinery can do.
                 let by_stock = kind
@@ -862,5 +894,30 @@ mod tests {
         }
         eprintln!("chip chain {with_chain}/5, data centres {with_dc}/5, AI campuses {with_ai}/5");
         assert!(with_chain >= 4 && with_dc >= 4 && with_ai >= 4);
+    }
+
+    #[test]
+    fn well_served_industries_grow_and_neglected_ones_shrink() {
+        let (mut served, mut neglected) = (0.0f32, 0.0f32);
+        for trial in 0..20u64 {
+            let mut ind = Industries::default();
+            ind.drift_rng = 0x1234_5678 + trial * 7919;
+            ind.add(Kind::CoalMine, (0, 0));
+            ind.add(Kind::SteelMill, (20, 0));
+            for _ in 0..120 {
+                ind.drift(&[0.9, 0.9]);
+            }
+            served += ind.list[0].production;
+            assert_eq!(ind.list[1].production, 1.0, "secondaries follow their inputs instead");
+            let mut ind = Industries::default();
+            ind.drift_rng = 0x8765_4321 + trial * 7919;
+            ind.add(Kind::CoalMine, (0, 0));
+            for _ in 0..120 {
+                ind.drift(&[0.1]);
+            }
+            neglected += ind.list[0].production;
+        }
+        assert!(served / 20.0 > 1.5, "served {}", served / 20.0);
+        assert!(neglected / 20.0 < 0.8, "neglected {}", neglected / 20.0);
     }
 }

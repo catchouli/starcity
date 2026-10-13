@@ -26,6 +26,44 @@ pub struct Town {
     /// Recent passenger service (decays over time); speeds up growth.
     pub served: f32,
     pub delivered: u32,
+    /// Population, counted every few seconds (it is a pass over every building).
+    pub pop: u32,
+    /// Seconds of food and of goods the town has left in its shops.
+    pub food: f32,
+    pub goods: f32,
+}
+
+/// Above this many people a town wants food, and above the second it wants goods too (§5.5).
+pub const WANTS_FOOD: u32 = 500;
+pub const WANTS_GOODS: u32 = 1500;
+/// One delivery that covers a town's needs lasts three game months.
+pub const SUPPLY_SECONDS: f32 = 90.0;
+
+impl Town {
+    /// How fast it grows compared with a town that has what it wants: slowed without food or goods,
+    /// and a little faster while both are on the shelves.
+    pub fn growth_factor(&self) -> f32 {
+        let mut f = 1.0;
+        if self.pop > WANTS_FOOD {
+            f *= if self.food > 0.0 { 1.25 } else { 0.4 };
+        }
+        if self.pop > WANTS_GOODS {
+            f *= if self.goods > 0.0 { 1.15 } else { 0.6 };
+        }
+        f
+    }
+
+    /// Units of a cargo that cover its need for three months.
+    pub fn need(&self) -> f32 {
+        (self.pop as f32 / 20.0).max(10.0)
+    }
+
+    /// A delivery of food (or goods): puts that much on the shelves, up to six months' worth.
+    pub fn stock(&mut self, goods: bool, units: u32) {
+        let seconds = units as f32 / self.need() * SUPPLY_SECONDS;
+        let shelf = if goods { &mut self.goods } else { &mut self.food };
+        *shelf = (*shelf + seconds).min(2.0 * SUPPLY_SECONDS);
+    }
 }
 
 /// A building. Big ones (an orb on 3 x 3 tiles) have an entry on every tile
@@ -69,6 +107,7 @@ pub struct Towns {
     pub year: i32,
     /// Progress towards the next redevelopment.
     renewal: f32,
+    pop_clock: f32,
     rng: u64,
 }
 
@@ -89,6 +128,7 @@ impl Towns {
             occupied: Layer::new(size_x, size_z),
             year: 2000,
             renewal: 0.0,
+            pop_clock: 0.0,
             rng: 1,
         }
     }
@@ -189,6 +229,9 @@ impl Towns {
             growth: 0.0,
             served: 0.0,
             delivered: 0,
+            pop: 0,
+            food: 0.0,
+            goods: 0.0,
         });
         for dir in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let len = 3 + self.below(4) as i32;
@@ -240,11 +283,26 @@ impl Towns {
     ) -> (Vec<(i32, i32)>, bool) {
         let mut road_tiles = Vec::new();
         let mut built = false;
+        self.pop_clock += dt;
+        if self.pop_clock >= 10.0 || self.list.iter().all(|t| t.pop == 0) {
+            self.pop_clock = 0.0;
+            let mut pops = vec![0u32; self.list.len()];
+            for b in self.buildings.values() {
+                if let Some(p) = pops.get_mut(b.town as usize) {
+                    *p += b.population();
+                }
+            }
+            for (t, p) in self.list.iter_mut().zip(pops) {
+                t.pop = p;
+            }
+        }
         for i in 0..self.list.len() {
             let town = &mut self.list[i];
             town.served *= 0.995f32.powf(dt);
-            // Steady growth, faster with good passenger service.
-            town.growth += dt * (0.05 + town.served * 0.01);
+            town.food = (town.food - dt).max(0.0);
+            town.goods = (town.goods - dt).max(0.0);
+            // Steady growth, faster with good passenger service and with the shops stocked.
+            town.growth += dt * (0.05 + town.served * 0.01) * town.growth_factor();
             while self.list[i].growth >= 1.0 {
                 self.list[i].growth -= 1.0;
                 let (roads_built, b) = self.grow(i, world, roads_layer, rails);
@@ -664,5 +722,60 @@ mod tests {
             .filter(|&(x, z)| towns.occupied.get(x, z) != 0)
             .count();
         assert_eq!(occupied, towns.buildings.len(), "freed tiles are free again");
+    }
+
+    fn blank(pop: u32) -> Town {
+        Town {
+            id: 0,
+            name: String::new(),
+            centre: (0, 0),
+            growth: 0.0,
+            served: 0.0,
+            delivered: 0,
+            pop,
+            food: 0.0,
+            goods: 0.0,
+        }
+    }
+
+    #[test]
+    fn big_towns_want_food_then_goods_and_grow_faster_when_fed() {
+        assert_eq!(blank(300).growth_factor(), 1.0, "small towns don't care");
+        let mut t = blank(800);
+        assert!((t.growth_factor() - 0.4).abs() < 1e-6);
+        t.stock(false, t.need() as u32);
+        assert!(t.food > 80.0 && (t.growth_factor() - 1.25).abs() < 1e-6);
+        let mut big = blank(2000);
+        assert!((big.growth_factor() - 0.24).abs() < 1e-6, "no food, no goods");
+        big.stock(false, 1000);
+        big.stock(true, 1000);
+        assert!(big.food <= 2.0 * SUPPLY_SECONDS, "the shelves fill up");
+        assert!(big.growth_factor() > 1.4);
+    }
+
+    #[test]
+    fn shelves_empty_over_time_and_the_town_slows_again() {
+        let (world, mut roads, rails, mut towns) = {
+            let p = crate::terrain::generation::GenParams::default();
+            let world = crate::terrain::generation::generate(&p);
+            let roads = Layer::new(world.size_x, world.size_z);
+            let rails = Layer::new(world.size_x, world.size_z);
+            let mut r2 = Layer::new(world.size_x, world.size_z);
+            let towns = Towns::generate(&world, &mut r2, &rails, p.seed, 2000);
+            (world, roads, rails, towns)
+        };
+        let _ = &mut roads;
+        towns.list[0].pop = 900;
+        towns.list[0].stock(false, 200);
+        let models = crate::models::Models::default();
+        let mut r = Layer::new(world.size_x, world.size_z);
+        for _ in 0..100 {
+            towns.update(1.0, &world, &mut r, &rails, &models);
+        }
+        assert!((towns.list[0].food - 80.0).abs() < 0.5, "a full shelf (six months) less 100 seconds: {}", towns.list[0].food);
+        for _ in 0..100 {
+            towns.update(1.0, &world, &mut r, &rails, &models);
+        }
+        assert_eq!(towns.list[0].food, 0.0);
     }
 }
