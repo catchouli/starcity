@@ -521,12 +521,9 @@ fn vs_model(
     return out;
 }
 
-// 4 x 4 ordered dither, 0..1.
+// A screen-space dither value in 0..1 (interleaved gradient noise: no arrays, no tables).
 fn bayer(p: vec2<f32>) -> f32 {
-    var m = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-    let x = u32(p.x) % 4u;
-    let y = u32(p.y) % 4u;
-    return (m[y * 4u + x] + 0.5) / 16.0;
+    return fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
 }
 
 @fragment
