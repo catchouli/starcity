@@ -35,6 +35,24 @@ pub struct Line {
 
 const PLATFORM: i32 = 4;
 
+/// Where a station may stand relative to what it serves: how far along the line from the centre,
+/// and how far off it.
+struct Reach {
+    along: std::ops::Range<i32>,
+    across: &'static [i32],
+}
+
+/// By a town: a little way out on the side facing the other town.
+const TOWN: Reach = Reach {
+    along: 6..18,
+    across: &[0, 2, -2, 4, -4, 6, -6],
+};
+/// By an industry: close enough to be in its three-tile catchment.
+const INDUSTRY: Reach = Reach {
+    along: 3..5,
+    across: &[0, 1, -1, 2, -2, 3, -3],
+};
+
 /// Builds up to `max` lines between the nearest pairs of towns.
 pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
     let mut pairs = Vec::new();
@@ -59,7 +77,7 @@ pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
             continue;
         }
         let saved = (rw.rails.clone(), rw.stations.clone());
-        match try_line(rw, a, b) {
+        match try_line(rw, a, b, &TOWN, &TOWN) {
             Some(line) => {
                 used.extend([a, b]);
                 lines.push(line);
@@ -70,9 +88,66 @@ pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
     lines
 }
 
+/// A freight line: a built line and what runs on it.
+pub struct FreightLine {
+    pub line: Line,
+    pub cargo: crate::cargo::Cargo,
+}
+
+/// Joins industries that make something to ones that use it, nearest first, so the demo shows every
+/// chain: coal to the power station, ore and coal to the steel mill, timber to the sawmill, grain to
+/// the food plant, steel and planks to the factory. Each maker gets one line.
+pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries, max: usize) -> Vec<FreightLine> {
+    use crate::cargo::Cargo;
+    use crate::industry::Kind;
+    let chains = [
+        (Kind::CoalMine, Kind::PowerStation, Cargo::Coal),
+        (Kind::CoalMine, Kind::SteelMill, Cargo::Coal),
+        (Kind::IronOreMine, Kind::SteelMill, Cargo::IronOre),
+        (Kind::Forest, Kind::Sawmill, Cargo::Timber),
+        (Kind::Farm, Kind::FoodPlant, Cargo::Grain),
+        (Kind::SteelMill, Kind::Factory, Cargo::Steel),
+        (Kind::Sawmill, Kind::Factory, Cargo::Planks),
+    ];
+    let centre = |i: &crate::industry::Industry| (i.tile.0 + i.size() / 2, i.tile.1 + i.size() / 2);
+    let mut lines = Vec::new();
+    let mut used: Vec<(usize, usize)> = Vec::new();
+    for (maker, user, cargo) in chains {
+        for a in industries.list.iter().filter(|i| i.kind == maker) {
+            if lines.len() >= max {
+                return lines;
+            }
+            // The nearest user that isn't too close or too far, and not already joined to this maker.
+            let mut options: Vec<_> = industries
+                .list
+                .iter()
+                .filter(|b| b.kind == user && !used.contains(&(a.id, b.id)))
+                .map(|b| {
+                    let (ca, cb) = (centre(a), centre(b));
+                    ((ca.0 - cb.0).pow(2) + (ca.1 - cb.1).pow(2), b)
+                })
+                .filter(|(d2, _)| (20 * 20..170 * 170).contains(d2))
+                .collect();
+            options.sort_by_key(|(d2, _)| *d2);
+            for (_, b) in options.into_iter().take(5) {
+                let saved = (rw.rails.clone(), rw.stations.clone());
+                match try_line(rw, centre(a), centre(b), &INDUSTRY, &INDUSTRY) {
+                    Some(line) => {
+                        used.push((a.id, b.id));
+                        lines.push(FreightLine { line, cargo });
+                        break;
+                    }
+                    None => (*rw.rails, *rw.stations) = saved,
+                }
+            }
+        }
+    }
+    lines
+}
+
 /// Works in "line space": `u` runs along the main axis between the towns
 /// (towards town `b`), `v` across it.
-fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
+fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32), reach_a: &Reach, reach_b: &Reach) -> Option<Line> {
     let along_x = (b.0 - a.0).abs() >= (b.1 - a.1).abs();
     let s = if along_x {
         (b.0 - a.0).signum()
@@ -82,8 +157,8 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
     let to_xz = |u: i32, v: i32| if along_x { (u, v) } else { (v, u) };
     let to_uv = |t: (i32, i32)| if along_x { t } else { (t.1, t.0) };
 
-    let station_a = place_station(rw, to_uv(a), s, &to_xz)?;
-    let station_b = place_station(rw, to_uv(b), -s, &to_xz)?;
+    let station_a = place_station(rw, to_uv(a), s, &to_xz, reach_a)?;
+    let station_b = place_station(rw, to_uv(b), -s, &to_xz, reach_b)?;
     let (a_end, b_end) = (*station_a.last().unwrap(), *station_b.last().unwrap());
 
     // Join the facing platform ends: out of one, round the hills, into the other.
@@ -190,9 +265,10 @@ fn place_station(
     centre: (i32, i32),
     s: i32,
     to_xz: &dyn Fn(i32, i32) -> (i32, i32),
+    reach: &Reach,
 ) -> Option<Vec<(i32, i32)>> {
-    for d in 6..18 {
-        for v in [0, 2, -2, 4, -4, 6, -6] {
+    for d in reach.along.clone() {
+        for &v in reach.across {
             let tiles: Vec<(i32, i32)> = (0..PLATFORM).map(|i| (centre.0 + s * (d + i), centre.1 + v)).collect();
             let (first, last) = (tiles[0], tiles[PLATFORM as usize - 1]);
             let plan = rw.stations.plan(
@@ -255,5 +331,57 @@ mod tests {
             tr.update(0.1, &rails, &signals, &stations, 1);
         }
         assert!(tr.list.iter().all(|t| t.crashed.is_none()));
+    }
+
+    #[test]
+    fn freight_lines_join_the_industries_of_a_generated_map() {
+        use crate::cargo::Cargo;
+        use crate::industry::Industries;
+        let p = GenParams::default();
+        let mut world = generation::generate(&p);
+        let (sx, sz) = (world.size_x, world.size_z);
+        let mut roads = Layer::new(sx, sz);
+        let mut rails = Layer::new(sx, sz);
+        let mut towns = Towns::generate(&world, &mut roads, &rails, p.seed, 2000);
+        let (industries, _) = Industries::generate(&mut world, &mut towns, &roads, &rails, p.seed);
+        let signals = Signals::default();
+        let mut stations = Stations::default();
+        let mut rw = Railway {
+            world: &world,
+            roads: &roads,
+            buildings: &towns.occupied,
+            signals: &signals,
+            rails: &mut rails,
+            stations: &mut stations,
+        };
+        let freight = build_freight(&mut rw, &industries, 16);
+        let cargos: std::collections::HashSet<_> = freight.iter().map(|f| f.cargo).collect();
+        eprintln!(
+            "{} freight lines carrying {} kinds of cargo",
+            freight.len(),
+            cargos.len()
+        );
+        assert!(freight.len() >= 5, "only {} freight lines", freight.len());
+        assert!(cargos.contains(&Cargo::Coal));
+        for f in &freight {
+            assert!(trains::reachable(&rails, &stations, f.line.from, f.line.to));
+            // Each end is by an industry that makes or wants the cargo.
+            let by = |sid, make: bool| {
+                let st = stations.get(sid).unwrap();
+                industries.near(&st.tiles).into_iter().any(|i| {
+                    let k = industries.list[i].kind;
+                    let list = if make { k.outputs() } else { k.inputs() };
+                    list.iter().any(|&(c, _)| c == f.cargo)
+                })
+            };
+            assert!(
+                by(f.line.from, true) || by(f.line.from, false),
+                "station not by an industry"
+            );
+            assert!(
+                by(f.line.to, true) || by(f.line.to, false),
+                "station not by an industry"
+            );
+        }
     }
 }

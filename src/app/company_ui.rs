@@ -451,12 +451,12 @@ impl StarcityApp {
         units: u32,
         boarded: Option<(f32, f32, f64)>,
         at: (f32, f32),
-    ) {
+    ) -> u32 {
         if units == 0 {
-            return;
+            return 0;
         }
         self.company.delivered[cargo.index()] += units;
-        let Some((x, z, since)) = boarded else { return };
+        let Some((x, z, since)) = boarded else { return 0 };
         let tiles = ((at.0 - x).powi(2) + (at.1 - z).powi(2)).sqrt();
         let seconds = (self.clock.days() - since).max(0.0) as f32;
         let item = if cargo == crate::cargo::Cargo::Passengers {
@@ -464,8 +464,9 @@ impl StarcityApp {
         } else {
             Item::Freight
         };
-        self.company
-            .earn(item, crate::cargo::fare(cargo, units, tiles, seconds));
+        let fare = crate::cargo::fare(cargo, units, tiles, seconds);
+        self.company.earn(item, fare);
+        fare
     }
 
     /// Once per sim step: the monthly books.

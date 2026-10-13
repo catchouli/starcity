@@ -31,6 +31,14 @@ const MAX_BLOCK_SEGMENTS: usize = 64;
 /// Time spent at each station.
 pub const LOADING_SECONDS: f32 = 3.0;
 
+/// What a train did at its last stop: units off, units on, and what the unloading paid.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Flow {
+    pub unloaded: u32,
+    pub loaded: u32,
+    pub income: u32,
+}
+
 type PieceKey = ((i32, i32), u8);
 
 /// A track piece traversed in one direction.
@@ -162,6 +170,8 @@ pub struct Train {
     pub load: u32,
     /// What the cars carry (coaches seat people; mail vans take bags).
     pub cargo: Cargo,
+    /// What happened at the last stop, for the loading animation.
+    pub flow: Flow,
     /// Where and when (game seconds) the passengers on board got on, for the fare.
     pub boarded: Option<(f32, f32, f64)>,
     /// Distance to the target station from each segment, and the target and
@@ -393,6 +403,7 @@ impl Trains {
             loading: None,
             stopped: false,
             load: 0,
+            flow: Flow::default(),
             cargo: Cargo::Passengers,
             boarded: None,
             routing: None,

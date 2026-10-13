@@ -289,6 +289,10 @@ impl StarcityApp {
             params,
         };
         app.company.sandbox = demo;
+        if demo {
+            // The demo is for testing: no tutorial.
+            app.ui.show_next_step = false;
+        }
         app.regenerate(rs);
         if demo {
             app.start_demo();
@@ -445,6 +449,25 @@ impl StarcityApp {
                 running += 1;
             }
         }
+        // Freight between the industries, so every chain has trains on it.
+        let mut railway = crate::scenario::Railway {
+            world: &self.world,
+            roads: &self.roads,
+            buildings: &self.towns.occupied,
+            signals: &self.signals,
+            rails: &mut self.rails,
+            stations: &mut self.stations,
+        };
+        let freight = crate::scenario::build_freight(&mut railway, &self.industries, 16);
+        let mut freight_trains = 0;
+        for f in &freight {
+            if let Ok(id) = self.trains.spawn(&self.rails, f.line.start, f.line.forward, 3) {
+                self.trains.set_orders(id, vec![f.line.to, f.line.from], 0);
+                self.trains.train(id).cargo = f.cargo;
+                freight_trains += 1;
+            }
+        }
+        log::info!("demo: {} freight lines, {freight_trains} trains", freight.len());
         let ids: Vec<StationId> = self.stations.list.keys().copied().collect();
         for id in ids {
             self.name_station(id);
@@ -461,7 +484,10 @@ impl StarcityApp {
             self.planes.list.len()
         );
         self.message = Some((
-            format!("Demo: {} rail, {boats} ferries, {planes} planes", lines.len()),
+            format!(
+                "Demo: {} rail, {freight_trains} freight trains, {boats} ferries, {planes} planes",
+                lines.len()
+            ),
             10.0,
         ));
         let _ = running;
@@ -1103,7 +1129,13 @@ impl StarcityApp {
             let (cargo, delivered, (x, z)) = (d.cargo, d.units, d.at);
             let tiles = st.tiles.clone();
             self.deliver_to_industries(&tiles, cargo, delivered);
-            self.pay_fare(cargo, delivered, d.boarded, (x, z));
+            let income = self.pay_fare(cargo, delivered, d.boarded, (x, z));
+            let t = self.trains.train(train);
+            t.flow = crate::trains::Flow {
+                unloaded: delivered,
+                loaded: t.load,
+                income,
+            };
             if cargo == Cargo::Passengers {
                 if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
                     let town = &mut self.towns.list[town as usize];
@@ -1214,6 +1246,67 @@ impl StarcityApp {
             painter.galley(r.min + egui::vec2(4.0, 2.0), galley, egui::Color32::BLACK);
         }
         self.terminal_labels(&painter, view_proj, rect);
+        self.loading_labels(&painter, view_proj, rect);
+    }
+
+    /// A little progress bar and counter above each train that's at a platform: first the cargo
+    /// coming off (counting down, with what it paid), then the new cargo going on (counting up).
+    fn loading_labels(&self, painter: &egui::Painter, view_proj: Mat4, rect: egui::Rect) {
+        for train in &self.trains.list {
+            let Some(left) = train.loading else { continue };
+            let progress = (1.0 - left / crate::trains::LOADING_SECONDS).clamp(0.0, 1.0);
+            let head = train.point_behind(0.0);
+            let p = Vec3::new(head.x, self.world.height_at(head.x, head.y) + 1.1, head.y);
+            let Some(at) = project(view_proj, rect, p) else {
+                continue;
+            };
+            let flow = train.flow;
+            let unit = train.cargo.unit();
+            // Unloading takes the first 40% of the stop, loading the rest.
+            let (text, fill) = if flow.unloaded > 0 && progress < 0.4 {
+                let f = progress / 0.4;
+                let n = (flow.unloaded as f32 * (1.0 - f)).round() as u32;
+                let pay = if flow.income > 0 {
+                    format!("  +£{}", flow.income)
+                } else {
+                    String::new()
+                };
+                (format!("Unloading {n} {unit}{pay}"), 1.0 - f)
+            } else {
+                let f = if flow.unloaded > 0 {
+                    (progress - 0.4) / 0.6
+                } else {
+                    progress
+                }
+                .clamp(0.0, 1.0);
+                let n = (flow.loaded as f32 * f).round() as u32;
+                (format!("Loading {n}/{} {unit}", train.capacity()), f)
+            };
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(12.0), egui::Color32::BLACK);
+            let size = egui::vec2(galley.size().x.max(110.0) + 10.0, galley.size().y + 12.0);
+            let r = egui::Rect::from_center_size(at, size);
+            painter.rect_filled(r, 0.0, egui::Color32::from_rgb(255, 255, 225));
+            painter.rect_stroke(
+                r,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::BLACK),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(r.min + egui::vec2(5.0, 2.0), galley, egui::Color32::BLACK);
+            // The bar: a sunken trough with blue blocks, Win95 style.
+            let bar =
+                egui::Rect::from_min_size(egui::pos2(r.min.x + 5.0, r.max.y - 8.0), egui::vec2(size.x - 10.0, 5.0));
+            painter.rect_filled(bar, 0.0, egui::Color32::WHITE);
+            painter.rect_stroke(
+                bar,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::GRAY),
+                egui::StrokeKind::Inside,
+            );
+            let filled =
+                egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * fill.clamp(0.0, 1.0), bar.height()));
+            painter.rect_filled(filled, 0.0, egui::Color32::from_rgb(0, 0, 128));
+        }
     }
 
     /// The selected train's window: status, orders, stop/go and remove.
