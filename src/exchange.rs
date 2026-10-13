@@ -189,7 +189,7 @@ mod tests {
         // Track between the stations, at the game's prices (a straight-ish line), plus stations and a train.
         let capital = distance.round() as u32 * company::RAIL_PIECE
             + station_tiles as u32 * company::STATION_TILE
-            + company::TRAIN;
+            + crate::catalog::TrainOrder::default().price();
         eprintln!(
             "line of {distance:.0} tiles between {people:?} people: {trips} loaded trips, £{per_year:.0} a year, capital about £{capital}, payback {:.2} years",
             capital as f32 / per_year

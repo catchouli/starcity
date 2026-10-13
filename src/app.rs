@@ -2104,7 +2104,7 @@ impl StarcityApp {
     }
 
     /// Starts following (the camera jumps there).
-    pub(super) fn start_following(&mut self, f: Followed) {
+    fn start_following(&mut self, f: Followed) {
         if let Some(p) = self.followed_position(f) {
             self.camera.focus.x = p.x;
             self.camera.focus.z = p.y;
@@ -2790,7 +2790,7 @@ impl FrameTimes {
 
 /// Something the camera can follow.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Followed {
+enum Followed {
     Train(u32),
     Craft(craft::Craft),
 }

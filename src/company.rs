@@ -16,8 +16,6 @@ pub const STATION_TILE: u32 = 200;
 /// A bus stop on a road tile.
 pub const BUS_STOP: u32 = 300;
 pub const SIGNAL: u32 = 30;
-/// A locomotive and two coaches.
-pub const TRAIN: u32 = 5_000;
 /// Moving one terrain corner by one block. Gentler than building the track itself
 /// would suggest, so that crossing hills is a cost and not a wall.
 pub const TERRAFORM_STEP: u32 = crate::network::TERRAFORM_COST;
@@ -25,8 +23,6 @@ pub const TERRAFORM_STEP: u32 = crate::network::TERRAFORM_COST;
 pub fn terraform_cost(plan: &crate::network::Plan) -> u32 {
     plan.terraform_steps * TERRAFORM_STEP
 }
-/// Running costs per year (charged monthly, earning or not); boats and planes carry theirs (catalog.rs).
-const TRAIN_RUNNING: u32 = 600;
 /// Upkeep per piece of road or track per year, and per station tile, port, airport.
 const PIECE_UPKEEP: f32 = 2.0;
 const STATION_UPKEEP: u32 = 200;

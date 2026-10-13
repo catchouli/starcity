@@ -112,9 +112,6 @@ pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
 pub struct FreightLine {
     pub line: Line,
     pub cargo: crate::cargo::Cargo,
-    /// The industries it joins (indices into `Industries::list`).
-    pub maker: usize,
-    pub user: usize,
 }
 
 /// Joins industries that make something to ones that use it, nearest first, so the demo shows every
@@ -181,12 +178,7 @@ pub fn build_freight_for(
                 match try_line(rw, centre(a), centre(b), &industry_reach(a.size()), &industry_reach(b.size())) {
                     Some(line) => {
                         used.push((a.id, b.id));
-                        lines.push(FreightLine {
-                            line,
-                            cargo,
-                            maker: a.id,
-                            user: b.id,
-                        });
+                        lines.push(FreightLine { line, cargo });
                         break;
                     }
                     None => (*rw.rails, *rw.stations) = saved,
