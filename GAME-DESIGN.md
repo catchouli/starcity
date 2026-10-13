@@ -933,4 +933,14 @@ The web build is a hard constraint (ENGINE.md §9.1), so the economy is designed
 13. **Revisions:** rewinding is powerful, and might undermine consequence. Limited use (three per game) and a heavy compute price are the proposal.
 16. **The Assistant's voice:** a cheerful 2000 helper that gently sends itself up (the paperclip joke) is charming, but the tone must stay helpful. Reviewing with real players is the test.
 15. **HQ gating strength:** the proposal is soft (visible checklists, sandbox unlock). Should levels 2–3 be skippable by paying more, and is a relocation penalty right?
+17. **Guesses to review (2026-10-13 autonomous session).** Built on my reading of the design; each is a dial:
+    - *Compute:* self-improvement ×10 every four years after 2028, so a couple of AI campuses reach the 1 PCU the Convergence Array asks for by the mid-2040s. Hosting income per batch (with the 2024–28 boom ×3) is probably too generous late on.
+    - *HQ levels 4–6* (Data campus, Glass spire, AI Citadel): prices £400k / £1M / £3M and company values £2M / £5M / £15M are untested against a real game; the Citadel opens the charter whatever the year.
+    - *Charter:* Planet only makes building dearer (+30% at full); Reach adds a year of Tech Pace and 40% to launches. People agents build a whole rail line to the biggest unserved town on their own; is that too much autonomy, or exactly the point?
+    - *Endings:* Stagnation is now "the Array wasn't finished", Ascension needs Wellbeing under 50 with Profit + Reach at half or more, Commons otherwise.
+    - *Space:* the moon base pays £100k a launch at twice the cost and sends back Regolith (and Helium-3 from 2034); asteroids pay £220k at four times. What comes back appears at the spaceport's stations.
+    - *Cities:* Prosperity adds up to ×5 growth; floors cap at 90 by 2050 and people per floor reach 30, but the building models don't get taller than ~8 tiles, so the numbers grow faster than the skyline.
+    - *Flying cars and expressway pods* are scenery; the expressway's only effect is +0.8 Prosperity for cities it reaches.
+    - *The news by era:* IE (2000s), phone (2010s), feed (2020s), SIGNAL (2030+); the exact look per era is open.
+18. **The moon (Phase 13) needs a design pass** before it's built: how switching maps works (a button, both maps simulated or only the visible one), what a dome is mechanically, and the lunar look (black sky, no ocean: a shader change).
 14. ~~**The moon and the globe: same save?**~~ Decided: same save, optional, and reversible (§10.13).
