@@ -1,4 +1,4 @@
-# Starcity — Engine and world design
+# Starcity — Engine and world
 
 > How the game is built: terrain, infrastructure, rendering, the web build and where the code stands. The game itself (the pitch, the economy, the eras, the plan) is in [GAME-DESIGN.md](GAME-DESIGN.md). Section numbers here are kept stable because code comments point at them, so there are gaps (§1–2, §10–11 moved or retired).
 

@@ -1,6 +1,6 @@
 # Starcity — Game design
 
-> The whole design as we understand it today: what the game is, what already exists, and what is still to build. Companion to [DESIGN.md](DESIGN.md) (engine, terrain and rendering; read that for how things are built). Numbers are first-pass dials, not promises. Items marked ✅ are implemented; everything else is planned. §11 is the implementation plan and the next steps. Last revised 2026-10-12.
+> The whole design as we understand it today: what the game is, what already exists, and what is still to build. Companion to [ENGINE.md](ENGINE.md) (engine, terrain and rendering; read that for how things are built). Numbers are first-pass dials, not promises. Items marked ✅ are implemented; everything else is planned. §11 is the implementation plan and the next steps. Last revised 2026-10-12.
 
 **The pitch.** An OpenTTD-style transport tycoon on 3D voxel terrain, played through fifty years of the future. You start in **2000**, as the web takes off, moving coal, people and goods by road, rail, sea and air. Around 2025 the world starts to turn to chrome; **data centres** and then **AI campuses** swallow the grid; from about 2030 **spaceports** open the moon and later the asteroids, whose dust and metals feed new industries on the ground. By **2050** the technological singularity arrives: whole cities of chrome orbs, rockets at every coast, and a final megaproject to finish. The score is not money but **compute**, a meter on screen that grows from thousands to numbers with no names (§5.9). The moon is playable from about 2038, Mars by the late 2040s, and the singularity opens the solar system and then the galaxy (§10.10–10.12).
 
@@ -37,7 +37,7 @@ You run a transport company. Cargo appears at industries and people appear in to
 
 1. **What to carry.** A coal mine is one-way and bulky; passengers are two-way; goods are the best-paid cargo but need two supplied industries before they exist.
 2. **How to carry it.** Road is cheap and slow, rail is the workhorse, boats suit coasts and oil, planes cross anything but need big airports. Each has cheap and expensive models.
-3. **Where to build.** Terrain costs money (levelling, §3 of DESIGN.md), distance pays, and industries are scattered so that the best routes are never obvious.
+3. **Where to build.** Terrain costs money (levelling, §3 of ENGINE.md), distance pays, and industries are scattered so that the best routes are never obvious.
 4. **How to keep it running.** Service quality drives how much cargo industries give you, and starved industries close.
 
 The tone to aim for is "one more line": simple rules that interlock, never a spreadsheet. If a rule can't be explained in a tooltip, it's too complicated.
@@ -93,7 +93,7 @@ The world is the scoreboard: the same map shows the ending, because it has been 
 ## 2. Time and money
 
 - **Calendar** ✅ (`clock.rs`): the real Gregorian calendar, starting Saturday 1 January 2000. **One calendar day is one second of simulation**, so at normal speed a month is about 30 s and a year about 6 minutes, and the game runs 2000 to 2050 in about **5 hours at 1×** (about 76 minutes at 4×, 38 at 8×). The speed buttons (pause, 1×, 2×, 4×, 8×) multiply *everything*: the calendar, vehicles, towns, the light.
-- **Time of day is separate from the calendar.** The light (DESIGN.md §7b) cycles once every 120 seconds of simulation, whatever the date: slow enough to look good, and independent of the calendar so the calendar can run at the pace a 50-year game needs. The toolbar shows the date with a sun or moon beside it for the time of day, next to the speed buttons.
+- **Time of day is separate from the calendar.** The light (ENGINE.md §7b) cycles once every 120 seconds of simulation, whatever the date: slow enough to look good, and independent of the calendar so the calendar can run at the pace a 50-year game needs. The toolbar shows the date with a sun or moon beside it for the time of day, next to the speed buttons.
 - **The economy uses the same time.** *A tick is 1 simulated second, an economy month is 30 s and an economy year is 360 s*, close to the calendar's own month and year, so "monthly" and "yearly" in this document line up with what the date shows. Anything below given "per year", "per month" or in "days" means these units. Production, finances and industry changes tick monthly; vehicles are real-time.
 - **Starting position:** a tiny company with £40,000 cash and no loan, and a garage for a headquarters (§9.1), plus £20,000 of seed money from the council's first contract (§9.3). Upgrading it to a Depot office (£10,000) opens a loan limit of £200,000 (borrow and repay in £10,000 steps), 5% a year interest on the loan, charged monthly.
 - **Income:** paid on delivery, to the company, when cargo is unloaded at a station that accepts it. See §3.
@@ -396,7 +396,7 @@ A well-fed city is the thing to stare at: a few thousand people in 2000, and, if
 
 ## 6. Passengers and mail
 
-Passengers behave as now (buildings near a station trickle people, trains unload everyone at each stop, §5 of DESIGN.md) with two changes:
+Passengers behave as now (buildings near a station trickle people, trains unload everyone at each stop, §5 of ENGINE.md) with two changes:
 
 - **Destinations are implied**: a load of passengers is paid on distance from where they boarded, as in §3, so long routes between big towns pay more, which is the reason to link cities, not hamlets.
 - **Mail** is generated in parallel at a fifth of the rate, and carried by mail wagons/vans and aircraft holds. A mail van is the cheapest way to get a small town paying its way.
@@ -639,7 +639,7 @@ The world turns chrome gradually: a little from 2025, extremely by 2050. It's bu
   The Compute meter is always on top and is the first thing to change at each step.
 
   *Cost on the web:* real background blur is expensive in egui and on mobile GPUs, so Glass and Sleek fake it with gradients and a baked noise; Holo and Liquid chrome are single draw calls per panel with a cheap shader. An option in settings keeps "Classic" for anyone who prefers it. `win95.rs` becomes a `Theme` trait (`bevel`, `title_bar`, `button`, `panel`) with one struct per look, blended for 6 months when the year crosses a boundary.
-- **Day/night** (DESIGN.md §7b) already shows it: chrome picks up the sunset, emissive strips glow at night, and the sky reflected in a chrome orb changes with the time of day. Later: lit windows on every era's buildings.
+- **Day/night** (ENGINE.md §7b) already shows it: chrome picks up the sunset, emissive strips glow at night, and the sky reflected in a chrome orb changes with the time of day. Later: lit windows on every era's buildings.
 - **Cost on the web:** one extra uniform and a few shader lines; the model fragment shader is a gradient lookup, with no textures, no extra passes and no per-object work. Terrain, water and clouds are unchanged.
 
 ### 10.4 Space
@@ -899,7 +899,7 @@ struct Level { world, roads, rails, towns, vehicles, industries, power, .. }  //
 
 ### Web performance budget
 
-The web build is a hard constraint (DESIGN.md §9.1), so the economy is designed around it:
+The web build is a hard constraint (ENGINE.md §9.1), so the economy is designed around it:
 
 - **Industries are few** (about 40–80), static, drawn as a few boxes each in the static box buffer. No per-frame cost.
 - **The economy runs monthly**: one pass over industries and stations every 30 game seconds, well under a millisecond. Vehicles touch it only on arrival.
