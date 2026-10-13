@@ -11,6 +11,11 @@ impl StarcityApp {
         self.compute.rate * crate::company::MONTH_SECONDS as f64
     }
 
+    /// The year the world's technology has reached for this company: the calendar year plus the Tech Pace.
+    pub(super) fn tech_year(&self) -> i32 {
+        self.year + self.company.effects.tech_pace.floor() as i32
+    }
+
     /// Re-works what the programs are doing from the allocation and last month's compute.
     pub(super) fn refresh_effects(&mut self) {
         self.company.effects = compute::effects(&self.compute_alloc, self.year, self.monthly_cu(), self.assets.trains);
@@ -61,14 +66,19 @@ impl StarcityApp {
                     compute::Program::Analytics => "fares",
                     compute::Program::Optimiser => "running costs",
                     compute::Program::Design => "construction",
+                    compute::Program::Research => "years of technology",
                 };
-                let sign = if p == compute::Program::Analytics { "+" } else { "-" };
+                let research = p == compute::Program::Research;
+                let sign = if p == compute::Program::Analytics { "+" } else if research { "" } else { "-" };
+                let (now_text, top_text) = if research {
+                    (format!("{now:.1}"), format!("{ceiling:.1}"))
+                } else {
+                    (format!("{:.1}%", now * 100.0), format!("{:.0}%", ceiling * 100.0))
+                };
                 ui.label(format!(
-                    "{} Now {}{:.1}% on {what}, at most {sign}{:.0}% this year. A company your size needs {} a month to run it fully.",
+                    "{} Now {}{now_text} on {what}, at most {sign}{top_text} this year. A company your size needs {} a month to run it fully.",
                     p.blurb(),
                     if now > 0.0 { sign } else { "" },
-                    now * 100.0,
-                    ceiling * 100.0,
                     compute::show(p.need(year, fleet)),
                 ));
             }

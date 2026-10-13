@@ -72,9 +72,11 @@ pub enum Program {
     Analytics,
     Optimiser,
     Design,
+    /// Pulls every model and industry's introduction year forward (the Tech Pace).
+    Research,
 }
 
-pub const PROGRAMS: [Program; 3] = [Program::Analytics, Program::Optimiser, Program::Design];
+pub const PROGRAMS: [Program; 4] = [Program::Analytics, Program::Optimiser, Program::Design, Program::Research];
 
 impl Program {
     pub fn index(self) -> usize {
@@ -86,6 +88,7 @@ impl Program {
             Program::Analytics => "Route analytics",
             Program::Optimiser => "Fleet optimiser",
             Program::Design => "Generative design",
+            Program::Research => "Research",
         }
     }
 
@@ -94,6 +97,7 @@ impl Program {
             Program::Analytics => "Better timetables and loading: every fare pays more.",
             Program::Optimiser => "Smoother running and fewer queues: lower running costs.",
             Program::Design => "Plans cheaper cuts and routes: lower construction costs.",
+            Program::Research => "Brings new machines and industries forward: the Tech Pace, in years.",
         }
     }
 
@@ -102,6 +106,7 @@ impl Program {
             Program::Analytics => 2003,
             Program::Optimiser => 2015,
             Program::Design => 2026,
+            Program::Research => 2030,
         }
     }
 
@@ -112,6 +117,7 @@ impl Program {
             Program::Analytics => (0.03, 0.12, 22.0),
             Program::Optimiser => (0.05, 0.25, 20.0),
             Program::Design => (0.10, 0.50, 14.0),
+            Program::Research => (0.5, 4.0, 20.0),
         };
         let t = ((year - self.from_year()) as f32 / span).clamp(0.0, 1.0);
         lo + (hi - lo) * t
@@ -123,6 +129,7 @@ impl Program {
             Program::Analytics => 300.0,
             Program::Optimiser => 500.0,
             Program::Design => 800.0,
+            Program::Research => 1500.0,
         };
         base * (1.0 + fleet as f64) * efficiency(year as f64 + 0.5).powf(0.8)
     }
@@ -141,7 +148,7 @@ impl Program {
 /// How the monthly compute is shared: a fraction for each program, the rest sold as hosting.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Allocation {
-    pub share: [f32; 3],
+    pub share: [f32; 4],
 }
 
 impl Allocation {
@@ -162,6 +169,8 @@ pub struct Effects {
     pub fare_bonus: f32,
     pub running_discount: f32,
     pub build_discount: f32,
+    /// Years the world's technology is pulled forward for this company.
+    pub tech_pace: f32,
 }
 
 pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Effects {
@@ -170,6 +179,7 @@ pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Ef
         fare_bonus: e(Program::Analytics),
         running_discount: e(Program::Optimiser),
         build_discount: e(Program::Design),
+        tech_pace: e(Program::Research),
     }
 }
 

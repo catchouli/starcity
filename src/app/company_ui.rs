@@ -331,6 +331,13 @@ impl StarcityApp {
             trains: self.assets.trains,
             town_served,
             vehicles: self.assets.trains + self.assets.ferries + self.assets.planes,
+            compute_sites: self
+                .industries
+                .list
+                .iter()
+                .filter(|i| !i.closed && i.kind.compute_scale() > 0.0)
+                .count() as u32,
+            compute_total: self.compute.total,
         };
         let active = self.company.contracts.iter().position(|c| !c.done);
         self.link =
@@ -733,7 +740,7 @@ impl StarcityApp {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
                         crate::ui::icon_assistant(ui.painter(), rect);
-                        ui.label(egui::RichText::new("Assistant").strong());
+                        ui.label(egui::RichText::new(company::assistant_name(self.year)).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .small_button("x")

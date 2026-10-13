@@ -13,8 +13,8 @@ impl StarcityApp {
         if self.ui.tool != crate::ui::Tool::Train {
             return;
         }
-        self.buy.fix(self.year);
-        let year = self.year;
+        let year = self.tech_year();
+        self.buy.fix(year);
         let mut order = self.buy;
         let mut open = true;
         let money = super::company_ui::money;

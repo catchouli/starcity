@@ -256,6 +256,9 @@ pub struct Facts {
     /// The biggest population of a town one of the company's stations serves.
     pub town_served: u32,
     pub vehicles: u32,
+    /// Working server farms, data centres and AI campuses, and everything they have made.
+    pub compute_sites: u32,
+    pub compute_total: f64,
 }
 
 /// 12345 -> "£12,345".
@@ -801,6 +804,19 @@ impl Company {
                 "Click your garage and upgrade it: it opens the loan and bigger fleets.",
             );
         }
+        // Once the Regional office stands, the future is waiting: compute is the score.
+        if self.hq_level >= 2 && facts.compute_total < 1_000.0 {
+            if facts.compute_sites == 0 {
+                return NextStep::plain(
+                    "Start making compute",
+                    "Compute is the real score. Company → Fund an industry → Server farm, then haul it Goods from a factory (a station beside each).",
+                );
+            }
+            return NextStep::plain(
+                "Feed your server farm",
+                "A server farm turns Goods into compute. Run a goods train from a factory to a station beside the farm, and keep it powered by a power station nearby.",
+            );
+        }
         if let Some(next) = LEVELS.get(self.hq_level as usize + 1) {
             let reqs = self.requirements(assets, facts);
             if let Some(unmet) = reqs.iter().find(|r| !r.met) {
@@ -914,6 +930,18 @@ impl Company {
             }
         }
         messages
+    }
+}
+
+/// Who is talking: the Assistant changes with the era (GAME-DESIGN.md §9.2). A cheerful desktop
+/// helper in 2000, a quiet card in the 2010s, a voice in the 2020s, and by the 2030s one that
+/// speaks for the company's agents.
+pub fn assistant_name(year: i32) -> &'static str {
+    match year {
+        ..=2009 => "Pip, your helper",
+        2010..=2019 => "Assistant",
+        2020..=2029 => "Atlas",
+        _ => "Atlas (agents online)",
     }
 }
 
@@ -1191,5 +1219,29 @@ mod tests {
         c.hq_level = 3;
         assert!(c.requirements(&Assets::default(), &Facts::default()).is_empty());
         assert!(relocation_cost(3) > relocation_cost(2));
+    }
+
+    #[test]
+    fn the_assistant_changes_with_the_era_and_points_at_compute_once_the_regional_office_stands() {
+        assert_ne!(assistant_name(2005), assistant_name(2025));
+        let mut c = Company::new(2012);
+        c.hq_level = 2;
+        let facts = Facts { compute_sites: 1, ..Default::default() };
+        let step = c.next_step(&Assets::default(), &facts, &LinkFacts::default());
+        assert!(step.detail.contains("compute"), "{}", step.detail);
+        let farms = Facts { compute_sites: 0, ..Default::default() };
+        assert!(c.next_step(&Assets::default(), &farms, &LinkFacts::default()).detail.contains("Fund an industry"));
+        let made = Facts { compute_total: 5_000.0, compute_sites: 1, ..Default::default() };
+        assert!(!c.next_step(&Assets::default(), &made, &LinkFacts::default()).detail.contains("compute"));
+    }
+
+    #[test]
+    fn research_pulls_technology_forward_late_in_the_game() {
+        use crate::compute::{Allocation, Program, effects};
+        let mut a = Allocation::default();
+        a.set(Program::Research, 1.0);
+        assert_eq!(effects(&a, 2025, 1e12, 10).tech_pace, 0.0, "not unlocked before 2030");
+        let late = effects(&a, 2048, 1e12, 10).tech_pace;
+        assert!(late > 3.0 && late <= 4.0, "{late}");
     }
 }

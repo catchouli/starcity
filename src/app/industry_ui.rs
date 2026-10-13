@@ -144,7 +144,7 @@ impl StarcityApp {
     /// The Fund an industry window: what can be founded this year, and for how much.
     pub(super) fn fund_window(&mut self, ctx: &egui::Context) {
         let mut open = self.ui.show_fund;
-        let year = self.year;
+        let year = self.tech_year();
         let cash = self.company.cash;
         let (sandbox, level) = (self.company.sandbox, self.company.hq_level);
         let mut chosen = None;
@@ -177,10 +177,11 @@ impl StarcityApp {
     /// When the year turns, the industries it brings in are founded: data centres from 2005, AI campuses
     /// from 2020 (GAME-DESIGN.md §5.8).
     fn found_industries(&mut self) {
-        if self.founded_year == self.year {
+        let year = self.tech_year();
+        if self.founded_year == year {
             return;
         }
-        self.founded_year = self.year;
+        self.founded_year = year;
         let before = self.industries.list.len();
         let moved = self.industries.found(
             &mut self.world,
@@ -188,7 +189,7 @@ impl StarcityApp {
             &self.roads,
             &self.rails,
             self.params.seed,
-            self.year,
+            year,
         );
         if self.industries.list.len() > before {
             self.levelled_pending.extend(moved);
