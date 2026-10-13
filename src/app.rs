@@ -1,3 +1,4 @@
+mod agents;
 mod catalog_ui;
 mod company_ui;
 mod compute_ui;
@@ -151,6 +152,8 @@ pub struct StarcityApp {
     news: Vec<usize>,
     /// Launches flown, and the rolls that decide whether they fail.
     space_launches: u32,
+    /// Fractions of an agent action carried to the next month.
+    agent_budget: f32,
     /// Rockets in flight: (x, z, seconds since lift-off).
     rockets: Vec<(f32, f32, f32)>,
     launch_rng: u64,
@@ -304,6 +307,7 @@ impl StarcityApp {
             compute_alloc: Default::default(),
             news: Vec::new(),
             space_launches: 0,
+            agent_budget: 0.0,
             rockets: Vec::new(),
             launch_rng: 0x2545_F491_4F6C_DD1D,
             last_event_date: 2000.0,

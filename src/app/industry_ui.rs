@@ -34,6 +34,7 @@ impl StarcityApp {
         let made = self.industries.month();
         self.compute_month();
         self.space_month();
+        self.agents_month();
         let mut moved = vec![0u32; self.industries.list.len()];
         for (id, cargo, units) in made {
             let ind = &self.industries.list[id];
