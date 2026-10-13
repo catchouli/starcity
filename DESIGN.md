@@ -1,20 +1,8 @@
-# Starcity — Design Doc
+# Starcity — Engine and world design
 
-> Working title. A living document: started 2026-10-11 from an initial brain dump, expect it to change.
+> How the game is built: terrain, infrastructure, rendering, the web build and where the code stands. The game itself (the pitch, the economy, the eras, the plan) is in [GAME-DESIGN.md](GAME-DESIGN.md). Section numbers here are kept stable because code comments point at them, so there are gaps (§1–2, §10–11 moved or retired).
 
-## 1. The pitch
-
-An OpenTTD-style transport tycoon / city-growth game where the world is **real 3D voxel terrain** (Minecraft-style blocks) instead of a flat heightmap. You can build roads and railways between towns, dig tunnels through hills, and flatten land like in TTD. Industries (coal mines, timber yards, quarries, power stations, factories…) and settlements spawn around the map. Towns grow **organically and physically**: a town spreads outward from where it started and can eventually merge with its neighbours into a bigger city.
-
-It's written in **Rust**. It compiles to **WebAssembly** and runs fast in the browser, and it ships as a **static site on GitHub Pages**, so anyone can play from a link.
-
-## 2. Core pillars
-
-1. **Hilly but buildable terrain.** Smooth rolling hills, not noisy high-frequency bumps. You should be able to run a railway up, down and across them, and there should be naturally flat areas where settlements form.
-2. **Terrain you can change.** Dig tunnels, cut through hills, and flatten land down to a plane (like TTD's landscaping tools).
-3. **Organic settlements.** Towns are networks of roads plus buildings that grow outward and can join up with each other.
-4. **Transport drives the economy.** Moving people and goods between places creates economic activity, and economic activity makes towns grow faster.
-5. **Instant to play.** Static web build, no install.
+Pillars the engine serves: hilly but buildable terrain; terrain you can change; organic settlements; transport drives the economy; instant to play (static web build, no install).
 
 ## 3. World & terrain
 
@@ -217,58 +205,15 @@ tyke's best piece is its camera. It should be ported as-is:
 
 ## 10. Relationship to `tyke`
 
-`tyke/` (Haskell, 2016: SDL2 + LambdaCube + imgui + reactive-banana) is kept here only as a reference and will be removed. What it contains:
+`tyke/` (Haskell, 2016) is kept in the repo only as a reference for the original camera (§9.2) and will be removed. Nothing else from it is used.
 
-- `Game/Terrain/Data.hs`: a chunk is `dimensions + Vector Bool`, indexed `x + dx*(y + dy*z)`.
-- `Game/Terrain/Rendering.hs`: a naive per-block mesher that emits a face wherever the neighbour is air. It uses a two-tile texture atlas (side/top) from `grass_block.png`.
-- `Game/Simulation/Camera/MixedCamera.hs`: the camera described in §9.2.
-- `pipelines/blocks.lc`: a simple textured, Lambert-lit shader (light dir (−0.5, 1, 1), 0.1 ambient).
+## 11. Engine to do
 
-Terrain generation was never really started: it only produced random noise for one 10×1×10 chunk. So the Rust "port" is really a rewrite that keeps tyke's data layout, mesher idea, shader and camera.
-
-## 11. Roadmap
-
-**M0 — Skeleton** ✅
-- Cargo workspace, `wgpu` + `winit` window, clear-colour frame running both natively and in the browser.
-- GitHub Actions: build wasm, deploy to GitHub Pages.
-
-**M1 — Voxel engine (tyke port)** ✅
-- Chunk storage, face-culled mesher (then greedy), textured, lit blocks.
-- Port the mixed ortho/perspective camera.
-- egui debug overlay (FPS, camera info).
-
-**M2 — Terrain generation** ✅ (except the settlement-site overlay)
-- Corner heightmap → slope shapes → voxels.
-- Slope geometry in the mesher.
-- Live-tunable generation parameters and seed in egui. Iterate until the hills look right.
-- Overlay showing the flatness score and candidate settlement sites.
-
-**M3 — Win95 UI, roads & rail drawing**
-- Win95 egui theme and top toolbar (§8). ✅
-- Tile picking (mouse ray → tile/corner) and a hover highlight.
-- Road tool: drag to draw along an axis or a 45° diagonal, with auto-connecting road tiles. ✅ Remove-road tool ✅.
-- Rail tool: drag to draw track ✅, and place path signals ✅.
-- Bulldoze tool and grass regrowth (first use of the fixed-tick simulation). ✅
-- Tile picking and hover/drag highlight ✅. Loading dialog with download progress ✅.
-- Incremental re-meshing of edited chunks.
-
-**M4 — Terraforming**
-- Raise, lower, level, dig and fill.
-
-**M5 — Settlements** ✅
-- Town founding and naming, growth along roads, buildings, passengers and service-driven growth (§5).
-
-**M6 — Trains & stations**
-- Trains ✅: placed with the train tool; follow the track graph (edge midpoints, at most 45° per step); accelerate and brake to stop points; reverse at dead ends; reserve paths through path signals and wait when blocked; crash head-on on unsignalled track; wrecks are cleared after a few seconds. Space pauses. They wander (random at junctions) until stations and orders exist.
-- Stations, orders and routing ✅ (§4.4).
-- Next: passengers and towns to give them somewhere to go.
-
-**M7 — Industries & economy**
-- Industry spawning, cargo chains, growth feedback.
-
-**Later**
-- Eras, chrome styling and space (§7c).
+Done: skeleton and CI, voxel engine, terrain generation, Win95 UI, roads, rail, signals, bulldozer, settlements, trains, stations and orders (see §13 for the rest). Still open:
+- **Terraforming tools** (raise, lower, level, dig; sloped tunnels; flood-fill water, §3.1).
+- Incremental re-meshing of edited chunks, settlement-site overlay (M2).
 - Visible cars and people, merging conurbations, save/load, bridges, rivers.
+- Everything on the game side is planned in GAME-DESIGN.md §11.
 
 ## 12. Open questions
 

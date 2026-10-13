@@ -3,7 +3,7 @@
 **▶ Play in your browser: https://catchouli.github.io/starcity/**
 
 A transport tycoon / city-growth game on voxel terrain, in Rust, playable in the browser.
-See [DESIGN.md](DESIGN.md) for the plan and [CREDITS.md](CREDITS.md) for asset licenses.
+See [GAME-DESIGN.md](GAME-DESIGN.md) for the game and [DESIGN.md](DESIGN.md) for the engine and [CREDITS.md](CREDITS.md) for asset licenses.
 
 ## Running
 
