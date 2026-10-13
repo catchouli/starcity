@@ -60,6 +60,44 @@ impl Loco {
     }
 }
 
+/// A boat or plane on sale (GAME-DESIGN.md §7.3–7.4).
+#[derive(Clone, Copy, Debug)]
+pub struct Craft {
+    pub name: &'static str,
+    pub price: u32,
+    /// Tiles a second (cruise, for planes).
+    pub speed: f32,
+    pub capacity: u32,
+    /// A year.
+    pub running: u32,
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Craft {
+    pub fn available(&self, year: i32) -> bool {
+        (self.from..=self.to).contains(&year)
+    }
+}
+
+pub const BOATS: [Craft; 3] = [
+    Craft { name: "Ferry", price: 6_000, speed: 2.5, capacity: 40, running: 500, from: 1950, to: 2040 },
+    Craft { name: "Large ferry", price: 16_000, speed: 3.2, capacity: 120, running: 1_300, from: 2008, to: 2200 },
+    Craft { name: "Wavepiercer", price: 40_000, speed: 5.0, capacity: 240, running: 2_600, from: 2032, to: 2200 },
+];
+
+pub const PLANES: [Craft; 4] = [
+    Craft { name: "Sparrow", price: 9_000, speed: 7.0, capacity: 16, running: 900, from: 1950, to: 2030 },
+    Craft { name: "Kite", price: 24_000, speed: 9.0, capacity: 40, running: 2_200, from: 1990, to: 2200 },
+    Craft { name: "Condor", price: 60_000, speed: 14.0, capacity: 100, running: 6_000, from: 2004, to: 2200 },
+    Craft { name: "Swift (electric)", price: 90_000, speed: 18.0, capacity: 140, running: 5_000, from: 2034, to: 2200 },
+];
+
+/// The cheapest one on sale in `year` (what a buy defaults to).
+pub fn default_craft(list: &[Craft], year: i32) -> usize {
+    list.iter().position(|c| c.available(year)).unwrap_or(0)
+}
+
 /// What one wagon for this cargo costs (a coach, mail van, hopper, tanker, flatbed, goods van, refrigerated van).
 pub fn wagon_price(cargo: Cargo) -> u32 {
     match cargo {

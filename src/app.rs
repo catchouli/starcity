@@ -156,6 +156,9 @@ pub struct StarcityApp {
     space_launches: u32,
     /// Fractions of an agent action carried to the next month.
     agent_budget: f32,
+    /// The boat and plane models picked in their buy windows (indices into `catalog::BOATS` / `PLANES`).
+    buy_boat: usize,
+    buy_plane: usize,
     /// The governor's charter, the Wellbeing ledger (0–100) and the ending once 2050 closes.
     charter: crate::charter::Charter,
     wellbeing: f32,
@@ -317,6 +320,8 @@ impl StarcityApp {
             news: Vec::new(),
             space_launches: 0,
             agent_budget: 0.0,
+            buy_boat: 0,
+            buy_plane: 1,
             charter: Default::default(),
             wellbeing: 0.0,
             ending_shown: false,
@@ -2295,6 +2300,7 @@ impl eframe::App for StarcityApp {
         self.charter_window(&ctx);
         self.ending_window(&ctx);
         self.train_buy_window(&ctx);
+        self.craft_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {
             self.params.seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);

@@ -9,6 +9,52 @@ use eframe::egui;
 
 impl StarcityApp {
     /// Shown while the Place train tool is active; click plain track to put the train down.
+    /// The Buy a boat / Buy a plane window, while the Ferry or Plane tool is active.
+    pub(super) fn craft_buy_window(&mut self, ctx: &egui::Context) {
+        let (list, mut chosen, title): (&[crate::catalog::Craft], usize, &str) = match self.ui.tool {
+            crate::ui::Tool::Boat => (&crate::catalog::BOATS, self.buy_boat, "Buy a boat"),
+            crate::ui::Tool::Plane => (&crate::catalog::PLANES, self.buy_plane, "Buy a plane"),
+            _ => return,
+        };
+        let year = self.tech_year();
+        if !list[chosen].available(year) {
+            chosen = crate::catalog::default_craft(list, year);
+        }
+        let money = super::company_ui::money;
+        let mut open = true;
+        win95::window(ctx, title, &mut open, egui::pos2(300.0, 130.0), |ui| {
+            ui.set_width(330.0);
+            for (i, c) in list.iter().enumerate() {
+                if year < c.from {
+                    ui.add_enabled(false, egui::Label::new(format!("{}: coming around {}", c.name, c.from)));
+                    continue;
+                }
+                if !c.available(year) {
+                    continue;
+                }
+                let text = format!(
+                    "{}  {}  {} seats  {:.1} tiles/s  {} a year",
+                    c.name,
+                    money(c.price as i64),
+                    c.capacity,
+                    c.speed,
+                    money(c.running as i64)
+                );
+                if ui.selectable_label(chosen == i, text).clicked() {
+                    chosen = i;
+                }
+            }
+            ui.label(egui::RichText::new("Then click water (boats) or an airport (planes) to place it.").small());
+        });
+        match self.ui.tool {
+            crate::ui::Tool::Boat => self.buy_boat = chosen,
+            _ => self.buy_plane = chosen,
+        }
+        if !open {
+            self.ui.tool = crate::ui::Tool::Pointer;
+        }
+    }
+
     pub(super) fn train_buy_window(&mut self, ctx: &egui::Context) {
         if self.ui.tool != crate::ui::Tool::Train {
             return;

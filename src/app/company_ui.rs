@@ -301,6 +301,10 @@ impl StarcityApp {
             train_running: self.trains.list.iter().map(|t| t.running).sum(),
             ferries: self.boats.list.len() as u32,
             planes: self.planes.list.len() as u32,
+            craft_value: self.boats.list.iter().map(|b| b.price).sum::<u32>()
+                + self.planes.list.iter().map(|p| p.price).sum::<u32>(),
+            craft_running: self.boats.list.iter().map(|b| b.running).sum::<u32>()
+                + self.planes.list.iter().map(|p| p.running).sum::<u32>(),
             road_pieces: self.player_roads,
             rail_pieces: if self.assets_version == self.track_version {
                 self.assets.rail_pieces

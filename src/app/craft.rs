@@ -2,8 +2,7 @@
 //! windows, the props that draw them, passenger loading, and the demo.
 
 use super::*;
-use crate::boats;
-use crate::planes;
+use crate::catalog::{BOATS, PLANES};
 use crate::sea::Sea;
 use crate::terminals::{Blockers, Kind, OrderEdit, Orders, SitePlan, TerminalId, plan_airport, plan_port};
 use crate::terrain::{BLOCK_HEIGHT, edit};
@@ -112,10 +111,10 @@ impl StarcityApp {
             Tool::Boat => {
                 let water = self.sea().is_water(tile.0, tile.1);
                 if water {
-                    self.show_cost(company::FERRY, 0);
+                    self.show_cost(BOATS[self.buy_boat].price, 0);
                 }
                 self.site_hint = Some(if water {
-                    "Click to put a ferry here".to_string()
+                    format!("Click to put a {} here", BOATS[self.buy_boat].name.to_lowercase())
                 } else {
                     "Ferries go on water".to_string()
                 });
@@ -136,7 +135,7 @@ impl StarcityApp {
                     .and_then(|id| self.terminals.get(id))
                     .is_some_and(|t| t.kind() == Kind::Airport);
                 if airport {
-                    self.show_cost(company::PLANE, 0);
+                    self.show_cost(PLANES[self.buy_plane].price, 0);
                 }
                 self.site_hint = Some(if airport {
                     "Click to park a plane here".to_string()
@@ -187,12 +186,16 @@ impl StarcityApp {
             }
             Tool::Boat => {
                 if self.sea().is_water(tile.0, tile.1) {
-                    if !self.can_add_vehicle(company::FERRY) {
+                    let model = BOATS[self.buy_boat];
+                    if !self.can_add_vehicle(model.price) {
                         return Vec::new();
                     }
                     let sea = self.sea.as_ref().unwrap();
                     if let Some(id) = self.boats.spawn(sea, tile) {
-                        self.company.spend(Item::Vehicles, company::FERRY);
+                        self.company.spend(Item::Vehicles, model.price);
+                        if let Some(b) = self.boats.get_mut(id) {
+                            (b.speed, b.capacity, b.price, b.running) = (model.speed, model.capacity, model.price, model.running);
+                        }
                         self.selected_craft = Some(Craft::Boat(id));
                         self.props_changed = true;
                     }
@@ -204,11 +207,16 @@ impl StarcityApp {
             Tool::Plane => {
                 match self.terminals.at(tile) {
                     Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::Airport) => {
-                        if !self.can_add_vehicle(company::PLANE) {
+                        let model = PLANES[self.buy_plane];
+                        if !self.can_add_vehicle(model.price) {
                             return Vec::new();
                         }
                         if let Some(id) = self.planes.spawn(&self.terminals, at) {
-                            self.company.spend(Item::Vehicles, company::PLANE);
+                            self.company.spend(Item::Vehicles, model.price);
+                            if let Some(p) = self.planes.get_mut(id) {
+                                (p.pace, p.capacity, p.price, p.running) =
+                                    (model.speed / 9.0, model.capacity, model.price, model.running);
+                            }
                             self.selected_craft = Some(Craft::Plane(id));
                             self.props_changed = true;
                         }
@@ -308,11 +316,11 @@ impl StarcityApp {
             };
             let (passengers, boarded, capacity) = match craft {
                 Craft::Boat(id) => match self.boats.get_mut(id) {
-                    Some(b) => (&mut b.passengers, &mut b.boarded, boats::CAPACITY),
+                    Some(b) => (&mut b.passengers, &mut b.boarded, b.capacity),
                     None => continue,
                 },
                 Craft::Plane(id) => match self.planes.get_mut(id) {
-                    Some(p) => (&mut p.passengers, &mut p.boarded, planes::CAPACITY),
+                    Some(p) => (&mut p.passengers, &mut p.boarded, p.capacity),
                     None => continue,
                 },
             };
@@ -516,7 +524,7 @@ impl StarcityApp {
                 };
                 let (status, load, stopped, orders) = (
                     b.status(&self.terminals),
-                    (b.passengers, boats::CAPACITY),
+                    (b.passengers, b.capacity),
                     b.stopped,
                     b.orders.clone(),
                 );
@@ -538,7 +546,7 @@ impl StarcityApp {
                 };
                 let (status, load, stopped, orders) = (
                     p.status(&self.terminals),
-                    (p.passengers, planes::CAPACITY),
+                    (p.passengers, p.capacity),
                     p.stopped,
                     p.orders.clone(),
                 );

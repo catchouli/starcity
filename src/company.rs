@@ -23,12 +23,8 @@ pub const TERRAFORM_STEP: u32 = crate::network::TERRAFORM_COST;
 pub fn terraform_cost(plan: &crate::network::Plan) -> u32 {
     plan.terraform_steps * TERRAFORM_STEP
 }
-pub const FERRY: u32 = 6_000;
-pub const PLANE: u32 = 9_000;
-/// Running costs per year (charged monthly, earning or not).
+/// Running costs per year (charged monthly, earning or not); boats and planes carry theirs (catalog.rs).
 const TRAIN_RUNNING: u32 = 600;
-const FERRY_RUNNING: u32 = 500;
-const PLANE_RUNNING: u32 = 900;
 /// Upkeep per piece of road or track per year, and per station tile, port, airport.
 const PIECE_UPKEEP: f32 = 2.0;
 const STATION_UPKEEP: u32 = 200;
@@ -134,6 +130,9 @@ pub struct Assets {
     pub train_running: u32,
     pub ferries: u32,
     pub planes: u32,
+    /// What the boats and planes cost to buy, and cost to run a year.
+    pub craft_value: u32,
+    pub craft_running: u32,
     pub road_pieces: u32,
     pub rail_pieces: u32,
     pub station_tiles: u32,
@@ -145,7 +144,7 @@ impl Assets {
     /// What the vehicles and infrastructure would cost new; half of the
     /// infrastructure and all of the vehicles count towards company value.
     pub fn value(&self) -> i64 {
-        let vehicles = self.train_value + self.ferries * FERRY + self.planes * PLANE;
+        let vehicles = self.train_value + self.craft_value;
         let infra = self.road_pieces * ROAD_PIECE
             + self.rail_pieces * RAIL_PIECE
             + self.station_tiles * STATION_TILE
@@ -673,7 +672,7 @@ impl Company {
     fn month(&mut self, assets: &Assets, messages: &mut Vec<String>) {
         if !self.sandbox {
             let running =
-                (assets.train_running + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32 / 12.0
+                (assets.train_running + assets.craft_running) as f32 / 12.0
                     * (1.0 - self.effects.running_discount)
                     * self.world.running;
             let upkeep = ((assets.road_pieces + assets.rail_pieces) as f32 * PIECE_UPKEEP
