@@ -224,7 +224,6 @@ pub struct SceneRenderer {
 struct ModelRange {
     first_index: u32,
     index_count: u32,
-    base_vertex: i32,
 }
 
 /// Models that rarely change (buildings, stations) are kept apart from ones
@@ -395,10 +394,12 @@ impl SceneRenderer {
             self.model_ranges.push(ModelRange {
                 first_index: indices.len() as u32,
                 index_count: mesh.indices.len() as u32,
-                base_vertex: vertices.len() as i32,
             });
+            // Indices point straight into the shared vertex buffer: WebGL2 (Safari, older browsers)
+            // has no base vertex, so drawing with one panics there.
+            let base = vertices.len() as u32;
             vertices.extend_from_slice(&mesh.vertices);
-            indices.extend_from_slice(&mesh.indices);
+            indices.extend(mesh.indices.iter().map(|&i| i + base));
         }
         let make = |label, data: &[u8], usage| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -711,7 +712,7 @@ impl SceneRenderer {
                         let range = self.model_ranges[id.0 as usize];
                         pass.draw_indexed(
                             range.first_index..range.first_index + range.index_count,
-                            range.base_vertex,
+                            0,
                             first..first + count,
                         );
                     }

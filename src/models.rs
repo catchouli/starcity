@@ -284,6 +284,15 @@ fn text(v: &serde_json::Value) -> Option<String> {
     v.as_str().map(|s| s.to_string())
 }
 
+/// `assets/models/models.json`: each model's metadata by file name, the fallback for files exported
+/// without their custom properties.
+fn manifest() -> &'static serde_json::Map<String, serde_json::Value> {
+    static MANIFEST: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> = std::sync::OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        serde_json::from_str(include_str!("../assets/models/models.json")).unwrap_or_default()
+    })
+}
+
 /// Custom properties from the scene and every node, flattened (first wins).
 fn extras(doc: &gltf::Document) -> serde_json::Map<String, serde_json::Value> {
     let mut all = serde_json::Map::new();
@@ -395,7 +404,14 @@ fn load_glb(name: &str, bytes: &[u8]) -> Result<(ModelMeta, MeshData), String> {
         return Err("no triangles".to_string());
     }
 
-    let props = extras(doc);
+    let mut props = extras(doc);
+    // Whatever the file doesn't say comes from models.json: Blender only exports custom properties
+    // when "Custom Properties" is ticked, and it's easy to forget.
+    if let Some(serde_json::Value::Object(known)) = manifest().get(name) {
+        for (k, v) in known {
+            props.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
     let folder = name.split('/').next().unwrap_or("");
     let stem = name.rsplit('/').next().unwrap_or(name);
     let role = match props.get("role").and_then(text) {
@@ -641,5 +657,35 @@ mod tests {
             .filter_map(|s| models.pick_building(2005, 1, (1, 1), s))
             .collect();
         assert!(seen.len() >= 2, "{seen:?}");
+    }
+
+    /// An artist re-exporting from Blender without "Custom Properties" ticked loses every extra;
+    /// models.json fills them back in by file name.
+    #[test]
+    fn a_model_exported_without_its_custom_properties_keeps_its_metadata() {
+        let name = "buildings/hq_2_regional_office";
+        let bytes = MODEL_FILES.iter().find(|(n, _)| *n == name).unwrap().1;
+        let (with, _) = load_glb(name, bytes).unwrap();
+        // The same file with every "extras" removed from its JSON chunk.
+        let len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let mut json: serde_json::Value = serde_json::from_slice(&bytes[20..20 + len]).unwrap();
+        for node in json["nodes"].as_array_mut().unwrap() {
+            node.as_object_mut().unwrap().remove("extras");
+        }
+        let mut text = serde_json::to_vec(&json).unwrap();
+        while text.len() % 4 != 0 {
+            text.push(b' ');
+        }
+        let rest = &bytes[20 + len..];
+        let mut stripped = Vec::new();
+        stripped.extend_from_slice(&bytes[0..8]);
+        stripped.extend_from_slice(&((12 + 8 + text.len() + rest.len()) as u32).to_le_bytes());
+        stripped.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        stripped.extend_from_slice(b"JSON");
+        stripped.extend_from_slice(&text);
+        stripped.extend_from_slice(rest);
+        let (without, _) = load_glb(name, &stripped).unwrap();
+        assert_eq!((without.kind.as_str(), without.tiles, without.from), (with.kind.as_str(), with.tiles, with.from));
+        assert_eq!(without.kind, "hq_2");
     }
 }

@@ -4,10 +4,18 @@ Everything you see on the map apart from the terrain, water and roads is a **glT
 
 The models here are **placeholders** made by `tools/make_placeholder_models.py` (they are original, CC0). Replace any of them with real art. The script is only for regenerating the placeholders; don't run it over your work (it will overwrite the placeholder files, and it's the only thing that does).
 
+## The quick way: replace a placeholder
+
+1. In Blender, **File → Import → glTF 2.0** the file you're replacing (say `buildings/hq_2_regional_office.glb`). It comes in at the right size, facing the right way, with its metadata attached as custom properties on the root object.
+2. Model over it, then delete the placeholder parts.
+3. **File → Export → glTF 2.0**, Format **glTF Binary (.glb)**, and save over the same file name.
+
+That's all. If "Custom Properties" isn't ticked on export, nothing is lost: the game reads anything missing from **`models.json`** in this folder, which lists every model's metadata by file name. If it is ticked, the properties in the file win, so you can change a model's years or footprint either in Blender or in `models.json`. (Tested with Blender's own import and export.)
+
 ## Adding or replacing a model
 
 1. Make the model in Blender (conventions below).
-2. Add the custom properties (below) to the **root object**.
+2. Add the custom properties (below) to the **root object**, or add a line for the new file to `models.json` (the file name without `.glb`, then its properties). Without either, the folder decides the `role`, the file name is the `kind`, and everything else takes the defaults below.
 3. **File → Export → glTF 2.0 (.glb)**. In the export options: Format **glTF Binary (.glb)**, Include → **Custom Properties** ticked, Transform → **+Y Up** (the default), Mesh → **Apply Modifiers**, Normals ticked, **no** textures (see "Not yet").
 4. Save it in the right folder with the same name to replace a model, or any new name to add one.
 5. `cargo test` checks it loads and is a sensible size. Run the game with `cargo run --release -- --demo`, open the debug window with **F3** and drag the **Date** slider (2000 to 2050) to see your model in the years it's used.

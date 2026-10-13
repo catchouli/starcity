@@ -72,13 +72,21 @@ fn main() {
             .dyn_into::<eframe::web_sys::HtmlCanvasElement>()
             .expect("#starcity is not a canvas");
 
-        let demo = eframe::web_sys::window()
+        let query = eframe::web_sys::window()
             .and_then(|w| w.location().search().ok())
-            .is_some_and(|q| q.contains("demo"));
+            .unwrap_or_default();
+        let demo = query.contains("demo");
+        let mut options = eframe::WebOptions::default();
+        // `?webgl` forces the WebGL2 fallback that Safari and older browsers get, for testing it.
+        if query.contains("webgl") {
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+                setup.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+            }
+        }
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
-                eframe::WebOptions::default(),
+                options,
                 Box::new(move |cc| Ok(Box::new(app::StarcityApp::new(cc, demo)))),
             )
             .await;

@@ -5,7 +5,11 @@ const SEGMENTS = 24;
 
 export default function initializer() {
   const bar = () => document.getElementById("loading-bar");
-  const label = () => document.getElementById("loading-label");
+  // The app may already have removed the dialog by the time the last callback runs.
+  const say = (text) => {
+    const el = document.getElementById("loading-label");
+    if (el) el.textContent = text;
+  };
 
   const setProgress = (fraction) => {
     const el = bar();
@@ -24,18 +28,18 @@ export default function initializer() {
       const mb = (current / 1e6).toFixed(1);
       if (total && current <= total) {
         setProgress(current / total);
-        label().textContent = `Downloading… ${mb} of ${(total / 1e6).toFixed(1)} MB`;
+        say(`Downloading… ${mb} of ${(total / 1e6).toFixed(1)} MB`);
       } else {
         setProgress(0.95);
-        label().textContent = `Downloading… ${mb} MB`;
+        say(`Downloading… ${mb} MB`);
       }
     },
     onComplete: () => {
       setProgress(1);
-      label().textContent = "Starting…";
+      say("Starting…");
     },
     onFailure: (error) => {
-      label().textContent = `Failed to load: ${error}`;
+      say(`Failed to load: ${error}`);
     },
   };
 }

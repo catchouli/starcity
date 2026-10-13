@@ -787,7 +787,25 @@ model("props/launch_rocket", "prop", "rocket", [
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)
+    write_manifest({path: extras for path, _, extras in MODELS})
     print(f"wrote {len(MODELS)} models to {os.path.normpath(OUT)}")
+
+
+def write_manifest(entries):
+    """models.json: every model's metadata by file name, so a .glb re-exported from Blender without
+    "Custom Properties" ticked keeps its years, footprint and kind. Entries for files that no longer
+    exist are dropped; entries someone added by hand for other files are kept."""
+    path = os.path.join(OUT, "models.json")
+    try:
+        with open(path) as f:
+            existing = json.load(f)
+    except (OSError, ValueError):
+        existing = {}
+    merged = {k: v for k, v in existing.items() if os.path.exists(os.path.join(OUT, k + ".glb"))}
+    merged.update(entries)
+    lines = [f"  {json.dumps(k)}: {json.dumps(merged[k])}" for k in sorted(merged)]
+    with open(path, "w") as f:
+        f.write("{\n" + ",\n".join(lines) + "\n}\n")
 
 
 if __name__ == "__main__":
