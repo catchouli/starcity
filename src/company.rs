@@ -170,10 +170,23 @@ pub struct Level {
     pub loan: i64,
     pub vehicles: u32,
     pub unlocks: &'static str,
+    /// Not before this year (0: any).
+    pub year: i32,
+    /// Compute milestones that must have been reached (§5.9).
+    pub tier: usize,
+    /// A kind of compute site one of the company's stations must serve.
+    pub serves: Option<Site>,
+}
+
+/// A compute site the headquarters may ask the company to serve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Site {
+    DataCentre,
+    AiCampus,
 }
 
 /// Levels 0 to 2 are playable; the rest arrive with the systems they unlock.
-pub const LEVELS: [Level; 4] = [
+pub const LEVELS: [Level; 7] = [
     Level {
         name: "Garage",
         cost: 0,
@@ -183,6 +196,9 @@ pub const LEVELS: [Level; 4] = [
         loan: 0,
         vehicles: 6,
         unlocks: "Roads, railways, stations and trains",
+        year: 0,
+        tier: 0,
+        serves: None,
     },
     Level {
         name: "Depot office",
@@ -193,6 +209,9 @@ pub const LEVELS: [Level; 4] = [
         loan: 200_000,
         vehicles: 40,
         unlocks: "A loan of up to £200,000 and up to 40 vehicles",
+        year: 0,
+        tier: 0,
+        serves: None,
     },
     Level {
         name: "Regional office",
@@ -203,6 +222,9 @@ pub const LEVELS: [Level; 4] = [
         loan: 500_000,
         vehicles: 150,
         unlocks: "Ports, ferries, airports and planes; a loan of up to £500,000; 150 vehicles",
+        year: 0,
+        tier: 0,
+        serves: None,
     },
     Level {
         name: "Corporate tower",
@@ -213,12 +235,54 @@ pub const LEVELS: [Level; 4] = [
         loan: 1_000_000,
         vehicles: 400,
         unlocks: "A loan of up to £1,000,000, up to 400 vehicles and yearly goals",
+        year: 0,
+        tier: 0,
+        serves: None,
+    },
+    Level {
+        name: "Data campus HQ",
+        cost: 400_000,
+        income: 500_000,
+        value: 2_000_000,
+        town: 5_000,
+        loan: 2_000_000,
+        vehicles: 600,
+        unlocks: "A loan of up to £2,000,000 and up to 600 vehicles; the Compute meter is the headline now",
+        year: 2012,
+        tier: 1,
+        serves: Some(Site::DataCentre),
+    },
+    Level {
+        name: "Glass spire",
+        cost: 1_000_000,
+        income: 1_500_000,
+        value: 5_000_000,
+        town: 8_000,
+        loan: 5_000_000,
+        vehicles: 900,
+        unlocks: "A loan of up to £5,000,000 and up to 900 vehicles",
+        year: 2025,
+        tier: 2,
+        serves: Some(Site::AiCampus),
+    },
+    Level {
+        name: "AI Citadel",
+        cost: 3_000_000,
+        income: 5_000_000,
+        value: 15_000_000,
+        town: 15_000,
+        loan: 20_000_000,
+        vehicles: 2_000,
+        unlocks: "The company runs itself: a loan of up to £20,000,000, up to 2,000 vehicles, and the charter whatever the year",
+        year: 2032,
+        tier: 4,
+        serves: Some(Site::AiCampus),
     },
 ];
 
 /// Levels that exist in the design but are not built yet.
 pub const LATER_LEVELS: &str =
-    "The Data campus, Glass spire and the AI Citadel come with the systems they unlock.";
+    "The Orbital Citadel and the Convergence seat come with space and the singularity.";
 
 /// What moving the headquarters costs: a flat fee and half of what the building has cost so far.
 /// Only from the Regional office on, so it is a late choice and never the first thing to try.
@@ -264,6 +328,11 @@ pub struct Facts {
     /// Working server farms, data centres and AI campuses, and everything they have made.
     pub compute_sites: u32,
     pub compute_total: f64,
+    /// Compute milestones reached.
+    pub compute_tier: usize,
+    /// Whether a station of the company's serves a data centre, and an AI campus.
+    pub serves_data_centre: bool,
+    pub serves_ai_campus: bool,
 }
 
 /// 12345 -> "£12,345".
@@ -630,6 +699,26 @@ impl Company {
                 text: format!("Serve a town of {} people with a station", l.town),
                 met: facts.town_served >= l.town,
             });
+        }
+        if l.year > 0 {
+            out.push(Requirement {
+                text: format!("The year {} or later", l.year),
+                met: self.year >= l.year,
+            });
+        }
+        if l.tier > 0 {
+            let name = crate::compute::TIERS[l.tier - 1].0;
+            out.push(Requirement {
+                text: format!("Reach the {name} compute milestone"),
+                met: facts.compute_tier >= l.tier,
+            });
+        }
+        if let Some(site) = l.serves {
+            let (text, met) = match site {
+                Site::DataCentre => ("Serve a data centre with a station", facts.serves_data_centre),
+                Site::AiCampus => ("Serve an AI campus with a station", facts.serves_ai_campus),
+            };
+            out.push(Requirement { text: text.to_string(), met });
         }
         out
     }
@@ -1234,7 +1323,11 @@ mod tests {
         assert!(reqs.len() >= 4 && reqs.iter().any(|r| r.text.contains("5000")));
         assert_eq!(level(3).vehicles, 400);
         c.hq_level = 3;
-        assert!(c.requirements(&Assets::default(), &Facts::default()).is_empty());
+        let next = c.requirements(&Assets::default(), &Facts::default());
+        assert!(next.iter().any(|r| r.text.contains("data centre")) && next.iter().any(|r| r.text.contains("milestone")));
+        assert!(next.iter().any(|r| r.text.contains("2012") && !r.met), "2010 is too early for the Data campus");
+        c.hq_level = 6;
+        assert!(c.requirements(&Assets::default(), &Facts::default()).is_empty(), "the Citadel is the last level for now");
         assert!(relocation_cost(3) > relocation_cost(2));
     }
 

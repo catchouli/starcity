@@ -377,6 +377,12 @@ impl StarcityApp {
         if crate::devtools::DevTools::window("news") {
             app.news.push(6);
         }
+        // `STARCITY_HQ=6`: start with the headquarters at that level (to see its model).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(level) = std::env::var("STARCITY_HQ").ok().and_then(|v| v.parse::<u8>().ok()) {
+            app.company.hq_level = level.min(6);
+            app.static_changed = true;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if crate::devtools::DevTools::window("charter") {
             app.ui.show_charter = true;

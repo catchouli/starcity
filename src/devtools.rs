@@ -2,6 +2,7 @@
 //!
 //! - `STARCITY_SCREENSHOT=out.png`: render a few frames, save a screenshot, exit.
 //!   `STARCITY_SHOT_FRAME=300` waits that many frames first (default 10).
+//! - `STARCITY_HQ=6`: start with the headquarters at that level.
 //! - `STARCITY_WINDOW=compute`: open the Compute window at startup.
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.

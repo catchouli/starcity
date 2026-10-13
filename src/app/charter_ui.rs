@@ -15,7 +15,7 @@ pub const CHARTER_FROM: i32 = 2028;
 impl StarcityApp {
     /// Whether the charter is in force: once the company's technology reaches the agents.
     pub(super) fn charter_active(&self) -> bool {
-        self.tech_year() >= CHARTER_FROM
+        self.tech_year() >= CHARTER_FROM || self.company.hq_level >= 6
     }
 
     /// Once a month: the Wellbeing ledger, the charter's effects, and (at the end of 2050) the ending.

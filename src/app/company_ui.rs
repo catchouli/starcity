@@ -344,6 +344,9 @@ impl StarcityApp {
                 .filter(|i| !i.closed && i.kind.compute_scale() > 0.0)
                 .count() as u32,
             compute_total: self.compute.total,
+            compute_tier: self.compute.tier,
+            serves_data_centre: self.serves_kind(crate::industry::Kind::DataCentre),
+            serves_ai_campus: self.serves_kind(crate::industry::Kind::AiCampus),
         };
         let active = self.company.contracts.iter().position(|c| !c.done);
         self.link =
@@ -357,6 +360,13 @@ impl StarcityApp {
         for m in messages {
             self.show_message(&m, now + 4.0);
         }
+    }
+
+    /// Whether any station serves a working industry of this kind.
+    fn serves_kind(&self, kind: crate::industry::Kind) -> bool {
+        self.industries.list.iter().any(|i| {
+            !i.closed && i.kind == kind && self.stations.list.values().any(|s| i.near(&s.tiles, crate::industry::CATCHMENT))
+        })
     }
 
     /// A town the company serves that has grown to want food or goods and hasn't got it: the Assistant says so.

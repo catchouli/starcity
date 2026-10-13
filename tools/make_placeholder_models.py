@@ -692,6 +692,30 @@ def hq_corporate_tower(name):
 hq_corporate_tower("buildings/hq_3_corporate_tower")
 
 
+def hq_level(name, level, parts):
+    model(name, "hq", f"hq_{level}", parts, **{"from": 1900, "to": 2200, "level": level, "tiles_x": 4, "tiles_z": 4, "weight": 1})
+
+
+PLAZA = mat("Plaza", "#b9b9bf")
+hq_level("buildings/hq_4_data_campus", 4, [box("Plaza", PLAZA, (0, 0.015, 0), (3.9, 0.03, 3.9)),
+    box("Block", mat("CampusWall", "#2f3846", metallic=0.3), (-0.2, 0.9, -0.2), (3.0, 1.8, 2.6)),
+    box("GlassBand", GLASS, (-0.2, 1.2, 1.11), (2.8, 0.9, 0.02)),
+    box("Racks", mat("CampusGlow", "#38d0a0", emissive=0.9), (-0.2, 0.5, 1.12), (2.6, 0.12, 0.02)),
+    box("Cool1", STEEL, (-1.0, 1.95, -0.6), (0.8, 0.3, 0.8)), box("Cool2", STEEL, (0.6, 1.95, -0.6), (0.8, 0.3, 0.8)),
+    box("Sign", mat("SignBoard", "#2a4f9e"), (-0.2, 1.75, 1.13), (1.4, 0.18, 0.02))])
+hq_level("buildings/hq_5_glass_spire", 5, [box("Plaza", PLAZA, (0, 0.015, 0), (3.9, 0.03, 3.9)),
+    box("Podium", mat("SpirePodium", "#9aa3b0", metallic=0.4), (0, 0.4, 0), (3.0, 0.8, 3.0)),
+    cyl("Spire", mat("SpireGlass", "#8fc4f0", metallic=0.7, roughness=0.08), (0, 4.0, 0), 0.9, 6.4, seg=16, rtop=0.45),
+    cyl("Crown", mat("SpireGlow", "#9ef0ff", emissive=0.9), (0, 7.3, 0), 0.47, 0.2, seg=16),
+    cyl("Mast", STEEL, (0, 8.0, 0), 0.04, 1.2, seg=6)])
+hq_level("buildings/hq_6_ai_citadel", 6, [box("Plaza", mat("CitadelPlaza", "#dfe3ea"), (0, 0.015, 0), (3.9, 0.03, 3.9)),
+    cyl("Base", mat("CitadelChrome", "#e8eef6", metallic=0.95, roughness=0.05), (0, 0.6, 0), 1.7, 1.2, seg=6, rtop=1.3),
+    cyl("Tower", mat("CitadelChrome", "#e8eef6", metallic=0.95, roughness=0.05), (0, 5.2, 0), 1.1, 8.0, seg=6, rtop=0.25),
+    cyl("Band1", mat("CitadelGlow", "#c9a6ff", emissive=1.0), (0, 3.0, 0), 1.0, 0.12, seg=6),
+    cyl("Band2", mat("CitadelGlow", "#c9a6ff", emissive=1.0), (0, 6.0, 0), 0.75, 0.12, seg=6),
+    sphere("Core", mat("CitadelCore", "#ffffff", emissive=1.0), (0, 9.6, 0), 0.35, lat=6, lon=12)])
+
+
 # --- Industries (GAME-DESIGN.md 5): centred on their footprint, 3 x 3 or 4 x 4 tiles ------------
 
 
