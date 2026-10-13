@@ -730,6 +730,11 @@ industry("factory", "factory", 4, [pad(4, CONCRETE),
     box("Shed1", mat("FactoryWall", "#b8bcc6"), (-0.4, 0.45, -0.2), (3.0, 0.9, 1.8)), box("Saw1", ROOF_GREY, (-1.2, 1.0, -0.2), (0.7, 0.28, 1.9)), box("Saw2", ROOF_GREY, (-0.3, 1.0, -0.2), (0.7, 0.28, 1.9)), box("Saw3", ROOF_GREY, (0.6, 1.0, -0.2), (0.7, 0.28, 1.9)),
     box("Office", GLASS, (-0.4, 0.4, 0.75), (2.2, 0.5, 0.06)), cyl("Chimney", BRICK, (1.5, 0.8, -1.2), 0.12, 1.6, seg=10), box("Docks", DARK_CONCRETE, (-0.4, 0.1, 1.5), (3.0, 0.2, 0.5))])
 
+industry("server_farm", "server_farm", 3, [pad(3, CONCRETE),
+    box("Hall", mat("ServerWall", "#cfd3da"), (-0.2, 0.35, -0.3), (2.0, 0.7, 1.5)), box("Roof", ROOF_GREY, (-0.2, 0.74, -0.3), (2.1, 0.07, 1.6)),
+    box("Racks", mat("Racks", "#2c4a9c", emissive=0.5), (-0.2, 0.3, 0.47), (1.8, 0.4, 0.04)), box("Cooler1", STEEL, (0.9, 0.9, -0.6), (0.4, 0.3, 0.4)), box("Cooler2", STEEL, (0.9, 0.9, 0.1), (0.4, 0.3, 0.4)),
+    box("Dish", WHITE, (-0.9, 0.95, -0.7), (0.3, 0.3, 0.05))])
+
 
 def main():
     for path, parts, extras in MODELS:

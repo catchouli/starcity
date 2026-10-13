@@ -262,6 +262,45 @@ pub fn money_pane(ui: &mut Ui, width: f32, text: &str, in_the_red: bool) -> Resp
     response
 }
 
+/// The Compute meter: the running total, the rate, and a log-axis sparkline of the last months.
+pub fn compute_pane(ui: &mut Ui, width: f32, total: &str, rate: &str, spark: &[f32]) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+    let p = ui.painter();
+    edge(p, rect, SHADOW, HIGHLIGHT);
+    let ink = Color32::from_rgb(0x10, 0x40, 0x90);
+    p.text(
+        pos2(rect.min.x + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        total,
+        egui::FontId::proportional(13.0),
+        ink,
+    );
+    // The sparkline: a straight line means exponential growth.
+    let area = Rect::from_min_max(pos2(rect.max.x - 50.0, rect.min.y + 4.0), pos2(rect.max.x - 5.0, rect.max.y - 4.0));
+    p.text(
+        pos2(area.min.x - 6.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        rate,
+        egui::FontId::proportional(11.0),
+        Color32::from_gray(0x50),
+    );
+    if spark.len() >= 2 {
+        let top = spark.iter().copied().fold(3.0f32, f32::max);
+        let points: Vec<_> = spark
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                pos2(
+                    area.min.x + area.width() * i as f32 / (spark.len() - 1) as f32,
+                    area.max.y - area.height() * (v / top).clamp(0.0, 1.0),
+                )
+            })
+            .collect();
+        p.add(egui::Shape::line(points, Stroke::new(1.5, ink)));
+    }
+    response
+}
+
 /// A sunken status bar pane holding some text.
 pub fn status_pane(ui: &mut Ui, width: f32, text: &str) {
     let height = ui.spacing().interact_size.y;

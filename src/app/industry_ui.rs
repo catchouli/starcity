@@ -12,6 +12,7 @@ impl StarcityApp {
     /// Once an economy month: industries make their cargo and the stations that serve them collect it.
     pub(super) fn industry_month(&mut self) {
         let made = self.industries.month();
+        self.compute_month();
         let mut moved = vec![0u32; self.industries.list.len()];
         for (id, cargo, units) in made {
             let ind = &self.industries.list[id];
@@ -25,6 +26,26 @@ impl StarcityApp {
         }
         for (ind, m) in self.industries.list.iter_mut().zip(moved) {
             ind.moved_last_month = m;
+        }
+    }
+
+    /// The server farms' month: batches of work become compute, which is also sold as hosting.
+    fn compute_month(&mut self) {
+        let efficiency = crate::compute::efficiency(self.year as f64 + 0.5);
+        let (mut cu, mut batches) = (0.0, 0u32);
+        for ind in &self.industries.list {
+            let scale = ind.kind.compute_scale();
+            if scale > 0.0 {
+                cu += ind.made_last_month as f64 * crate::compute::BATCH_CU * scale * efficiency;
+                batches += ind.made_last_month;
+            }
+        }
+        self.company
+            .earn(crate::company::Item::Hosting, batches * crate::compute::hosting_per_batch(self.year));
+        if let Some(tier) = self.compute.month(cu, crate::company::MONTH_SECONDS as f64) {
+            let name = crate::compute::TIERS[tier - 1].0;
+            let now = self.clock.days();
+            self.show_message(&format!("Compute milestone: {name} ({})", crate::compute::show(self.compute.total)), now);
         }
     }
 
@@ -100,7 +121,14 @@ pub(super) fn room_for(industries: &crate::industry::Industries, tiles: &[(i32, 
 
 fn describe(ui: &mut egui::Ui, ind: &Industry) {
     let kind = ind.kind;
-    if !kind.outputs().is_empty() {
+    if kind.compute_scale() > 0.0 {
+        ui.label("Turns Goods into compute: the score. It also sells spare compute as hosting.");
+        ui.label(format!(
+            "Last month: {} batches, {}",
+            ind.made_last_month,
+            crate::compute::show(ind.made_last_month as f64 * crate::compute::BATCH_CU)
+        ));
+    } else if !kind.outputs().is_empty() {
         let list: Vec<String> = kind
             .outputs()
             .iter()
@@ -138,10 +166,12 @@ fn describe(ui: &mut egui::Ui, ind: &Industry) {
                 .to_string(),
         });
     }
-    ui.label(format!(
-        "Last month: made {}, collected by stations {}",
-        ind.made_last_month, ind.moved_last_month
-    ));
+    if kind.compute_scale() == 0.0 {
+        ui.label(format!(
+            "Last month: made {}, collected by stations {}",
+            ind.made_last_month, ind.moved_last_month
+        ));
+    }
 }
 
 fn inputs_text(ind: &Industry) -> String {

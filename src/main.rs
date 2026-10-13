@@ -5,6 +5,7 @@ mod cargo;
 mod catalog;
 mod clock;
 mod clouds;
+mod compute;
 mod company;
 mod daylight;
 #[cfg(not(target_arch = "wasm32"))]

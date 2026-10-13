@@ -32,10 +32,11 @@ pub enum Kind {
     Sawmill,
     FoodPlant,
     Factory,
+    ServerFarm,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 9] = [
+    pub const ALL: [Kind; 10] = [
         Kind::CoalMine,
         Kind::IronOreMine,
         Kind::Forest,
@@ -45,6 +46,7 @@ impl Kind {
         Kind::Sawmill,
         Kind::FoodPlant,
         Kind::Factory,
+        Kind::ServerFarm,
     ];
 
     /// The model kind in `assets/models/industries/`.
@@ -59,6 +61,7 @@ impl Kind {
             Kind::Sawmill => "sawmill",
             Kind::FoodPlant => "food_plant",
             Kind::Factory => "factory",
+            Kind::ServerFarm => "server_farm",
         }
     }
 
@@ -73,13 +76,14 @@ impl Kind {
             Kind::Sawmill => "Sawmill",
             Kind::FoodPlant => "Food plant",
             Kind::Factory => "Factory",
+            Kind::ServerFarm => "Server farm",
         }
     }
 
     /// Footprint in tiles (square).
     pub fn size(self) -> i32 {
         match self {
-            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant => 3,
+            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm => 3,
             Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory => 4,
         }
     }
@@ -92,6 +96,7 @@ impl Kind {
             Kind::Sawmill => &[(Cargo::Timber, 1)],
             Kind::FoodPlant => &[(Cargo::Grain, 1)],
             Kind::Factory => &[(Cargo::Steel, 1), (Cargo::Planks, 1)],
+            Kind::ServerFarm => &[(Cargo::Goods, 1)],
             _ => &[],
         }
     }
@@ -107,7 +112,15 @@ impl Kind {
             Kind::Sawmill => &[(Cargo::Planks, 1)],
             Kind::FoodPlant => &[(Cargo::Food, 1)],
             Kind::Factory => &[(Cargo::Goods, 2)],
-            Kind::PowerStation => &[],
+            Kind::PowerStation | Kind::ServerFarm => &[],
+        }
+    }
+
+    /// Compute-units one batch makes at the year-2000 efficiency (0 for everything that makes cargo).
+    pub fn compute_scale(self) -> f64 {
+        match self {
+            Kind::ServerFarm => 1.0,
+            _ => 0.0,
         }
     }
 
@@ -127,6 +140,7 @@ impl Kind {
             Kind::FoodPlant => 90,
             Kind::Factory => 60,
             Kind::PowerStation => 40,
+            Kind::ServerFarm => 40,
         }
     }
 
@@ -136,7 +150,7 @@ impl Kind {
             Kind::PowerStation => -100.0,
             Kind::SteelMill => 20.0,
             Kind::Factory => 10.0,
-            Kind::Sawmill | Kind::FoodPlant => 5.0,
+            Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm => 5.0,
             _ => 0.0,
         }
     }
@@ -315,6 +329,9 @@ impl Industries {
                 }
                 by_stock.min(cap)
             };
+            if kind.compute_scale() > 0.0 {
+                ind.made_last_month = batches;
+            }
             for &(c, per) in kind.outputs() {
                 let units = batches * per;
                 if units > 0 {
@@ -453,6 +470,7 @@ impl Ctx<'_> {
             }
             Kind::FoodPlant => (town < 15.0).then_some(1.0),
             Kind::Factory => (town < 20.0).then_some(1.0),
+            Kind::ServerFarm => (6.0..25.0).contains(&town).then(|| 1.0 - town / 25.0),
         }?;
         Some(rule)
     }
@@ -525,6 +543,7 @@ impl Industries {
             (Kind::Sawmill, want(3.0)),
             (Kind::FoodPlant, want(3.0)),
             (Kind::Factory, want(2.0)),
+            (Kind::ServerFarm, want(2.0)),
         ];
         let mut rng = Rng((seed as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
         // Land heights: the 50th and 75th percentiles.
@@ -724,5 +743,26 @@ mod tests {
         assert_eq!(ind.near(&[(15, 11)]), vec![id], "two tiles off the east edge");
         assert!(ind.near(&[(17, 11)]).is_empty(), "four tiles off");
         assert_eq!(ind.near(&[(9, 9)]), vec![id]);
+    }
+
+    #[test]
+    fn a_server_farm_turns_goods_into_batches_of_compute_and_a_short_grid_slows_it() {
+        let mut ind = Industries::default();
+        let farm = ind.add(Kind::ServerFarm, (0, 0));
+        ind.deliver(farm, Cargo::Goods, 100);
+        // No power station within reach: the farm runs on its own generator at 30%.
+        ind.month();
+        let slow = ind.list[farm].made_last_month;
+        assert_eq!(slow, (Kind::ServerFarm.batches() as f32 * power::GENERATOR_FLOOR).round() as u32);
+        assert_eq!(ind.list[farm].stock[Cargo::Goods.index()], 100 - slow);
+        // With a stocked power station beside it, the full forty batches.
+        let plant = ind.add(Kind::PowerStation, (6, 0));
+        ind.deliver(plant, Cargo::Coal, 100);
+        ind.month();
+        assert_eq!(ind.list[farm].made_last_month, Kind::ServerFarm.batches());
+        // Without goods it makes nothing.
+        ind.list[farm].stock[Cargo::Goods.index()] = 0;
+        ind.month();
+        assert_eq!(ind.list[farm].made_last_month, 0);
     }
 }

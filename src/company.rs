@@ -54,13 +54,16 @@ pub enum Item {
     Headquarters,
     /// Money from the council's contracts: seed money and completion rewards.
     Contracts,
+    /// Selling spare compute from the server farms.
+    Hosting,
 }
 
 impl Item {
-    pub const ALL: [Item; 9] = [
+    pub const ALL: [Item; 10] = [
         Item::Passengers,
         Item::Freight,
         Item::Contracts,
+        Item::Hosting,
         Item::Construction,
         Item::Vehicles,
         Item::Headquarters,
@@ -80,6 +83,7 @@ impl Item {
             Item::Interest => "Loan interest",
             Item::Headquarters => "Headquarters",
             Item::Contracts => "Contracts",
+            Item::Hosting => "Compute hosting",
         }
     }
 
@@ -92,7 +96,7 @@ impl Item {
 /// expense are kept apart by sign of the category: passengers are income).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ledger {
-    amounts: [i64; 9],
+    amounts: [i64; 10],
 }
 
 impl Ledger {
@@ -105,13 +109,13 @@ impl Ledger {
     }
 
     pub fn income(&self) -> i64 {
-        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts)
+        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts) + self.get(Item::Hosting)
     }
 
     pub fn expenses(&self) -> i64 {
         Item::ALL
             .iter()
-            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts))
+            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts | Item::Hosting))
             .map(|&i| self.get(i))
             .sum()
     }

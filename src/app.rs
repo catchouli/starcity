@@ -140,6 +140,8 @@ pub struct StarcityApp {
     selected_industry: Option<usize>,
     /// Seconds into the current economy month for the industries.
     industry_clock: f32,
+    /// The score: compute made by the server farms (GAME-DESIGN.md §5.9).
+    pub(crate) compute: crate::compute::Compute,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
     /// The Assistant's suggestion changed since the player last looked: its button glows.
@@ -270,6 +272,7 @@ impl StarcityApp {
             industries: Industries::default(),
             selected_industry: None,
             industry_clock: 0.0,
+            compute: Default::default(),
             proj_morph: 0.0,
             assistant_attention: false,
             last_step_title: String::new(),
@@ -639,6 +642,7 @@ impl StarcityApp {
         self.industries = industries;
         self.selected_industry = None;
         self.industry_clock = 0.0;
+        self.compute = Default::default();
         self.remesh_tiles(rs, &levelled);
         self.vehicles = Vehicles::new(self.params.seed as u64);
         self.sea = None;
@@ -1970,9 +1974,24 @@ impl StarcityApp {
         let panel = egui::Frame::NONE
             .fill(win95::FACE)
             .inner_margin(egui::Margin::symmetric(4, 2));
+        let compute_text = format!("Compute {}", crate::compute::show(self.compute.total));
+        let compute_rate = format!("+{}/s", crate::compute::show(self.compute.rate));
+        let compute_tip = match crate::compute::TIERS.get(self.compute.tier) {
+            Some((name, at)) => format!(
+                "Compute is the score: everything your server farms have made. Next milestone: {name} at {}. Feed a server farm Goods to make more.",
+                crate::compute::show(*at)
+            ),
+            None => "Compute is the score. Every milestone reached.".to_string(),
+        };
+        let meter = ui::Meter {
+            total: &compute_text,
+            rate: &compute_rate,
+            tip: &compute_tip,
+            spark: &self.compute.history,
+        };
         let actions = egui::Panel::top("menu_bar")
             .frame(panel)
-            .show(ui, |ui| ui::menu_bar(ui, &mut self.ui))
+            .show(ui, |ui| ui::menu_bar(ui, &mut self.ui, &meter))
             .inner;
         let clock_text = self.clock.date().date_string();
         let cash_text = company_ui::money(self.company.cash);

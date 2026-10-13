@@ -120,7 +120,15 @@ pub struct UiActions {
     pub new_map: bool,
 }
 
-pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
+/// The Compute meter shown at the right of the menu bar: running total, rate, history (log axis), tooltip.
+pub struct Meter<'a> {
+    pub total: &'a str,
+    pub rate: &'a str,
+    pub tip: &'a str,
+    pub spark: &'a [f32],
+}
+
+pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
     let mut actions = UiActions::default();
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
@@ -164,6 +172,9 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState) -> UiActions {
             if ui.button("About Starcity").clicked() {
                 s.show_about = true;
             }
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            win95::compute_pane(ui, 270.0, meter.total, meter.rate, meter.spark).on_hover_text(meter.tip);
         });
     });
     actions
