@@ -273,6 +273,7 @@ impl Towns {
             }
         }
         towns.year = year;
+        towns.count_people();
         towns
     }
 
@@ -359,6 +360,19 @@ impl Towns {
             .map(|(_, id)| id)
     }
 
+    /// Counts every town's people into `Town::pop` (a pass over every building).
+    pub fn count_people(&mut self) {
+        let mut pops = vec![0u32; self.list.len()];
+        for b in self.buildings.values() {
+            if let Some(p) = pops.get_mut(b.town as usize) {
+                *p += b.population();
+            }
+        }
+        for (t, p) in self.list.iter_mut().zip(pops) {
+            t.pop = p;
+        }
+    }
+
     /// Runs growth over `dt` seconds. Returns (road tiles changed, whether buildings changed).
     pub fn update(
         &mut self,
@@ -373,15 +387,7 @@ impl Towns {
         self.pop_clock += dt;
         if self.pop_clock >= 10.0 || self.list.iter().all(|t| t.pop == 0) {
             self.pop_clock = 0.0;
-            let mut pops = vec![0u32; self.list.len()];
-            for b in self.buildings.values() {
-                if let Some(p) = pops.get_mut(b.town as usize) {
-                    *p += b.population();
-                }
-            }
-            for (t, p) in self.list.iter_mut().zip(pops) {
-                t.pop = p;
-            }
+            self.count_people();
         }
         for i in 0..self.list.len() {
             let town = &mut self.list[i];
@@ -487,6 +493,7 @@ impl Towns {
             self.buildings.get_mut(&t).unwrap().year = year - age;
         }
         self.year = year;
+        self.count_people();
     }
 
     /// Where a `side` x `side` building containing `tile` could stand: every
