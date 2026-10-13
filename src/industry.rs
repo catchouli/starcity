@@ -387,6 +387,8 @@ pub struct Industries {
     pub list: Vec<Industry>,
     by_tile: HashMap<(i32, i32), usize>,
     drift_rng: u64,
+    /// After the singularity (§10.5): factories make without waiting for their inputs.
+    pub post_singularity: bool,
 }
 
 /// A primary industry closes after this many months of poor service, if its output has shrunk below this.
@@ -591,6 +593,14 @@ impl Industries {
                     .min()
                     .unwrap_or(0);
                 let cap = (kind.batches() as f32 * efficiency).round() as u32;
+                if self.post_singularity && !kind.outputs().is_empty() {
+                    // Synthesis: everything the machinery can make, from nothing.
+                    for &(c, per) in kind.outputs() {
+                        made.push((ind.id, c, cap * per));
+                        ind.made_last_month += cap * per;
+                    }
+                    continue;
+                }
                 for &(c, n) in kind.inputs() {
                     ind.stock[c.index()] -= by_stock.min(cap) * n;
                 }
@@ -1231,5 +1241,18 @@ mod tests {
             ind.deliver(array, c, n);
         }
         assert_eq!(Industries::convergence_progress(&ind.list[array]), 1.0);
+    }
+
+    #[test]
+    fn after_the_singularity_factories_make_from_nothing() {
+        let mut ind = Industries::default();
+        let mill = ind.add(Kind::Sawmill, (0, 0));
+        let farm = ind.add(Kind::ServerFarm, (10, 0));
+        ind.deliver(farm, Cargo::Goods, 100);
+        assert!(ind.month().iter().all(|&(i, _, _)| i != mill), "no timber, no planks");
+        ind.post_singularity = true;
+        let made = ind.month();
+        assert!(made.iter().any(|&(i, c, n)| i == mill && c == Cargo::Planks && n > 0));
+        assert!(ind.list[farm].made_last_month > 0, "compute sites still work as before");
     }
 }

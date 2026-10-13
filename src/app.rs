@@ -2132,8 +2132,16 @@ impl StarcityApp {
             self.ui.look_override = None;
         }
         let want = self.ui.look_override.unwrap_or_else(|| win95::Look::for_year(self.year));
-        if want != win95::look() {
+        // Following the years, a new look's colours ease in over its first six months.
+        let t = if self.ui.look_override.is_none() && want != win95::Look::Classic {
+            ((self.clock.year_f64() as f32 - want.from_year() as f32) / 0.5).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let from = win95::Look::ALL[win95::Look::ALL.iter().position(|&l| l == want).unwrap_or(0).saturating_sub(1)];
+        if want != win95::look() || (t - win95::blend()).abs() > 0.02 || (t >= 1.0) != (win95::blend() >= 1.0) {
             win95::set_look(want);
+            win95::set_blend(from, t);
             win95::apply(ui.ctx());
         }
         let panel = egui::Frame::NONE

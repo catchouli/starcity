@@ -100,8 +100,45 @@ fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
+/// The look being blended away from, and how far the blend has got (0 to 1, as f32 bits).
+static BLEND_FROM: AtomicU8 = AtomicU8::new(0);
+static BLEND: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
+
+/// For the first months of a new look, its colours ease in from the old one's (the shapes change at
+/// once). `t` is 0 at the boundary and 1 when the new look is complete.
+pub fn set_blend(from: Look, t: f32) {
+    BLEND_FROM.store(from.index(), Ordering::Relaxed);
+    BLEND.store(t.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+}
+
+pub fn blend() -> f32 {
+    f32::from_bits(BLEND.load(Ordering::Relaxed))
+}
+
 fn pal() -> Palette {
-    match look() {
+    let new = palette_of(look());
+    let t = blend();
+    if t >= 1.0 {
+        return new;
+    }
+    let old = palette_of(Look::ALL[(BLEND_FROM.load(Ordering::Relaxed) as usize).min(5)]);
+    let mix = |a: Color32, b: Color32| a.lerp_to_gamma(b, t);
+    Palette {
+        face: mix(old.face, new.face),
+        light: mix(old.light, new.light),
+        highlight: mix(old.highlight, new.highlight),
+        shadow: mix(old.shadow, new.shadow),
+        dark: mix(old.dark, new.dark),
+        accent: mix(old.accent, new.accent),
+        accent_end: mix(old.accent_end, new.accent_end),
+        text: if t < 0.5 && old.dark_ui == new.dark_ui { mix(old.text, new.text) } else { new.text },
+        radius: new.radius,
+        dark_ui: new.dark_ui,
+    }
+}
+
+fn palette_of(l: Look) -> Palette {
+    match l {
         Look::Classic => Palette {
             face: FACE,
             light: LIGHT,

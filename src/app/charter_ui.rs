@@ -22,6 +22,7 @@ impl StarcityApp {
     pub(super) fn governor_month(&mut self) {
         let people = self.people();
         self.wellbeing = charter::wellbeing(&people);
+        self.industries.post_singularity = self.converged;
         let active = self.charter_active();
         self.company.build_factor = if active { self.charter.build_cost_factor() } else { 1.0 };
         // The Convergence Array: every delivery made, fully powered, and the compute committed.

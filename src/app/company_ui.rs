@@ -369,6 +369,42 @@ impl StarcityApp {
         })
     }
 
+    /// A train with nowhere to go (§9.2): the Assistant says which.
+    fn idle_vehicle_hint(&self) -> Option<String> {
+        if self.company.sandbox {
+            return None;
+        }
+        if let Some(t) = self.trains.list.iter().find(|t| t.orders.len() < 2 && !t.stopped) {
+            return Some(format!(
+                "Train {} has nowhere to go. Click it and give it two stations to run between.",
+                t.id + 1
+            ));
+        }
+        self.buses
+            .list
+            .iter()
+            .find(|b| b.orders.list.is_empty())
+            .map(|b| format!("Road vehicle {} has no stops. Click it and add two.", b.id + 1))
+    }
+
+    /// An industry the company serves that is short of power (§5.7).
+    fn power_hint(&self) -> Option<String> {
+        if self.company.sandbox {
+            return None;
+        }
+        self.industries
+            .list
+            .iter()
+            .filter(|i| !i.closed && i.kind.power_mw() > 0.0 && i.power < 0.5)
+            .find(|i| self.stations.list.values().any(|s| i.near(&s.tiles, crate::industry::CATCHMENT)))
+            .map(|i| {
+                format!(
+                    "Your {} is running on its own generator (slowly). A power station within 30 tiles, fed with coal, would speed it up.",
+                    i.kind.name().to_lowercase()
+                )
+            })
+    }
+
     /// A town the company serves that has grown to want food or goods and hasn't got it: the Assistant says so.
     fn hungry_town_hint(&self) -> Option<String> {
         if self.company.sandbox || self.company.hq_level < 1 {
@@ -536,7 +572,8 @@ impl StarcityApp {
         self.last_event_date = date;
         let world = crate::events::active(date, seed);
         self.company.world = world;
-        self.towns.growth_mult = world.growth;
+        // After the singularity towns grow twice as fast, without waiting for anything.
+        self.towns.growth_mult = world.growth * if self.converged { 2.0 } else { 1.0 };
         let messages = self.company.tick(dt, self.year, &self.assets);
         let now = self.last_time;
         for m in messages {
@@ -744,6 +781,8 @@ impl StarcityApp {
             .company
             .stuck_hint(&self.facts)
             .map(str::to_string)
+            .or_else(|| self.idle_vehicle_hint())
+            .or_else(|| self.power_hint())
             .or_else(|| self.hungry_town_hint());
         let goals: Vec<(String, bool)> = self
             .company
