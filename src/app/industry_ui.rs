@@ -31,6 +31,8 @@ impl StarcityApp {
         let events = self.industries.drift(&ratings);
         self.industry_events(events);
         self.power_towns();
+        self.prosperity_month();
+        self.sky_month();
         let made = self.industries.month();
         self.compute_month();
         self.space_month();
@@ -91,6 +93,58 @@ impl StarcityApp {
                 }
             }
         }
+    }
+
+    /// Each town's Prosperity (§5.10): the reasons it has to grow.
+    fn prosperity_month(&mut self) {
+        let near = |a: (f32, f32), b: (i32, i32), r: f32| ((a.0 - b.0 as f32).powi(2) + (a.1 - b.1 as f32).powi(2)) <= r * r;
+        for i in 0..self.towns.list.len() {
+            let t = &self.towns.list[i];
+            let centre = t.centre;
+            let stations = self
+                .stations
+                .list
+                .values()
+                .filter(|s| s.tiles.iter().any(|&(x, z)| (x - centre.0).abs() <= 14 && (z - centre.1).abs() <= 14))
+                .count() as u32;
+            let mut kinds: Vec<crate::industry::Kind> = self
+                .industries
+                .list
+                .iter()
+                .filter(|ind| !ind.closed && near(ind.centre(), centre, 30.0))
+                .map(|ind| ind.kind)
+                .collect();
+            kinds.sort_by_key(|k| *k as u8);
+            kinds.dedup();
+            let reasons = crate::towns::Reasons {
+                stations,
+                served: t.served,
+                fed: t.food > 0.0,
+                goods: t.goods > 0.0,
+                industry_kinds: kinds.len() as u32,
+                compute: kinds.iter().any(|k| k.compute_scale() > 0.0),
+            };
+            self.towns.list[i].prosperity = crate::towns::prosperity(&reasons);
+        }
+    }
+
+    /// How many flying cars each city has this month.
+    pub(super) fn sky_month(&mut self) {
+        let year = self.tech_year();
+        self.sky_areas = self
+            .towns
+            .list
+            .iter()
+            .map(|t| crate::skycars::Area {
+                centre: glam::Vec2::new(t.centre.0 as f32 + 0.5, t.centre.1 as f32 + 0.5),
+                // Over the busy middle, where the towers are.
+                radius: (3.0 + (t.pop as f32).sqrt() * 0.15).min(30.0),
+                cars: crate::skycars::cars_for(t.pop, year),
+            })
+            .collect();
+        let world = &self.world;
+        self.skycars.populate(&self.sky_areas, |p| world.height_at(p.x, p.y));
+        self.props_changed = true;
     }
 
     /// Towns with a working power station within 40 tiles grow a little faster (GAME-DESIGN.md §5.5).

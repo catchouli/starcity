@@ -230,6 +230,22 @@ pub fn boats(models: &Models, world: &World, boats: &Boats) -> Placed {
 }
 
 /// Planes, with a shadow on the ground while they're in the air.
+/// Flying cars over the cities.
+pub fn skycars(models: &Models, cars: &crate::skycars::SkyCars) -> Placed {
+    let Some(m) = models.pick(Role::Prop, "flying_car", 2040, 0) else {
+        return Vec::new();
+    };
+    cars.list
+        .iter()
+        .map(|c| {
+            let mut inst = ModelInstance::at(c.pos.to_array(), c.yaw);
+            // A little larger than life, so they read from the usual zoom.
+            inst.scale = 1.1;
+            (m, inst)
+        })
+        .collect()
+}
+
 /// Rockets in flight, rising from their pads: each is (x, z, seconds since lift-off).
 pub fn rockets(models: &Models, world: &World, flights: &[(f32, f32, f32)]) -> Placed {
     let Some(m) = models.pick(Role::Prop, "rocket", 2000, 0) else {

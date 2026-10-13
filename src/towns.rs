@@ -33,6 +33,9 @@ pub struct Town {
     pub goods: f32,
     /// A working power station is within 40 tiles: a little faster growth.
     pub powered: bool,
+    /// How much reason it has to grow (1 to 5), recomputed monthly from its connections, service,
+    /// supply, industry and compute nearby (§5.10).
+    pub prosperity: f32,
 }
 
 /// Above this many people a town wants food, and above the second it wants goods too (§5.5).
@@ -45,7 +48,7 @@ impl Town {
     /// How fast it grows compared with a town that has what it wants: slowed without food or goods,
     /// and a little faster while both are on the shelves.
     pub fn growth_factor(&self) -> f32 {
-        let mut f = if self.powered { 1.15 } else { 1.0 };
+        let mut f = if self.powered { 1.15 } else { 1.0 } * self.prosperity.max(1.0);
         if self.pop > WANTS_FOOD {
             f *= if self.food > 0.0 { 1.25 } else { 0.4 };
         }
@@ -91,7 +94,60 @@ impl Building {
         if self.part_of.is_some() {
             return 0;
         }
-        self.floors as u32 * 8 * self.size.0 as u32 * self.size.1 as u32
+        self.floors as u32 * people_per_floor(self.year) * self.size.0 as u32 * self.size.1 as u32
+    }
+}
+
+/// People living on a floor of a building built in `year`: eight until 2020, thirty by 2050 (§5.10).
+pub fn people_per_floor(year: i32) -> u32 {
+    8 + ((year - 2020).clamp(0, 30) as u32 * 22) / 30
+}
+
+/// The most floors a building can have in `year`: 14 until 2025, 40 by 2035, 90 by 2050 or so.
+pub fn floor_cap(year: i32) -> u32 {
+    if year <= 2025 {
+        (8 + (year - 2000).max(0) / 8).min(14) as u32
+    } else {
+        (14 + (year - 2025) as u32 * 26 / 10).min(90)
+    }
+}
+
+/// What makes a town want to grow (§5.10), each counted with diminishing returns.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Reasons {
+    /// Stations serving it.
+    pub stations: u32,
+    /// Recent passenger service (`Town::served`).
+    pub served: f32,
+    pub fed: bool,
+    pub goods: bool,
+    /// Kinds of working industry within 30 tiles.
+    pub industry_kinds: u32,
+    /// A server farm, data centre or AI campus within 30 tiles.
+    pub compute: bool,
+}
+
+/// The Prosperity score: 1 for a town with no reason to grow, up to 5 for a powerhouse.
+pub fn prosperity(r: &Reasons) -> f32 {
+    let p = 1.0
+        + 0.35 * r.stations.min(4) as f32
+        + 0.8 * (r.served / 50.0).min(1.0)
+        + if r.fed { 0.4 } else { 0.0 }
+        + if r.goods { 0.4 } else { 0.0 }
+        + 0.1 * r.industry_kinds.min(8) as f32
+        + if r.compute { 0.5 } else { 0.0 };
+    p.min(5.0)
+}
+
+/// What a place of this many people is called.
+pub fn size_name(pop: u32) -> &'static str {
+    match pop {
+        0..300 => "Village",
+        300..2_000 => "Town",
+        2_000..20_000 => "City",
+        20_000..200_000 => "Metropolis",
+        200_000..2_000_000 => "Megacity",
+        _ => "Arcology city",
     }
 }
 
@@ -238,6 +294,7 @@ impl Towns {
             food: 0.0,
             goods: 0.0,
             powered: false,
+            prosperity: 1.0,
         });
         for dir in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let len = 3 + self.below(4) as i32;
@@ -262,7 +319,8 @@ impl Towns {
 
     /// How far from its centre a town builds, growing with its population.
     fn radius(&self, town: TownId) -> i32 {
-        (4.0 + (self.population(town) as f32).sqrt() * 0.6).min(40.0) as i32
+        // Big cities keep widening, out to 70 tiles.
+        (4.0 + (self.population(town) as f32).sqrt() * 0.6).min(70.0) as i32
     }
 
     /// The town nearest a tile, within `max` tiles of its centre.
@@ -546,7 +604,7 @@ impl Towns {
             } else {
                 // Taller buildings towards the centre as the town grows.
                 // Later years build taller.
-                let cap = (8 + (self.year - 2000).max(0) / 8).min(14) as u32;
+                let cap = floor_cap(self.year).min(255);
                 let max_floors = (1 + self.population(id) / 300).min(cap) as u8;
                 let inner = radius / 2 + 1;
                 let pick: Vec<(i32, i32)> = self
@@ -742,6 +800,7 @@ mod tests {
             food: 0.0,
             goods: 0.0,
             powered: false,
+            prosperity: 1.0,
         }
     }
 
@@ -784,5 +843,25 @@ mod tests {
             towns.update(1.0, &world, &mut r, &rails, &models);
         }
         assert_eq!(towns.list[0].food, 0.0);
+    }
+
+    #[test]
+    fn cities_get_taller_and_denser_with_the_years_and_have_names() {
+        assert_eq!(people_per_floor(2000), 8);
+        assert_eq!(people_per_floor(2050), 30);
+        assert_eq!(floor_cap(2000), 8);
+        assert_eq!(floor_cap(2025), 11);
+        assert!(floor_cap(2035) >= 40 && floor_cap(2050) <= 90);
+        assert_eq!(size_name(150), "Village");
+        assert_eq!(size_name(25_000), "Metropolis");
+    }
+
+    #[test]
+    fn prosperity_rewards_every_reason_to_grow_and_tops_out() {
+        assert_eq!(prosperity(&Reasons::default()), 1.0);
+        let fed = Reasons { stations: 2, served: 60.0, fed: true, goods: true, ..Default::default() };
+        assert!(prosperity(&fed) > 3.0);
+        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, industry_kinds: 20, compute: true };
+        assert_eq!(prosperity(&all), 5.0);
     }
 }

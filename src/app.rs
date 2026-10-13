@@ -166,6 +166,9 @@ pub struct StarcityApp {
     ending: Option<crate::charter::Ending>,
     /// Rockets in flight: (x, z, seconds since lift-off).
     rockets: Vec<(f32, f32, f32)>,
+    /// Air taxis over the cities (§7.6).
+    skycars: crate::skycars::SkyCars,
+    sky_areas: Vec<crate::skycars::Area>,
     launch_rng: u64,
     last_event_date: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
@@ -327,6 +330,8 @@ impl StarcityApp {
             ending_shown: false,
             ending: None,
             rockets: Vec::new(),
+            skycars: Default::default(),
+            sky_areas: Vec::new(),
             launch_rng: 0x2545_F491_4F6C_DD1D,
             last_event_date: 2000.0,
             proj_morph: 0.0,
@@ -709,6 +714,8 @@ impl StarcityApp {
         self.industry_clock = 0.0;
         self.compute = Default::default();
         self.compute_alloc = Default::default();
+        self.sky_areas.clear();
+        self.skycars = Default::default();
         self.charter = Default::default();
         self.ending_shown = false;
         self.ending = None;
@@ -1196,6 +1203,9 @@ impl StarcityApp {
             exchange::accrue(station, people, now);
         }
         self.tick_terminals();
+        if self.sky_areas.is_empty() {
+            self.sky_month();
+        }
         self.industry_clock += 1.0;
         if self.industry_clock >= crate::company::MONTH_SECONDS {
             self.industry_clock -= crate::company::MONTH_SECONDS;
@@ -1287,6 +1297,7 @@ impl StarcityApp {
             placed.extend(props::boats(&self.models, &self.world, &self.boats));
             placed.extend(props::planes(&self.models, &self.world, &self.planes));
             placed.extend(props::rockets(&self.models, &self.world, &self.rockets));
+            placed.extend(props::skycars(&self.models, &self.skycars));
             self.renderer
                 .set_models(&rs.device, &rs.queue, ModelLayer::Dynamic, &mut placed);
             self.scene_dirty = true;
@@ -1304,7 +1315,7 @@ impl StarcityApp {
                 let Some(at) = project(view_proj, rect, p) else {
                     continue;
                 };
-                let text = format!("{}\n{}", town.name, self.towns.population(town.id));
+                let text = format!("{} ({})\n{}", town.name, crate::towns::size_name(town.pop), town.pop);
                 let galley = painter.layout(
                     text,
                     egui::FontId::proportional(14.0),
@@ -1649,7 +1660,8 @@ impl StarcityApp {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut town.name);
             });
-            ui.label(format!("Population {population} in {buildings} buildings"));
+            ui.label(format!("{}: population {population} in {buildings} buildings", crate::towns::size_name(population)));
+            ui.label(format!("Prosperity {:.1} (growth up to x5 from stations, service, food and goods, industry and compute nearby)", town.prosperity));
             ui.label(format!("{} passengers delivered by rail", town.delivered));
             if town.pop > crate::towns::WANTS_FOOD {
                 let wants = |have: f32, what: &str| {
@@ -2272,6 +2284,10 @@ impl eframe::App for StarcityApp {
             vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
             craft_moved |= self.step_craft(step);
             craft_moved |= self.step_rockets(step);
+            if !self.skycars.list.is_empty() {
+                let world = &self.world;
+                craft_moved |= self.skycars.update(step, &self.sky_areas, |p| world.height_at(p.x, p.y));
+            }
             changed.extend(self.sim.advance(&mut self.world, step));
         }
         self.last_time = now;

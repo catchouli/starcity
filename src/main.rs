@@ -31,6 +31,7 @@ mod sea;
 #[cfg(test)]
 mod shader_test;
 mod sim;
+mod skycars;
 mod space;
 mod stations;
 mod terminals;

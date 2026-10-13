@@ -784,6 +784,14 @@ model("props/launch_rocket", "prop", "rocket", [
     **{"from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
 
 
+model("props/flying_car", "prop", "flying_car", [
+    box("Cabin", mat("PodShell", "#e8ecf2", metallic=0.5, roughness=0.25), (0.0, 0.16, 0.0), (0.42, 0.16, 0.24)),
+    box("Canopy", GLASS, (0.06, 0.27, 0.0), (0.22, 0.08, 0.2)),
+    box("RotorL", mat("Rotor", "#2a2f38"), (0.0, 0.25, 0.2), (0.3, 0.02, 0.1)), box("RotorR", mat("Rotor", "#2a2f38"), (0.0, 0.25, -0.2), (0.3, 0.02, 0.1)),
+    box("Glow", mat("PodGlow", "#62e0ff", emissive=1.0), (0.0, 0.07, 0.0), (0.3, 0.02, 0.16))],
+    **{"from": 2028, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)
