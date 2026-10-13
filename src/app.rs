@@ -140,6 +140,9 @@ pub struct StarcityApp {
     selected_industry: Option<usize>,
     /// Seconds into the current economy month for the industries.
     industry_clock: f32,
+    /// The year new industries were last founded for, and ground they levelled that needs meshing.
+    founded_year: i32,
+    levelled_pending: Vec<(i32, i32)>,
     /// The score: compute made by the server farms (GAME-DESIGN.md §5.9).
     pub(crate) compute: crate::compute::Compute,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
@@ -272,6 +275,8 @@ impl StarcityApp {
             industries: Industries::default(),
             selected_industry: None,
             industry_clock: 0.0,
+            founded_year: 0,
+            levelled_pending: Vec::new(),
             compute: Default::default(),
             proj_morph: 0.0,
             assistant_attention: false,
@@ -638,6 +643,7 @@ impl StarcityApp {
             &self.roads,
             &self.rails,
             self.params.seed,
+            self.year,
         );
         self.industries = industries;
         self.selected_industry = None;
@@ -2182,6 +2188,7 @@ impl eframe::App for StarcityApp {
         }
         self.handle_arrivals();
         self.handle_craft_arrivals();
+        changed.append(&mut self.levelled_pending);
         self.remesh_tiles(&rs, &changed);
         self.update_light(now, frame_dt);
 

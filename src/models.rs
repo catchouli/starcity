@@ -472,8 +472,8 @@ mod tests {
                 Role::Prop => ((1.1, 1.1), 1.1, 1.1, 1.5),
                 // Headquarters stand on a 4 x 4 plot.
                 Role::Hq => ((2.1, 2.1), 2.1, 2.1, 8.0),
-                // Industries are 3 x 3 or 4 x 4.
-                Role::Industry => ((2.1, 2.1), 2.1, 2.1, 8.0),
+                // Industries are 3 x 3 to 5 x 5.
+                Role::Industry => ((2.6, 2.6), 2.6, 2.6, 8.0),
             };
             let _ = limit;
             if meta.kind == "airport" {

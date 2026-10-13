@@ -21,9 +21,11 @@ pub enum Cargo {
     Planks,
     Food,
     Goods,
+    Silicon,
+    Chips,
 }
 
-pub const COUNT: usize = 12;
+pub const COUNT: usize = 14;
 
 /// What kind of vehicle body can carry it (GAME-DESIGN.md §4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +50,8 @@ impl Cargo {
         Cargo::Planks,
         Cargo::Food,
         Cargo::Goods,
+        Cargo::Silicon,
+        Cargo::Chips,
     ];
 
     pub fn index(self) -> usize {
@@ -68,6 +72,8 @@ impl Cargo {
             Cargo::Planks => "Planks",
             Cargo::Food => "Food",
             Cargo::Goods => "Goods",
+            Cargo::Silicon => "Silicon",
+            Cargo::Chips => "Chips",
         }
     }
 
@@ -77,7 +83,7 @@ impl Cargo {
             Cargo::Passengers => "passengers",
             Cargo::Mail => "bags",
             Cargo::Oil | Cargo::Fuel => "kl",
-            Cargo::Goods => "crates",
+            Cargo::Goods | Cargo::Chips => "crates",
             _ => "t",
         }
     }
@@ -85,7 +91,7 @@ impl Cargo {
     pub fn class(self) -> Class {
         match self {
             Cargo::Passengers | Cargo::Mail => Class::People,
-            Cargo::Coal | Cargo::IronOre | Cargo::Grain | Cargo::Oil | Cargo::Fuel => Class::Bulk,
+            Cargo::Coal | Cargo::IronOre | Cargo::Grain | Cargo::Oil | Cargo::Fuel | Cargo::Silicon => Class::Bulk,
             Cargo::Food => Class::Fresh,
             _ => Class::General,
         }
@@ -106,6 +112,8 @@ impl Cargo {
             Cargo::Planks => 4.4,
             Cargo::Food => 4.8,
             Cargo::Goods => 6.4,
+            Cargo::Silicon => 3.4,
+            Cargo::Chips => 9.0,
         }
     }
 
@@ -123,6 +131,8 @@ impl Cargo {
             Cargo::Planks => (70.0, 110.0),
             Cargo::Food => (20.0, 40.0),
             Cargo::Goods => (30.0, 70.0),
+            Cargo::Silicon => (100.0, 150.0),
+            Cargo::Chips => (40.0, 80.0),
         }
     }
 

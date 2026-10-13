@@ -735,6 +735,22 @@ industry("server_farm", "server_farm", 3, [pad(3, CONCRETE),
     box("Racks", mat("Racks", "#2c4a9c", emissive=0.5), (-0.2, 0.3, 0.47), (1.8, 0.4, 0.04)), box("Cooler1", STEEL, (0.9, 0.9, -0.6), (0.4, 0.3, 0.4)), box("Cooler2", STEEL, (0.9, 0.9, 0.1), (0.4, 0.3, 0.4)),
     box("Dish", WHITE, (-0.9, 0.95, -0.7), (0.3, 0.3, 0.05))])
 
+industry("silica_quarry", "silica_quarry", 3, [pad(3, SOIL),
+    box("Pit", mat("SilicaPit", "#cdbf9a"), (-0.4, 0.012, 0.3), (1.6, 0.03, 1.4)), box("Crusher", PLATE, (0.7, 0.4, -0.6), (0.8, 0.8, 0.7)), box("Conveyor", BLACK, (0.1, 0.3, -0.6), (1.3, 0.06, 0.16)),
+    box("SandPile", mat("Sand", "#e3d6a8"), (0.7, 0.2, 0.7), (0.9, 0.4, 0.8))])
+industry("chip_fab", "chip_fab", 4, [pad(4, CONCRETE),
+    box("Cleanroom", mat("FabWall", "#e6e8ee"), (-0.2, 0.4, -0.2), (3.0, 0.8, 2.2)), box("Roof", ROOF_GREY, (-0.2, 0.84, -0.2), (3.1, 0.07, 2.3)),
+    box("Glow", mat("FabGlow", "#7ad0ff", emissive=0.7), (-0.2, 0.5, 0.92), (2.4, 0.18, 0.03)), cyl("Tank1", STEEL, (1.4, 0.5, 1.2), 0.22, 1.0, seg=14), cyl("Tank2", STEEL, (0.9, 0.5, 1.4), 0.2, 1.0, seg=14),
+    box("Plant", PLATE, (-1.2, 0.95, -1.2), (0.7, 0.2, 0.6))])
+industry("data_centre", "data_centre", 4, [pad(4, CONCRETE),
+    box("Hall", mat("DcWall", "#3a4252"), (-0.2, 0.45, -0.1), (3.0, 0.9, 2.2)), box("Roof", ROOF_GREY, (-0.2, 0.94, -0.1), (3.1, 0.07, 2.3)),
+    box("Strip", mat("DcStrip", "#38d0a0", emissive=0.8), (-0.2, 0.55, 1.02), (2.6, 0.08, 0.03)), box("Cool1", STEEL, (-1.0, 1.1, -0.5), (0.7, 0.3, 0.7)), box("Cool2", STEEL, (0.2, 1.1, -0.5), (0.7, 0.3, 0.7)),
+    box("Gen", DARK_CONCRETE, (1.3, 0.2, 1.3), (0.8, 0.4, 0.5))])
+industry("ai_campus", "ai_campus", 5, [pad(5, CONCRETE),
+    box("HallA", mat("AiWall", "#2a2f3c"), (-0.9, 0.55, -0.9), (2.6, 1.1, 1.5)), box("HallB", mat("AiWall", "#2a2f3c"), (0.0, 0.55, 1.0), (4.0, 1.1, 1.3)), box("RoofA", ROOF_GREY, (-0.9, 1.14, -0.9), (2.7, 0.07, 1.6)),
+    box("StripA", mat("AiStrip", "#9a7cff", emissive=0.9), (-0.9, 0.7, -0.13), (2.2, 0.1, 0.03)), box("StripB", mat("AiStrip", "#9a7cff", emissive=0.9), (0.0, 0.7, 1.66), (3.6, 0.1, 0.03)),
+    box("Cool1", STEEL, (1.4, 1.0, -1.0), (0.9, 0.5, 0.9)), box("Cool2", STEEL, (1.4, 1.0, 0.0), (0.9, 0.5, 0.9)), box("Sub", DARK_CONCRETE, (-1.8, 0.3, 1.2), (0.6, 0.6, 0.8))])
+
 
 def main():
     for path, parts, extras in MODELS:

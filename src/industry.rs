@@ -33,10 +33,14 @@ pub enum Kind {
     FoodPlant,
     Factory,
     ServerFarm,
+    SilicaQuarry,
+    ChipFab,
+    DataCentre,
+    AiCampus,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 14] = [
         Kind::CoalMine,
         Kind::IronOreMine,
         Kind::Forest,
@@ -47,6 +51,10 @@ impl Kind {
         Kind::FoodPlant,
         Kind::Factory,
         Kind::ServerFarm,
+        Kind::SilicaQuarry,
+        Kind::ChipFab,
+        Kind::DataCentre,
+        Kind::AiCampus,
     ];
 
     /// The model kind in `assets/models/industries/`.
@@ -62,6 +70,10 @@ impl Kind {
             Kind::FoodPlant => "food_plant",
             Kind::Factory => "factory",
             Kind::ServerFarm => "server_farm",
+            Kind::SilicaQuarry => "silica_quarry",
+            Kind::ChipFab => "chip_fab",
+            Kind::DataCentre => "data_centre",
+            Kind::AiCampus => "ai_campus",
         }
     }
 
@@ -77,14 +89,47 @@ impl Kind {
             Kind::FoodPlant => "Food plant",
             Kind::Factory => "Factory",
             Kind::ServerFarm => "Server farm",
+            Kind::SilicaQuarry => "Silica quarry",
+            Kind::ChipFab => "Chip fab",
+            Kind::DataCentre => "Data centre",
+            Kind::AiCampus => "AI campus",
         }
     }
 
     /// Footprint in tiles (square).
     pub fn size(self) -> i32 {
         match self {
-            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm => 3,
-            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory => 4,
+            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry => 3,
+            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre => 4,
+            Kind::AiCampus => 5,
+        }
+    }
+
+    /// The first year it can be built.
+    pub fn from_year(self) -> i32 {
+        match self {
+            Kind::DataCentre => 2005,
+            Kind::AiCampus => 2020,
+            _ => 2000,
+        }
+    }
+
+    /// Whether new ones are founded in `year` (server farms give way to the cloud).
+    pub fn available(self, year: i32) -> bool {
+        year >= self.from_year() && (self != Kind::ServerFarm || year <= 2015)
+    }
+
+    /// How many a default map starts with (scaled by area).
+    fn count(self) -> f32 {
+        match self {
+            Kind::CoalMine => 4.0,
+            Kind::IronOreMine => 3.0,
+            Kind::Forest => 5.0,
+            Kind::Farm => 8.0,
+            Kind::PowerStation => 3.0,
+            Kind::SteelMill | Kind::Factory | Kind::ServerFarm | Kind::SilicaQuarry | Kind::DataCentre => 2.0,
+            Kind::Sawmill | Kind::FoodPlant => 3.0,
+            Kind::ChipFab | Kind::AiCampus => 1.0,
         }
     }
 
@@ -97,6 +142,8 @@ impl Kind {
             Kind::FoodPlant => &[(Cargo::Grain, 1)],
             Kind::Factory => &[(Cargo::Steel, 1), (Cargo::Planks, 1)],
             Kind::ServerFarm => &[(Cargo::Goods, 1)],
+            Kind::ChipFab => &[(Cargo::Silicon, 1)],
+            Kind::DataCentre | Kind::AiCampus => &[(Cargo::Chips, 1)],
             _ => &[],
         }
     }
@@ -112,7 +159,9 @@ impl Kind {
             Kind::Sawmill => &[(Cargo::Planks, 1)],
             Kind::FoodPlant => &[(Cargo::Food, 1)],
             Kind::Factory => &[(Cargo::Goods, 2)],
-            Kind::PowerStation | Kind::ServerFarm => &[],
+            Kind::SilicaQuarry => &[(Cargo::Silicon, 1)],
+            Kind::ChipFab => &[(Cargo::Chips, 1)],
+            Kind::PowerStation | Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus => &[],
         }
     }
 
@@ -120,6 +169,8 @@ impl Kind {
     pub fn compute_scale(self) -> f64 {
         match self {
             Kind::ServerFarm => 1.0,
+            Kind::DataCentre => 5.0,
+            Kind::AiCampus => 20.0,
             _ => 0.0,
         }
     }
@@ -140,7 +191,9 @@ impl Kind {
             Kind::FoodPlant => 90,
             Kind::Factory => 60,
             Kind::PowerStation => 40,
-            Kind::ServerFarm => 40,
+            Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus => 40,
+            Kind::SilicaQuarry => 80,
+            Kind::ChipFab => 50,
         }
     }
 
@@ -151,6 +204,9 @@ impl Kind {
             Kind::SteelMill => 20.0,
             Kind::Factory => 10.0,
             Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm => 5.0,
+            Kind::ChipFab => 30.0,
+            Kind::DataCentre => 20.0,
+            Kind::AiCampus => 60.0,
             _ => 0.0,
         }
     }
@@ -471,6 +527,12 @@ impl Ctx<'_> {
             Kind::FoodPlant => (town < 15.0).then_some(1.0),
             Kind::Factory => (town < 20.0).then_some(1.0),
             Kind::ServerFarm => (6.0..25.0).contains(&town).then(|| 1.0 - town / 25.0),
+            Kind::SilicaQuarry => ((ground == Material::Sand || base >= self.median)
+                && ground != Material::Grass)
+                .then(|| field(self.seed ^ 19, ci.0, ci.1, 40) + 0.2),
+            Kind::ChipFab => (town >= 8.0 && self.near_water(ci, 20)).then(|| 1.0 / (1.0 + town / 40.0)),
+            Kind::DataCentre => (6.0..35.0).contains(&town).then(|| 1.0 - town / 35.0),
+            Kind::AiCampus => (15.0..60.0).contains(&town).then(|| 1.0 / (1.0 + town / 60.0)),
         }?;
         Some(rule)
     }
@@ -526,26 +588,38 @@ impl Industries {
         roads: &Layer,
         rails: &Layer,
         seed: u32,
+        year: i32,
     ) -> (Industries, Vec<(i32, i32)>) {
         let mut out = Industries::default();
+        let moved = out.found(world, towns, roads, rails, seed, year);
+        (out, moved)
+    }
+
+    /// Founds the industries `year` allows that the map doesn't have yet (all of them on a fresh
+    /// map; the cloud and the AI campuses as their years arrive). Returns the tiles that moved.
+    pub fn found(
+        &mut self,
+        world: &mut World,
+        towns: &mut Towns,
+        roads: &Layer,
+        rails: &Layer,
+        seed: u32,
+        year: i32,
+    ) -> Vec<(i32, i32)> {
         let mut moved = Vec::new();
         let size = world.size_x as i32;
         // Counts for the default 512 x 512 map, scaled by area.
         let scale = (size * size) as f32 / (512.0 * 512.0);
         let want = |n: f32| ((n * scale).round() as usize).max(1);
-        let plan = [
-            (Kind::CoalMine, want(4.0)),
-            (Kind::IronOreMine, want(3.0)),
-            (Kind::Forest, want(5.0)),
-            (Kind::Farm, want(8.0)),
-            (Kind::PowerStation, want(3.0)),
-            (Kind::SteelMill, want(2.0)),
-            (Kind::Sawmill, want(3.0)),
-            (Kind::FoodPlant, want(3.0)),
-            (Kind::Factory, want(2.0)),
-            (Kind::ServerFarm, want(2.0)),
-        ];
-        let mut rng = Rng((seed as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+        let plan: Vec<(Kind, usize)> = Kind::ALL
+            .iter()
+            .filter(|k| k.available(year) && !self.list.iter().any(|i| i.kind == **k))
+            .map(|&k| (k, want(k.count())))
+            .collect();
+        if plan.is_empty() {
+            return moved;
+        }
+        let mut rng = Rng(((seed as u64) ^ (self.list.len() as u64) << 32).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
         // Land heights: the 50th and 75th percentiles.
         let mut heights: Vec<u16> = (0..size)
             .step_by(4)
@@ -581,7 +655,7 @@ impl Industries {
                             4 + rng.below((size - 12) as u64) as i32,
                             4 + rng.below((size - 12) as u64) as i32,
                         );
-                        if let Some(score) = ctx.score(kind, t, &out) {
+                        if let Some(score) = ctx.score(kind, t, self) {
                             candidates.push((score, t));
                         }
                     }
@@ -600,8 +674,8 @@ impl Industries {
                     .level_site(kind, tile);
                     let Some(changes) = changes else { continue };
                     moved.extend(edit::apply(world, &changes));
-                    let id = out.add(kind, tile);
-                    for t in out.list[id].tiles() {
+                    let id = self.add(kind, tile);
+                    for t in self.list[id].tiles() {
                         towns.occupied.set(t.0, t.1, OCCUPIED);
                     }
                     break;
@@ -610,7 +684,7 @@ impl Industries {
         }
         moved.sort();
         moved.dedup();
-        (out, moved)
+        moved
     }
 }
 
@@ -635,7 +709,7 @@ mod tests {
     fn a_map_gets_a_working_set_of_industries() {
         for seed in [1u32, 7, 42, 2024, 99] {
             let (mut world, mut towns, roads, rails) = map(seed);
-            let (ind, moved) = Industries::generate(&mut world, &mut towns, &roads, &rails, seed);
+            let (ind, moved) = Industries::generate(&mut world, &mut towns, &roads, &rails, seed, 2000);
             let count = |k: Kind| ind.list.iter().filter(|i| i.kind == k).count();
             eprintln!(
                 "seed {seed}: coal {} ore {} forest {} farm {} power {} steel {} sawmill {} food {} factory {}",
@@ -764,5 +838,29 @@ mod tests {
         ind.list[farm].stock[Cargo::Goods.index()] = 0;
         ind.month();
         assert_eq!(ind.list[farm].made_last_month, 0);
+    }
+
+    #[test]
+    fn the_chip_chain_is_placed_and_the_cloud_arrives_with_its_years() {
+        let (mut with_chain, mut with_dc, mut with_ai) = (0, 0, 0);
+        let seeds = [1u32, 7, 42, 2024, 99];
+        for seed in seeds {
+            let (mut world, mut towns, roads, rails) = map(seed);
+            let (mut ind, _) = Industries::generate(&mut world, &mut towns, &roads, &rails, seed, 2000);
+            let has = |ind: &Industries, k: Kind| ind.list.iter().any(|i| i.kind == k);
+            assert!(has(&ind, Kind::ServerFarm), "seed {seed}: no server farm");
+            assert!(!has(&ind, Kind::DataCentre) && !has(&ind, Kind::AiCampus), "too early");
+            with_chain += (has(&ind, Kind::SilicaQuarry) && has(&ind, Kind::ChipFab)) as i32;
+            ind.found(&mut world, &mut towns, &roads, &rails, seed, 2005);
+            with_dc += has(&ind, Kind::DataCentre) as i32;
+            ind.found(&mut world, &mut towns, &roads, &rails, seed, 2020);
+            with_ai += has(&ind, Kind::AiCampus) as i32;
+            // Founding again changes nothing.
+            let n = ind.list.len();
+            ind.found(&mut world, &mut towns, &roads, &rails, seed, 2020);
+            assert_eq!(ind.list.len(), n);
+        }
+        eprintln!("chip chain {with_chain}/5, data centres {with_dc}/5, AI campuses {with_ai}/5");
+        assert!(with_chain >= 4 && with_dc >= 4 && with_ai >= 4);
     }
 }

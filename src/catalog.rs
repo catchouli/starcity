@@ -64,6 +64,8 @@ impl Loco {
 pub fn wagon_price(cargo: Cargo) -> u32 {
     match cargo {
         Cargo::Passengers | Cargo::Goods => 600,
+        Cargo::Silicon => 500,
+        Cargo::Chips => 800,
         Cargo::Mail | Cargo::Coal | Cargo::IronOre | Cargo::Grain => 500,
         Cargo::Oil | Cargo::Fuel => 650,
         Cargo::Timber | Cargo::Steel | Cargo::Planks => 550,
@@ -79,7 +81,8 @@ pub fn wagon_name(cargo: Cargo) -> &'static str {
         Cargo::Coal | Cargo::IronOre | Cargo::Grain => "hopper",
         Cargo::Oil | Cargo::Fuel => "tanker",
         Cargo::Timber | Cargo::Steel | Cargo::Planks => "flatbed",
-        Cargo::Goods => "goods van",
+        Cargo::Goods | Cargo::Chips => "goods van",
+        Cargo::Silicon => "hopper",
         Cargo::Food => "refrigerated van",
     }
 }

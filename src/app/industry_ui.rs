@@ -11,6 +11,7 @@ use eframe::egui;
 impl StarcityApp {
     /// Once an economy month: industries make their cargo and the stations that serve them collect it.
     pub(super) fn industry_month(&mut self) {
+        self.found_industries();
         let made = self.industries.month();
         self.compute_month();
         let mut moved = vec![0u32; self.industries.list.len()];
@@ -29,19 +30,49 @@ impl StarcityApp {
         }
     }
 
+    /// When the year turns, the industries it brings in are founded: data centres from 2005, AI campuses
+    /// from 2020 (GAME-DESIGN.md §5.8).
+    fn found_industries(&mut self) {
+        if self.founded_year == self.year {
+            return;
+        }
+        self.founded_year = self.year;
+        let before = self.industries.list.len();
+        let moved = self.industries.found(
+            &mut self.world,
+            &mut self.towns,
+            &self.roads,
+            &self.rails,
+            self.params.seed,
+            self.year,
+        );
+        if self.industries.list.len() > before {
+            self.levelled_pending.extend(moved);
+            self.static_changed = true;
+            let names: Vec<_> = self.industries.list[before..]
+                .iter()
+                .map(|i| i.kind.name())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let now = self.clock.days();
+            self.show_message(&format!("New industry: {}", names.join(", ")), now);
+        }
+    }
+
     /// The server farms' month: batches of work become compute, which is also sold as hosting.
     fn compute_month(&mut self) {
         let efficiency = crate::compute::efficiency(self.year as f64 + 0.5);
-        let (mut cu, mut batches) = (0.0, 0u32);
+        let (mut cu, mut batches) = (0.0, 0.0f64);
         for ind in &self.industries.list {
             let scale = ind.kind.compute_scale();
             if scale > 0.0 {
                 cu += ind.made_last_month as f64 * crate::compute::BATCH_CU * scale * efficiency;
-                batches += ind.made_last_month;
+                batches += ind.made_last_month as f64 * scale;
             }
         }
         self.company
-            .earn(crate::company::Item::Hosting, batches * crate::compute::hosting_per_batch(self.year));
+            .earn(crate::company::Item::Hosting, (batches * crate::compute::hosting_per_batch(self.year) as f64) as u32);
         if let Some(tier) = self.compute.month(cu, crate::company::MONTH_SECONDS as f64) {
             let name = crate::compute::TIERS[tier - 1].0;
             let now = self.clock.days();
@@ -122,7 +153,7 @@ pub(super) fn room_for(industries: &crate::industry::Industries, tiles: &[(i32, 
 fn describe(ui: &mut egui::Ui, ind: &Industry) {
     let kind = ind.kind;
     if kind.compute_scale() > 0.0 {
-        ui.label("Turns Goods into compute: the score. It also sells spare compute as hosting.");
+        ui.label(format!("Turns {} into compute: the score. It also sells spare compute as hosting.", inputs_text(ind)));
         ui.label(format!(
             "Last month: {} batches, {}",
             ind.made_last_month,

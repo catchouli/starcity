@@ -109,6 +109,9 @@ pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries,
         (Kind::SteelMill, Kind::Factory, Cargo::Steel),
         (Kind::Sawmill, Kind::Factory, Cargo::Planks),
         (Kind::Factory, Kind::ServerFarm, Cargo::Goods),
+        (Kind::SilicaQuarry, Kind::ChipFab, Cargo::Silicon),
+        (Kind::ChipFab, Kind::DataCentre, Cargo::Chips),
+        (Kind::ChipFab, Kind::AiCampus, Cargo::Chips),
     ];
     let centre = |i: &crate::industry::Industry| (i.tile.0 + i.size() / 2, i.tile.1 + i.size() / 2);
     let mut lines = Vec::new();
@@ -344,7 +347,7 @@ mod tests {
         let mut roads = Layer::new(sx, sz);
         let mut rails = Layer::new(sx, sz);
         let mut towns = Towns::generate(&world, &mut roads, &rails, p.seed, 2000);
-        let (industries, _) = Industries::generate(&mut world, &mut towns, &roads, &rails, p.seed);
+        let (industries, _) = Industries::generate(&mut world, &mut towns, &roads, &rails, p.seed, 2000);
         let signals = Signals::default();
         let mut stations = Stations::default();
         let mut rw = Railway {
