@@ -96,6 +96,12 @@ impl ModelInstance {
         self
     }
 
+    /// A building: its windows light up at night (alpha 240 in the shader).
+    pub fn building(mut self) -> ModelInstance {
+        self.tint[3] = 240;
+        self
+    }
+
     pub fn wrecked(mut self) -> ModelInstance {
         self.tint[3] = 255;
         self
@@ -190,6 +196,8 @@ pub struct SceneRenderer {
     /// Per-tile infrastructure bits (Rgba8Uint): r = roads, g = rails (later),
     /// b = preview pieces that fit, a = preview pieces that are blocked.
     infra: wgpu::Texture,
+    /// Night light map (R8): where towns glow after dark.
+    light: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     quad_indices: wgpu::Buffer,
     quad_capacity: u32,
@@ -282,6 +290,16 @@ impl SceneRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -308,7 +326,8 @@ impl SceneRenderer {
             ..Default::default()
         });
         let infra = create_infra_texture(device, 1, 1);
-        let bind_group = create_bind_group(device, &bgl, &globals, &textures, &sampler, &infra);
+        let light = create_light_texture(device, 1, 1);
+        let bind_group = create_bind_group(device, &bgl, &globals, &textures, &sampler, &infra, &light);
 
         let pipelines = create_pipelines(device, &layout, &shader, 1);
         let (quad_indices, quad_capacity) = create_quad_indices(device, 1024);
@@ -331,6 +350,7 @@ impl SceneRenderer {
             terrain_textures: textures,
             sampler,
             infra,
+            light,
             bind_group,
             quad_indices,
             quad_capacity,
@@ -352,6 +372,10 @@ impl SceneRenderer {
     /// Recreates the infrastructure texture for a new map size (all zero).
     pub fn resize_infra(&mut self, device: &wgpu::Device, size_x: u32, size_z: u32) {
         self.infra = create_infra_texture(device, size_x, size_z);
+        self.rebind(device);
+    }
+
+    fn rebind(&mut self, device: &wgpu::Device) {
         self.bind_group = create_bind_group(
             device,
             &self.bind_group_layout,
@@ -359,6 +383,40 @@ impl SceneRenderer {
             &self.terrain_textures,
             &self.sampler,
             &self.infra,
+            &self.light,
+        );
+    }
+
+    /// Model instances drawn in the static and dynamic layers, and the draw calls they take.
+    pub fn instances(&self) -> (u32, u32, usize) {
+        let count = |l: usize| self.draws[l].iter().map(|&(_, _, n)| n).sum::<u32>();
+        (count(0), count(1), self.draws[0].len() + self.draws[1].len())
+    }
+
+    /// Replaces the night light map (`nightlight.rs`): one byte per cell, `w` by `h`.
+    pub fn set_light_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, data: &[u8]) {
+        if self.light.width() != w || self.light.height() != h {
+            self.light = create_light_texture(device, w, h);
+            self.rebind(device);
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.light,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
     }
 
@@ -840,6 +898,23 @@ fn create_infra_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture 
     })
 }
 
+fn create_light_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("night light"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
 fn create_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -847,8 +922,10 @@ fn create_bind_group(
     textures: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
     infra: &wgpu::Texture,
+    light: &wgpu::Texture,
 ) -> wgpu::BindGroup {
     let infra_view = infra.create_view(&Default::default());
+    let light_view = light.create_view(&Default::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("globals"),
         layout,
@@ -868,6 +945,10 @@ fn create_bind_group(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::TextureView(&infra_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&light_view),
             },
         ],
     })

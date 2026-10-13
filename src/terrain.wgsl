@@ -43,6 +43,8 @@ struct Globals {
 // Per-tile infrastructure bits: r = roads, g = rails, b = preview pieces that
 // fit, a = preview pieces that are blocked.
 @group(0) @binding(3) var infra: texture_2d<u32>;
+// Where towns glow at night (`nightlight.rs`): one value per 4 x 4 tiles, filtered.
+@group(0) @binding(4) var light_map: texture_2d<f32>;
 
 const WATER: u32 = 15u;
 
@@ -335,9 +337,34 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     color = highlight(color, in.world, px);
 
+    color += city_glow(in.world) * (base * 1.6 + vec3<f32>(0.12));
     let wire_bg = select(color, vec3<f32>(0.08, 0.09, 0.12), g.options.x > 0.5);
     color = mix(wire_bg, vec3<f32>(1.0, 0.85, 0.2), wf);
     return vec4<f32>(mix(color, g.sky.xyz, fog(in.world)), 1.0);
+}
+
+// How dark it is: 0 by day, 1 at night.
+fn night() -> f32 {
+    return 1.0 - g.sky.w;
+}
+
+// The warm glow of towns at night, added on top of whatever is lit (explicit LOD, so it's safe
+// anywhere in a shader).
+fn city_glow(world: vec3<f32>) -> vec3<f32> {
+    let size = g.ocean.x;
+    let uv = world.xz / max(size, 1.0);
+    if night() < 0.01 || size <= 0.0 || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 {
+        return vec3<f32>(0.0);
+    }
+    let v = textureSampleLevel(light_map, tex_sampler, uv, 0.0).r;
+    return vec3<f32>(1.0, 0.7, 0.4) * v * night() * 0.9;
+}
+
+// A cheap hash for a cell: 0 to 1.
+fn hash2(p: vec2<f32>) -> f32 {
+    let q = fract(p * vec2<f32>(0.1031, 0.1030));
+    let r = q + dot(q, q.yx + 33.33);
+    return fract((r.x + r.y) * r.x);
 }
 
 // Fog for the endless ocean: nothing on the map is fogged, but the sea fades
@@ -360,6 +387,8 @@ fn on_map(world: vec3<f32>) -> f32 {
 fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let n = flat_normal(in.world);
     var color = highlight(vec3<f32>(0.12, 0.32, 0.45) * lighting(n), in.world, pixel_size(in.world));
+    // Towns' lights shimmer on the water at night.
+    color += city_glow(in.world) * 0.8;
     var alpha = 0.78;
     let wf = wire(in.quad_uv) * g.params.w;
     color = mix(color, vec3<f32>(0.3, 0.8, 1.0), wf);
@@ -578,5 +607,18 @@ fn fs_model(in: ModelOut) -> @location(0) vec4<f32> {
     // A little glint on glossy non-metals (glass, paint).
     color += g.sun_color.xyz * pow(sun_amount, 64.0) * 0.14 * (1.0 - rough) * (1.0 - metallic);
     color += albedo * glow * 1.4;
+    // Night: the town's glow falls on everything, and buildings light their windows.
+    color += city_glow(in.world) * albedo * 1.5;
+    let is_building = in.tint.a > 0.93 && in.tint.a < 0.95;
+    if is_building && night() > 0.02 && abs(n.y) < 0.3 {
+        // A grid of windows on each wall: about four across a tile, one per floor.
+        let along = dot(in.world.xz, vec2<f32>(-n.z, n.x));
+        let cell = vec2<f32>(along / 0.12, in.world.y / 0.22);
+        let f = fract(cell);
+        let pane = step(0.28, f.x) * step(f.x, 0.72) * step(0.3, f.y) * step(f.y, 0.78);
+        let lit = step(0.42, hash2(floor(cell) + floor(dot(in.world.xz, n.xz) * 4.0) * 17.0));
+        let warm = mix(vec3<f32>(1.0, 0.78, 0.45), vec3<f32>(0.75, 0.9, 1.0), hash2(floor(cell) * 1.7));
+        color += warm * pane * lit * night() * 1.1;
+    }
     return vec4<f32>(mix(color, g.sky.xyz, fog(in.world)), 1.0);
 }

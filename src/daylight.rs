@@ -65,9 +65,9 @@ impl Light {
         let sky = mix3(sky, scale3([0.85, 0.52, 0.38], 0.55 + 0.45 * day), twilight * 0.55);
 
         let warm = mix3([1.0, 0.68, 0.42], [1.0, 0.97, 0.9], smoothstep(0.05, 0.55, elev));
-        let sun = mix3([0.26, 0.34, 0.56], scale3(warm, 0.8), day);
+        let sun = mix3([0.29, 0.37, 0.60], scale3(warm, 0.8), day);
 
-        let ambient = mix3([0.60, 0.66, 0.92], [1.0, 1.0, 1.0], day);
+        let ambient = mix3([0.66, 0.72, 0.96], [1.0, 1.0, 1.0], day);
 
         // East at sunrise, west at sunset; at night the moon takes over from the
         // opposite side. The direction blends between the two with the daylight,

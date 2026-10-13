@@ -21,6 +21,7 @@ enum CraftAction {
     ToggleStop,
     Remove,
     Find,
+    Follow,
 }
 
 fn thousands(n: u32) -> String {
@@ -555,6 +556,7 @@ impl StarcityApp {
             Kind::Airport => ("airport", "airports"),
             Kind::BusStop => ("bus stop", "bus stops"),
         };
+        let followed = self.following == Some(super::Followed::Craft(craft));
         let mut action = None;
         let mut open = true;
         let salt = match craft {
@@ -611,6 +613,13 @@ impl StarcityApp {
                 }
                 if ui.button("Find").on_hover_text("Centre the view on it").clicked() {
                     action = Some(CraftAction::Find);
+                }
+                if ui
+                    .button(if followed { "Stop following" } else { "Follow" })
+                    .on_hover_text("Keep the camera on it (moving the view yourself stops it)")
+                    .clicked()
+                {
+                    action = Some(CraftAction::Follow);
                 }
                 if ui
                     .button(format!(
@@ -672,6 +681,13 @@ impl StarcityApp {
                 }
                 self.selected_craft = None;
                 self.props_changed = true;
+            }
+            CraftAction::Follow => {
+                if followed {
+                    self.following = None;
+                } else {
+                    self.start_following(super::Followed::Craft(craft));
+                }
             }
             CraftAction::Find => {
                 if let Some(p) = focus {

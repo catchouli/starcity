@@ -72,6 +72,13 @@ pub struct StarcityApp {
     gen_ms: f32,
     mesh_ms: f32,
     frame_ms: f32,
+    /// Where the frame's time goes (smoothed), for the debug window's Frame tab.
+    times: FrameTimes,
+    debug_tab: u8,
+    /// The vehicle the camera is following, and where it last put the focus (moving the camera
+    /// yourself stops it).
+    following: Option<Followed>,
+    follow_at: Vec3,
     scene_renders: u64,
     ui: UiState,
     physical_keys: PhysicalKeys,
@@ -112,6 +119,9 @@ pub struct StarcityApp {
     demo: Option<demo::DemoState>,
     /// Every chunk needs meshing again (the sea level went back down).
     remesh_all: bool,
+    /// The night light map needs building again (towns or roads changed), and when it was last built.
+    light_dirty: bool,
+    light_built: f64,
     planes: Planes,
     selected_craft: Option<Craft>,
     selected_terminal: Option<TerminalId>,
@@ -249,6 +259,10 @@ impl StarcityApp {
             gen_ms: 0.0,
             mesh_ms: 0.0,
             frame_ms: 0.0,
+            times: FrameTimes::default(),
+            debug_tab: 0,
+            following: None,
+            follow_at: Vec3::ZERO,
             scene_renders: 0,
             ui: UiState {
                 tool: Tool::Pointer,
@@ -313,6 +327,8 @@ impl StarcityApp {
             flood_warning: None,
             demo: None,
             remesh_all: false,
+            light_dirty: true,
+            light_built: -10.0,
             planes: Planes::default(),
             selected_craft: None,
             selected_terminal: None,
@@ -405,6 +421,11 @@ impl StarcityApp {
             app.static_changed = true;
         }
         #[cfg(not(target_arch = "wasm32"))]
+        if crate::devtools::DevTools::window("frames") {
+            app.ui.show_debug = true;
+            app.debug_tab = 1;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if crate::devtools::DevTools::window("charter") {
             app.ui.show_charter = true;
         }
@@ -449,7 +470,10 @@ impl StarcityApp {
             self.seek_to(then);
         }
         if let Some(hour) = DevTools::hour() {
+            // Keep the date (`STARCITY_YEAR` may have moved it); only the light changes.
+            let days = self.clock.year_f64();
             self.clock = Clock::starting_at(hour);
+            self.clock.set_year_f64(days);
         }
         if let Some(zoom) = DevTools::zoom() {
             self.camera.view_height = zoom;
@@ -1416,7 +1440,18 @@ impl StarcityApp {
             self.static_changed = true;
             self.track_version += 1;
         }
+        // The night glow follows the towns, rebuilt at most every couple of seconds.
+        if self.light_dirty && self.last_time - self.light_built > 2.0 {
+            self.light_dirty = false;
+            self.light_built = self.last_time;
+            let people = self.towns.buildings.iter().filter(|(_, b)| b.part_of.is_none()).map(|(&t, b)| (t, b.population()));
+            let map = crate::nightlight::build(self.world.size_x, self.world.size_z, people, &self.roads);
+            let (w, h) = crate::nightlight::dims(self.world.size_x, self.world.size_z);
+            self.renderer.set_light_map(&rs.device, &rs.queue, w as u32, h as u32, &map);
+            self.scene_dirty = true;
+        }
         if std::mem::take(&mut self.static_changed) {
+            self.light_dirty = true;
             let mut placed = props::stations(&self.models, &self.world, &self.rails, &self.stations, self.year);
             placed.extend(props::buildings(&self.models, &self.world, &self.towns));
             placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
@@ -1570,7 +1605,9 @@ impl StarcityApp {
             SetCargo(Cargo),
             Remove,
             Find,
+            Follow,
         }
+        let followed = self.following == Some(Followed::Train(id));
         let status = train.status(&self.stations);
         let orders = train.orders.clone();
         let current = if orders.is_empty() {
@@ -1647,6 +1684,13 @@ impl StarcityApp {
                     {
                         action = Some(Action::Find);
                     }
+                    if ui
+                        .button(if followed { "Stop following" } else { "Follow" })
+                        .on_hover_text("Keep the camera on this train (moving the view yourself stops it)")
+                        .clicked()
+                    {
+                        action = Some(Action::Follow);
+                    }
                     if ui.button("Remove train").clicked() {
                         action = Some(Action::Remove);
                     }
@@ -1704,6 +1748,14 @@ impl StarcityApp {
                 self.trains.remove(id);
                 self.selected_train = None;
                 self.props_changed = true;
+                return;
+            }
+            Some(Action::Follow) => {
+                if followed {
+                    self.following = None;
+                } else {
+                    self.start_following(Followed::Train(id));
+                }
                 return;
             }
             Some(Action::Find) => {
@@ -1997,7 +2049,9 @@ impl StarcityApp {
     /// Zooms while keeping the ground point under the cursor fixed on screen.
     fn zoom_at_cursor(&mut self, ui: &egui::Ui, rect: egui::Rect, factor: f32) {
         let max_width = self.world.size_x as f32 * 2.0;
-        let Some(pos) = ui.ctx().pointer_latest_pos() else {
+        // While following a vehicle, zoom on it rather than towards the cursor.
+        let pointer = ui.ctx().pointer_latest_pos().filter(|_| self.following.is_none());
+        let Some(pos) = pointer else {
             self.camera.zoom(factor, max_width);
             return;
         };
@@ -2020,6 +2074,46 @@ impl StarcityApp {
     }
 
     /// Keeps the focus inside the map and resting on the ground.
+    /// Where a followed vehicle is now, if it still exists.
+    fn followed_position(&self, f: Followed) -> Option<glam::Vec2> {
+        match f {
+            Followed::Train(id) => self.trains.list.iter().find(|t| t.id == id).map(|t| t.point_behind(0.0)),
+            Followed::Craft(craft::Craft::Boat(id)) => self.boats.get(id).map(|b| b.pos),
+            Followed::Craft(craft::Craft::Plane(id)) => self.planes.get(id).map(|p| glam::Vec2::new(p.pos.x, p.pos.z)),
+            Followed::Craft(craft::Craft::Bus(id)) => self.buses.get(id).map(|b| b.placement().0),
+        }
+    }
+
+    /// Keeps the camera on the followed vehicle. Panning the view yourself (the focus moved since we
+    /// last put it there) stops following; rotating and zooming don't.
+    fn follow(&mut self) {
+        let Some(f) = self.following else { return };
+        let moved = (self.camera.focus.x - self.follow_at.x).abs() + (self.camera.focus.z - self.follow_at.z).abs();
+        if moved > 0.05 {
+            self.following = None;
+            return;
+        }
+        let Some(p) = self.followed_position(f) else {
+            self.following = None;
+            return;
+        };
+        self.camera.focus.x = p.x;
+        self.camera.focus.z = p.y;
+        self.follow_at = self.camera.focus;
+        self.scene_dirty = true;
+    }
+
+    /// Starts following (the camera jumps there).
+    pub(super) fn start_following(&mut self, f: Followed) {
+        if let Some(p) = self.followed_position(f) {
+            self.camera.focus.x = p.x;
+            self.camera.focus.z = p.y;
+            self.follow_at = self.camera.focus;
+            self.following = Some(f);
+            self.scene_dirty = true;
+        }
+    }
+
     fn settle_focus(&mut self, dt: f32) {
         // The view can wander out over the sea, up to a map's width past the edge.
         let size = self.world.size_x as f32;
@@ -2043,8 +2137,56 @@ impl StarcityApp {
     fn debug_window(&mut self, ctx: &egui::Context, rs: &RenderState) {
         let mut regen = false;
         let mut open = self.ui.show_debug;
+        let mut tab = self.debug_tab;
+        let frame_tab = |ui: &mut egui::Ui, app: &Self| {
+            let budget = 1000.0 / 60.0;
+            ui.label(format!("Budget for 60 fps: {budget:.1} ms. Bars: average, with the recent worst faint."));
+            egui::Grid::new("frame times").num_columns(3).show(ui, |ui| {
+                for (i, name) in FrameTimes::PARTS.iter().enumerate() {
+                    let (avg, peak) = (app.times.avg[i], app.times.peak[i]);
+                    ui.label(*name);
+                    ui.label(format!("{avg:.2} ms (worst {peak:.1})"));
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 10.0), egui::Sense::hover());
+                    let p = ui.painter();
+                    let w = |ms: f32| rect.width() * (ms / budget).min(1.0);
+                    p.rect_filled(rect, 0.0, egui::Color32::from_gray(0x50).gamma_multiply(0.3));
+                    let colour = if avg > budget * 0.5 { egui::Color32::from_rgb(0xd0, 0x50, 0x30) } else { egui::Color32::from_rgb(0x30, 0x90, 0x50) };
+                    p.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(w(peak), rect.height())), 0.0, colour.gamma_multiply(0.35));
+                    p.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(w(avg), rect.height())), 0.0, colour);
+                    ui.end_row();
+                }
+            });
+            ui.separator();
+            let (st, dy, draws) = app.renderer.instances();
+            let s = app.renderer.stats;
+            ui.label(format!("Models: {st} still, {dy} moving, {draws} draw calls"));
+            ui.label(format!("Terrain: {}/{} chunks, {}/{} quads", s.chunks_drawn, s.chunks_total, s.quads_drawn, s.quads_total));
+            ui.label(format!(
+                "Moving things: {} trains, {} road vehicles, {} buses and trucks, {} boats, {} planes, {} flying cars, {} pods",
+                app.trains.list.len(),
+                app.vehicles.list.len(),
+                app.buses.list.len(),
+                app.boats.list.len(),
+                app.planes.list.len(),
+                app.skycars.list.len(),
+                app.express.pods.len()
+            ));
+            ui.label(format!("Scene redrawn {} times (it only redraws when something changes)", app.scene_renders));
+            ui.label(
+                egui::RichText::new("CPU time only: the GPU's share isn't measured, and in a browser it adds to this.").small(),
+            );
+        };
         ui::win95::window(ctx, "Debug", &mut open, egui::pos2(8.0, 90.0), |ui| {
             ui.set_width(270.0);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut tab, 0, "Overview");
+                ui.selectable_value(&mut tab, 1, "Frame time");
+            });
+            ui.separator();
+            if tab == 1 {
+                frame_tab(ui, self);
+                return;
+            }
             let info = rs.adapter.get_info();
             let s = self.renderer.stats;
             ui.label(format!("{:.1} ms/frame  ·  {:?}", self.frame_ms, info.backend));
@@ -2169,6 +2311,7 @@ impl StarcityApp {
             ui.separator();
             ui.small("WASD/arrows or left-drag: pan · Q/E or right-drag: rotate\nscroll: zoom · R: ortho/perspective · F1: wireframe · G: grid\nEsc: pointer tool · F3: this window");
         });
+        self.debug_tab = tab;
         self.ui.show_debug = open;
         if regen {
             self.regenerate(rs);
@@ -2396,6 +2539,7 @@ impl eframe::App for StarcityApp {
         if self.camera.update(dt) {
             self.scene_dirty = true;
         }
+        self.follow();
         self.settle_focus(dt);
 
         let now = ctx.input(|i| i.time);
@@ -2422,6 +2566,7 @@ impl eframe::App for StarcityApp {
             self.renderer.era_chrome = chrome;
             self.scene_dirty = true;
         }
+        let t_sim = Instant::now();
         let steps = (sim_dt / MAX_SIM_STEP).ceil() as u32;
         let (mut trains_moved, mut vehicles_moved, mut craft_moved) = (false, false, false);
         let mut changed = Vec::new();
@@ -2442,6 +2587,8 @@ impl eframe::App for StarcityApp {
             }
             changed.extend(self.sim.advance(&mut self.world, step));
         }
+        let sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
+        let t_world = Instant::now();
         self.last_time = now;
         self.trains_moving = trains_moved;
         self.vehicles_moving = vehicles_moved;
@@ -2463,7 +2610,9 @@ impl eframe::App for StarcityApp {
         }
         self.remesh_tiles(&rs, &changed);
         self.update_light(now, frame_dt);
+        let world_ms = t_world.elapsed().as_secs_f32() * 1000.0;
 
+        let t_ui = Instant::now();
         self.game_ui(ui, &rs);
         if self.ui.show_debug {
             self.debug_window(&ctx, &rs);
@@ -2488,6 +2637,8 @@ impl eframe::App for StarcityApp {
         self.industry_window(&ctx);
         self.craft_windows(&ctx);
         self.terminal_window(&ctx);
+        let ui_ms = t_ui.elapsed().as_secs_f32() * 1000.0;
+        let (mut props_ms, mut render_ms) = (0.0, 0.0);
 
         let mut scene_changed = false;
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -2501,9 +2652,11 @@ impl eframe::App for StarcityApp {
                 (rect.width() * scale).max(1.0) as u32,
                 (rect.height() * scale).max(1.0) as u32,
             ];
+            let t_props = Instant::now();
             let changes = self.handle_tool(&ctx, &response, self.view_proj(size));
             self.apply_changes(&rs, changes);
             self.flush_infra(&rs);
+            props_ms = t_props.elapsed().as_secs_f32() * 1000.0;
             self.handle_mouse(ui, &response);
             // Clouds fade around the cursor, so redraw when it moves over them.
             let cursor = ctx.pointer_latest_pos().filter(|_| response.hovered());
@@ -2533,6 +2686,7 @@ impl eframe::App for StarcityApp {
                     cursor: cursor_px,
                     fade_radius: 220.0 * scale,
                 };
+                let t_render = Instant::now();
                 self.renderer.render(
                     &rs,
                     size,
@@ -2543,6 +2697,7 @@ impl eframe::App for StarcityApp {
                     clouds,
                     &self.light,
                 );
+                render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
                 self.scene_renders += 1;
                 self.scene_dirty = false;
             }
@@ -2585,6 +2740,7 @@ impl eframe::App for StarcityApp {
         self.devtools.update(&ctx);
         let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
         self.frame_ms = self.frame_ms * 0.9 + ms * 0.1;
+        self.times.add(&[sim_ms, world_ms, ui_ms, props_ms, render_ms, ms]);
     }
 }
 
@@ -2604,4 +2760,37 @@ fn project(view_proj: Mat4, rect: egui::Rect, p: Vec3) -> Option<egui::Pos2> {
         rect.min.x + (ndc.x + 1.0) / 2.0 * rect.width(),
         rect.min.y + (1.0 - ndc.y) / 2.0 * rect.height(),
     ))
+}
+
+/// The frame's time by part, smoothed, and the worst of each in the last few seconds.
+#[derive(Default)]
+struct FrameTimes {
+    avg: [f32; 6],
+    peak: [f32; 6],
+}
+
+impl FrameTimes {
+    const PARTS: [&'static str; 6] = [
+        "Simulation (trains, towns, vehicles)",
+        "World updates (arrivals, remeshing)",
+        "Interface (windows, panels)",
+        "Tools and props (rebuilding instances)",
+        "3D scene (encoding draws)",
+        "Whole frame (CPU)",
+    ];
+
+    fn add(&mut self, ms: &[f32; 6]) {
+        for i in 0..6 {
+            self.avg[i] = self.avg[i] * 0.9 + ms[i] * 0.1;
+            // Peaks decay over a few seconds, so a spike shows for a moment.
+            self.peak[i] = (self.peak[i] * 0.995).max(ms[i]);
+        }
+    }
+}
+
+/// Something the camera can follow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Followed {
+    Train(u32),
+    Craft(craft::Craft),
 }

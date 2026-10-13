@@ -229,12 +229,17 @@ pub fn text() -> Color32 {
 
 /// Accent colour for numbers that matter (the compute meter).
 pub fn ink() -> Color32 {
+    // Follows the colours on screen (which, early in a blend, may still be the old look's).
     let p = pal();
-    match look() {
-        Look::Classic => Color32::from_rgb(0x10, 0x40, 0x90),
-        Look::Holo | Look::Ambient => p.highlight,
-        Look::Chrome => p.dark,
-        _ => p.accent,
+    if p.dark_ui {
+        p.highlight
+    } else {
+        match look() {
+            Look::Classic => Color32::from_rgb(0x10, 0x40, 0x90),
+            Look::Chrome => p.dark,
+            Look::Holo | Look::Ambient => Color32::from_rgb(0x0a, 0x60, 0xc0),
+            _ => p.accent,
+        }
     }
 }
 

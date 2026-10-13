@@ -23,6 +23,7 @@ mod industry;
 mod input;
 mod models;
 mod network;
+mod nightlight;
 mod picking;
 mod planes;
 mod power;

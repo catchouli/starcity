@@ -130,7 +130,7 @@ pub fn buildings(models: &Models, world: &World, towns: &Towns) -> Placed {
         } else {
             0.0
         };
-        out.push((model, ModelInstance::at([cx, world.height_at(cx, cz), cz], yaw)));
+        out.push((model, ModelInstance::at([cx, world.height_at(cx, cz), cz], yaw).building()));
     }
     out
 }
