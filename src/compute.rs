@@ -10,6 +10,17 @@ pub fn efficiency(year: f64) -> f64 {
     2f64.powf((year - 2000.0) / 2.5)
 }
 
+/// Compute designing better compute (§5.9): nothing until the Models era, then ten times more every
+/// four years. The super-exponential term, kept out of the way until the AI boom has happened.
+pub fn self_improvement(year: f64) -> f64 {
+    if year < 2028.0 { 1.0 } else { 10f64.powf((year - 2028.0) / 4.0) }
+}
+
+/// CU a month from `batches` of work at a site of this scale in `year`.
+pub fn monthly(batches: u32, scale: f64, year: f64) -> f64 {
+    batches as f64 * BATCH_CU * scale * efficiency(year) * self_improvement(year)
+}
+
 /// What selling one batch of spare compute earns (£): the AI boom triples it from 2024, and the
 /// 2029 correction takes some of that back.
 pub fn hosting_per_batch(year: i32) -> u32 {
@@ -231,6 +242,21 @@ impl Compute {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_convergence_target_is_reachable_with_a_few_ai_campuses_but_not_without() {
+        // Two AI campuses running flat out from 2036.
+        let mut total = 0.0;
+        for month in 0..(10 * 12) {
+            let year = 2036.0 + month as f64 / 12.0;
+            total += 2.0 * monthly(40, 20.0, year);
+        }
+        assert!(total > 1e15, "{}", show(total));
+        // A server farm in the 2000s makes a few thousand a month.
+        assert!(monthly(40, 1.0, 2001.0) < 5_000.0);
+        // Before the AI years, no self-improvement.
+        assert_eq!(self_improvement(2020.0), 1.0);
+    }
 
     #[test]
     fn units_change_every_three_orders_of_magnitude() {

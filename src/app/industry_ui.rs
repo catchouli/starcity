@@ -358,12 +358,11 @@ impl StarcityApp {
 
     /// The server farms' month: batches of work become compute, which is also sold as hosting.
     fn compute_month(&mut self) {
-        let efficiency = crate::compute::efficiency(self.year as f64 + 0.5);
         let (mut cu, mut batches) = (0.0, 0.0f64);
         for ind in &self.industries.list {
             let scale = ind.kind.compute_scale();
             if scale > 0.0 {
-                cu += ind.made_last_month as f64 * crate::compute::BATCH_CU * scale * efficiency;
+                cu += crate::compute::monthly(ind.made_last_month, scale, self.year as f64 + 0.5);
                 batches += ind.made_last_month as f64 * scale;
             }
         }
