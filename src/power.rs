@@ -8,11 +8,13 @@ pub const REACH: f32 = 30.0;
 /// Even with no grid, machines run on their own generators at this fraction.
 pub const GENERATOR_FLOOR: f32 = 0.3;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Source {
     pub at: (f32, f32),
     pub mw: f32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Consumer {
     pub at: (f32, f32),
     pub mw: f32,

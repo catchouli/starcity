@@ -20,7 +20,7 @@ const FOLLOW_GAP: f32 = 0.5;
 /// Never more than this many vehicles on the map.
 const MAX_VEHICLES: usize = 900;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Car,
     Bus,
@@ -46,7 +46,7 @@ impl Kind {
 }
 
 /// A road piece driven in one direction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RoadSeg {
     pub tile: (i32, i32),
     pub piece: u8,
@@ -142,6 +142,7 @@ pub fn next_road_segments(roads: &Layer, seg: RoadSeg) -> Vec<RoadSeg> {
     out
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Vehicle {
     pub kind: Kind,
     pub town: TownId,
@@ -168,6 +169,7 @@ impl Vehicle {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Vehicles {
     pub list: Vec<Vehicle>,
     /// The current year; new vehicles are bought in it.

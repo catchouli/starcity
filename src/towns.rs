@@ -17,6 +17,7 @@ pub type TownId = u32;
 /// How far a station's catchment reaches from its platforms, in tiles.
 pub const CATCHMENT: i32 = 4;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Town {
     pub id: TownId,
     pub name: String,
@@ -90,7 +91,7 @@ impl Town {
 /// A building. Big ones (an orb on 3 x 3 tiles) have an entry on every tile
 /// they cover: the north-west tile is the anchor, with `size` set, and the
 /// rest point back at it with `part_of`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Building {
     pub town: TownId,
     pub floors: u8,
@@ -129,7 +130,7 @@ pub fn floor_cap(year: i32) -> u32 {
 }
 
 /// What makes a town want to grow (§5.10), each counted with diminishing returns.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct Reasons {
     /// Stations serving it.
     pub stations: u32,
@@ -178,6 +179,7 @@ pub fn size_name(pop: u32) -> &'static str {
 const MIN_AGE: i32 = 12;
 const RENEWAL_SECONDS: f32 = 20.0 * 365.0;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Towns {
     pub list: Vec<Town>,
     pub buildings: BTreeMap<(i32, i32), Building>,

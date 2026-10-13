@@ -43,7 +43,7 @@ pub const UPKEEP: u32 = 8_000;
 
 /// Where a launch goes (§10.4). They open with the years; farther pays more, costs more to fly,
 /// and sends something back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Destination {
     Orbit,
     Moon,
@@ -109,7 +109,7 @@ impl Destination {
 }
 
 /// A launch's result: what it earned, what it cost to run, and whether it failed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Launch {
     pub revenue: u32,
     pub cost: u32,

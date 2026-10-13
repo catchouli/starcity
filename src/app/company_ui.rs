@@ -17,7 +17,7 @@ struct RelocationSite {
 }
 
 /// What a contract joins: a town or an industry.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Endpoint {
     Town(TownId),
     Industry(usize),

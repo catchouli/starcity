@@ -4,6 +4,7 @@
 use crate::cargo::Cargo;
 
 /// A locomotive model. Speeds are in tiles per second, prices in pounds, running cost per year.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Loco {
     pub name: &'static str,
     pub blurb: &'static str,
@@ -61,7 +62,7 @@ impl Loco {
 }
 
 /// A boat or plane on sale (GAME-DESIGN.md §7.3–7.4).
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct Craft {
     pub name: &'static str,
     pub price: u32,
@@ -266,7 +267,7 @@ pub fn wagon_name(cargo: Cargo) -> &'static str {
 }
 
 /// A train as chosen in the buy window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrainOrder {
     pub loco: usize,
     pub cargo: Cargo,

@@ -3,7 +3,7 @@
 //! What is in force is a pure function of the date, so jumping about in time stays consistent.
 
 /// What the world is doing to the company right now: multipliers on its income and costs.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Mods {
     pub passengers: f32,
     pub freight: f32,
@@ -25,6 +25,7 @@ impl Default for Mods {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Event {
     pub year: f32,
     pub title: &'static str,

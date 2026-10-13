@@ -2,7 +2,7 @@
 //! kept beside Money, and the ending the singularity reads from both. Pure, tested without a window.
 
 /// Four priorities that always add up to one.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Charter {
     pub weights: [f32; 4],
 }
@@ -78,7 +78,7 @@ impl Charter {
 }
 
 /// What Wellbeing is made of, each from 0 to 1.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct People {
     /// Share of the population within reach of a station.
     pub served: f32,
@@ -96,7 +96,7 @@ pub fn wellbeing(p: &People) -> f32 {
 }
 
 /// How the fifty years end (§1.2).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ending {
     Ascension,
     Commons,

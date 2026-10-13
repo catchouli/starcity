@@ -8,6 +8,7 @@ mod demo;
 mod flood_ui;
 mod industry_ui;
 mod news_ui;
+mod save;
 
 use crate::boats::Boats;
 use crate::camera::Camera;
@@ -51,6 +52,8 @@ const CLOUD_FRAME_SECONDS: f64 = 1.0 / 15.0;
 /// Longest simulation step, and the most simulated time per frame.
 const MAX_SIM_STEP: f32 = 0.1;
 const MAX_SIM_PER_FRAME: f32 = 0.4;
+/// Real seconds a train's loading label stays up, at the least.
+const LABEL_SECONDS: f32 = 2.0;
 /// The light is re-evaluated at most this often.
 const LIGHT_FRAME_SECONDS: f64 = 0.1;
 
@@ -79,6 +82,14 @@ pub struct StarcityApp {
     /// yourself stops it).
     following: Option<Followed>,
     follow_at: Vec3,
+    /// When (real seconds) each train last pulled in, for its loading label.
+    stop_shown: HashMap<u32, f64>,
+    /// Where the game is saved (`None` for dev runs), when it last was, and whether the last try failed.
+    store: Option<Box<dyn save::Store>>,
+    last_save: f64,
+    save_failed: bool,
+    /// Each chunk of the world as last encoded for saving, and the chunk version it was encoded at.
+    world_bytes: Vec<save::SavedChunk>,
     scene_renders: u64,
     ui: UiState,
     physical_keys: PhysicalKeys,
@@ -263,6 +274,11 @@ impl StarcityApp {
             debug_tab: 0,
             following: None,
             follow_at: Vec3::ZERO,
+            stop_shown: HashMap::new(),
+            store: if demo { None } else { save::store() },
+            last_save: 0.0,
+            save_failed: false,
+            world_bytes: Vec::new(),
             scene_renders: 0,
             ui: UiState {
                 tool: Tool::Pointer,
@@ -410,6 +426,11 @@ impl StarcityApp {
             app.ui.show_next_step = false;
         }
         app.regenerate(rs);
+        let resumed = !demo && app.load_saved(rs);
+        if !resumed {
+            // The first save encodes the whole map, which takes a moment: do it while starting up.
+            app.save_now();
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if crate::devtools::DevTools::window("news") {
             app.news.push(6);
@@ -438,8 +459,12 @@ impl StarcityApp {
             }
         }
         let c = app.params.size as f32 / 2.0;
-        app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
-        if !demo {
+        if resumed {
+            // The camera was saved with the game.
+        } else {
+            app.camera.focus = Vec3::new(c, app.world.surface_height(c as i32, c as i32), c);
+        }
+        if !demo && !resumed {
             // A new game opens on your garage.
             app.look_at_hq();
         }
@@ -1388,7 +1413,10 @@ impl StarcityApp {
 
     /// Trains that have just pulled in: unload everyone, then load from the platform.
     fn handle_arrivals(&mut self) {
+        let now = self.last_time;
+        self.stop_shown.retain(|_, &mut at| now - at < 60.0);
         for (train, station) in std::mem::take(&mut self.trains.arrivals) {
+            self.stop_shown.insert(train, now);
             let Some(st) = self.stations.list.get_mut(&station) else {
                 continue;
             };
@@ -1547,12 +1575,31 @@ impl StarcityApp {
         self.loading_labels(&painter, view_proj, rect);
     }
 
+    /// How long (real seconds) a train's loading label stays up: the stop itself, or `LABEL_SECONDS`
+    /// if that's longer.
+    fn label_seconds(&self) -> f64 {
+        let factor = self.ui.speed.factor();
+        let stop = if factor > 0.0 {
+            crate::trains::LOADING_SECONDS / factor
+        } else {
+            0.0
+        };
+        stop.max(LABEL_SECONDS) as f64
+    }
+
     /// A little progress bar and counter above each train that's at a platform: first the cargo
     /// coming off (counting down, with what it paid), then the new cargo going on (counting up).
+    /// It runs on real time, for at least `LABEL_SECONDS`, so stops can be seen at high speed too.
     fn loading_labels(&self, painter: &egui::Painter, view_proj: Mat4, rect: egui::Rect) {
+        let stop = self.label_seconds();
         for train in &self.trains.list {
-            let Some(left) = train.loading else { continue };
-            let progress = (1.0 - left / crate::trains::LOADING_SECONDS).clamp(0.0, 1.0);
+            let Some(&at) = self.stop_shown.get(&train.id) else {
+                continue;
+            };
+            let progress = ((self.last_time - at) / stop) as f32;
+            if progress >= 1.0 {
+                continue;
+            }
             let head = train.point_behind(0.0);
             let p = Vec3::new(head.x, self.world.height_at(head.x, head.y) + 1.1, head.y);
             let Some(at) = project(view_proj, rect, p) else {
@@ -2577,14 +2624,18 @@ impl StarcityApp {
         if std::mem::take(&mut self.ui.go_hq) {
             self.look_at_hq();
         }
-        if actions.new_map {
-            self.params.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
-            self.regenerate(rs);
+        if actions.new_game {
+            let seed = (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
+            self.new_game(rs, seed);
         }
     }
 }
 
 impl eframe::App for StarcityApp {
+    fn on_exit(&mut self) {
+        self.save_now();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let frame_start = Instant::now();
         let rs = frame.wgpu_render_state().expect("wgpu").clone();
@@ -2656,6 +2707,7 @@ impl eframe::App for StarcityApp {
         }
         self.handle_arrivals();
         self.handle_craft_arrivals();
+        self.autosave();
         changed.append(&mut self.levelled_pending);
         if std::mem::take(&mut self.remesh_all) {
             // One tile per chunk is enough: remeshing works chunk by chunk.
@@ -2687,8 +2739,8 @@ impl eframe::App for StarcityApp {
         self.craft_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {
-            self.params.seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
-            self.regenerate(&rs);
+            let seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
+            self.new_game(&rs, seed);
         }
         self.town_window(&ctx);
         self.station_window(&ctx);
@@ -2777,6 +2829,10 @@ impl eframe::App for StarcityApp {
             || self.trains_moving
             || self.vehicles_moving
             || self.craft_moving
+            || self
+                .stop_shown
+                .values()
+                .any(|&at| self.last_time - at < self.label_seconds())
         {
             ctx.request_repaint();
         } else if clouds_visible {

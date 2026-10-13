@@ -20,7 +20,7 @@ const START_YEAR: i32 = 2000;
 /// Hour of the day the light starts at, so the first view is in morning light.
 pub const START_HOUR: f64 = 8.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Speed {
     Paused,
     X1,
@@ -51,7 +51,7 @@ impl Speed {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Date {
     pub year: i32,
     /// 1 to 12.
@@ -81,7 +81,7 @@ impl Date {
 
 /// The calendar and the light cycle run separately: the calendar fast enough
 /// for a 50-year game, the light slowly enough to look good.
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct Clock {
     /// Calendar days since 1 January of the start year.
     days: f64,

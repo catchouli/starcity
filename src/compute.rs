@@ -93,7 +93,7 @@ pub fn tier(total: f64) -> usize {
 
 /// What the company's compute is spent on (GAME-DESIGN.md §5.8). Whatever isn't given to a program
 /// is sold as hosting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Program {
     Analytics,
     /// Sees the headlines coming: years of foresight.
@@ -195,7 +195,7 @@ impl Program {
 }
 
 /// How the monthly compute is shared: a fraction for each program, the rest sold as hosting.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct Allocation {
     pub share: [f32; 6],
 }
@@ -213,7 +213,7 @@ impl Allocation {
 }
 
 /// What the running programs do to the company this month.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Effects {
     pub fare_bonus: f32,
     pub running_discount: f32,
@@ -240,7 +240,7 @@ pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Ef
 
 const HISTORY: usize = 120;
 
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct Compute {
     /// Everything made since the company began: the score.
     pub total: f64,

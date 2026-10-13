@@ -35,7 +35,7 @@ pub const LOAN_STEP: i64 = 10_000;
 const WARN_MONTHS: u32 = 3;
 const BANKRUPT_MONTHS: u32 = 12;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     Passengers,
     /// Mail and every other cargo.
@@ -92,7 +92,7 @@ impl Item {
 
 /// One year of income and spending by category (positive numbers; income and
 /// expense are kept apart by sign of the category: passengers are income).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ledger {
     amounts: [i64; 11],
 }
@@ -129,7 +129,7 @@ impl Ledger {
 }
 
 /// What the company owns, counted once a month for running costs.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct Assets {
     pub trains: u32,
     /// What the trains cost to buy, and cost to run per year.
@@ -162,6 +162,7 @@ impl Assets {
 }
 
 /// What the headquarters asks for, and gives, at each level (GAME-DESIGN.md §9.1).
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Level {
     pub name: &'static str,
     /// Paid to build it.
@@ -184,7 +185,7 @@ pub struct Level {
 }
 
 /// A compute site the headquarters may ask the company to serve.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
     DataCentre,
     AiCampus,
@@ -313,7 +314,7 @@ pub fn tool_level(tool: Tool) -> u8 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Requirement {
     pub text: String,
     pub met: bool,
@@ -321,7 +322,7 @@ pub struct Requirement {
 
 /// What the game knows about the company right now, for the checklist and
 /// the next-step panel.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct Facts {
     pub rail_pieces: u32,
     pub stations: u32,
@@ -355,7 +356,7 @@ pub fn pounds(n: i64) -> String {
 /// What a contract from the town council asks for (GAME-DESIGN.md §9.3): link two towns by
 /// rail and carry some people between them. The council pays `seed` money when it starts, to
 /// get you going, and `reward` when it's done.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContractKind {
     /// Join two towns and carry people between them.
     Link,
@@ -363,7 +364,7 @@ pub enum ContractKind {
     Supply(Cargo),
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Contract {
     pub kind: ContractKind,
     pub from: String,
@@ -413,7 +414,7 @@ impl Contract {
 }
 
 /// Where the company stands on its current contract's two towns.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LinkFacts {
     pub station_a: bool,
     pub station_b: bool,
@@ -422,6 +423,7 @@ pub struct LinkFacts {
     pub train: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Company {
     pub cash: i64,
     pub loan: i64,
@@ -965,7 +967,7 @@ impl Company {
 }
 
 /// A yearly goal: a suggestion that pays a small bonus, never forced (GAME-DESIGN.md §9).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum GoalKind {
     /// Deliver this many units of a cargo during the year.
     Carry(cargo::Cargo, u32),
@@ -975,7 +977,7 @@ pub enum GoalKind {
     Town(u32),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Goal {
     pub kind: GoalKind,
     pub done: bool,

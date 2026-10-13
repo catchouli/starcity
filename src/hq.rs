@@ -9,7 +9,7 @@ use crate::towns::{TownId, Towns};
 /// Side of the plot, in tiles. Every level's model fits inside it.
 pub const PLOT: i32 = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Hq {
     /// North-west tile of the plot.
     pub anchor: (i32, i32),

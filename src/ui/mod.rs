@@ -150,7 +150,7 @@ pub struct UiState {
 
 #[derive(Default)]
 pub struct UiActions {
-    pub new_map: bool,
+    pub new_game: bool,
 }
 
 /// The Compute meter shown at the right of the menu bar: running total, rate, history (log axis), tooltip.
@@ -165,8 +165,9 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
     let mut actions = UiActions::default();
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if ui.button("New map").clicked() {
-                actions.new_map = true;
+            if ui.button("New game").clicked() {
+                actions.new_game = true;
+                ui.close();
             }
             #[cfg(not(target_arch = "wasm32"))]
             {

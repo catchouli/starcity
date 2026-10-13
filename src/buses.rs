@@ -14,7 +14,7 @@ const LOAD_SECONDS: f32 = 3.0;
 const SEARCH_LIMIT: usize = 40_000;
 const RETRY_SECONDS: f32 = 3.0;
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 enum State {
     Idle,
     Driving { path: VecDeque<RoadSeg>, to: TerminalId },
@@ -22,6 +22,7 @@ enum State {
     NoRoute { to: TerminalId, retry: f32 },
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Bus {
     pub id: u32,
     pub born: i32,
@@ -67,7 +68,7 @@ impl Bus {
     }
 }
 
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Buses {
     pub list: Vec<Bus>,
     /// The current year; new buses are built in it.

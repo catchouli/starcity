@@ -25,7 +25,7 @@ const LOAD_SECONDS: f32 = 4.0;
 const SEARCH_BUDGET: usize = 3000;
 const MAX_CACHED_ROUTES: usize = 256;
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 enum State {
     /// Nowhere to go.
     Idle,
@@ -55,6 +55,7 @@ enum State {
     },
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Boat {
     pub id: u32,
     /// The year it was built, which decides what it looks like.
@@ -100,14 +101,16 @@ impl Boat {
     }
 }
 
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Boats {
     pub list: Vec<Boat>,
     /// The current year; new boats are built in it.
     pub year: i32,
     /// Boats that have just tied up: (boat, port). The app loads and unloads.
     pub arrivals: Vec<(u32, TerminalId)>,
+    #[serde(skip)]
     routes: HashMap<RouteKey, Option<Rc<Route>>>,
+    #[serde(skip)]
     finder: Pathfinder,
     /// The sea version the cached routes are for.
     version: u32,

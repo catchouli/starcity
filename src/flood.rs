@@ -62,7 +62,7 @@ pub fn reach(world: &World, level: u16, walls: &Layer) -> Vec<(i32, i32)> {
 }
 
 /// The sea's state as it rises.
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Flood {
     /// The level the game began at.
     pub start: u16,

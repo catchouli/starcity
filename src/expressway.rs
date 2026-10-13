@@ -20,12 +20,13 @@ const CLEARANCE: f32 = 2.0;
 const GRADE: f32 = 0.35;
 const POD_SPEED: f32 = 10.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct Pod {
     pub seg: RoadSeg,
     pub pos: f32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Expressway {
     pub layer: Layer,
     /// The deck's height over each tile.

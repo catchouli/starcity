@@ -9,7 +9,7 @@ pub const FROM: i32 = 2028;
 const SPEED: f32 = 4.0;
 const CRUISE: f32 = 6.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct SkyCar {
     pub pos: Vec3,
     pub target: Vec2,
@@ -20,7 +20,7 @@ pub struct SkyCar {
 }
 
 /// Where a town's cars fly: its centre and how far out it has built.
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct Area {
     pub centre: Vec2,
     pub radius: f32,
@@ -28,7 +28,7 @@ pub struct Area {
     pub cars: usize,
 }
 
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct SkyCars {
     pub list: Vec<SkyCar>,
     rng: u64,

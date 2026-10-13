@@ -16,7 +16,7 @@
 use super::{Block, Material, Shape, World};
 use noise::{NoiseFn, Perlin};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct GenParams {
     pub seed: u32,
     /// Map size in tiles (square).

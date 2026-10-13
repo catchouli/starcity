@@ -7,7 +7,7 @@
 
 /// The twelve cargoes the game starts with (GAME-DESIGN.md §4). Era cargoes
 /// (chips, containers, lunar glass...) join this list with their industries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Cargo {
     Passengers,
     Mail,
@@ -33,7 +33,7 @@ pub enum Cargo {
 pub const COUNT: usize = 19;
 
 /// What kind of vehicle body can carry it (GAME-DESIGN.md §4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
     People,
     Bulk,
@@ -195,7 +195,7 @@ pub fn fare(cargo: Cargo, units: u32, tiles: f32, seconds: f32) -> u32 {
 }
 
 /// Cargo waiting at a station: whole units come out, fractions pile up.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Stock {
     units: [f32; COUNT],
 }
@@ -223,7 +223,7 @@ impl Stock {
 }
 
 /// What decides a station's rating for a cargo (GAME-DESIGN.md §5.2).
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct RatingInputs {
     /// Seconds since a vehicle last loaded this cargo here.
     pub since_pickup: f32,
@@ -265,7 +265,7 @@ pub fn share(rating: f32) -> f32 {
 }
 
 /// Per-station, per-cargo service record and rating.
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct Service {
     pub rating: f32,
     /// Game seconds when something last loaded; `None` if nothing ever has.

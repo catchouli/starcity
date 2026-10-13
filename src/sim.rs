@@ -3,7 +3,7 @@
 use crate::network::Layer;
 use crate::terrain::{Block, Material, World};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Clear {
     /// Bulldoze: remove everything and leave bare ground.
     Everything,
@@ -14,7 +14,7 @@ pub enum Clear {
 }
 
 /// Tiles whose terrain (needs re-meshing) or infrastructure (needs re-uploading) changed.
-#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Default, Debug)]
 pub struct Changes {
     pub terrain: Vec<(i32, i32)>,
     pub infra: Vec<(i32, i32)>,
@@ -27,6 +27,7 @@ pub const TICK_SECONDS: f32 = 0.25;
 /// With one grass neighbour that's about 25 s on average; fully surrounded, about 6 s.
 const GROW_CHANCE: f32 = 0.01;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Sim {
     accumulator: f32,
     rng: Rng,
@@ -182,6 +183,7 @@ impl Sim {
 }
 
 /// xorshift64*: tiny, fast, deterministic and identical on every platform.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Rng(u64);
 
 impl Rng {

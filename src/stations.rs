@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 
 pub type StationId = u32;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Station {
     pub id: StationId,
     pub name: String,
@@ -33,7 +33,7 @@ impl Station {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct Stations {
     pub list: BTreeMap<StationId, Station>,
     by_tile: BTreeMap<(i32, i32), StationId>,
@@ -41,7 +41,7 @@ pub struct Stations {
 }
 
 /// A planned run of platform tiles along one axis.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct StationPlan {
     pub tiles: Vec<(i32, i32)>,
     /// The straight track piece the platforms run along (X or Y).

@@ -32,7 +32,7 @@ const MAX_BLOCK_SEGMENTS: usize = 64;
 pub const LOADING_SECONDS: f32 = 3.0;
 
 /// What a train did at its last stop: units off, units on, and what the unloading paid.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default)]
 pub struct Flow {
     pub unloaded: u32,
     pub loaded: u32,
@@ -42,7 +42,7 @@ pub struct Flow {
 type PieceKey = ((i32, i32), u8);
 
 /// A track piece traversed in one direction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Seg {
     pub tile: (i32, i32),
     pub piece: u8,
@@ -135,7 +135,7 @@ fn signal_on(signals: &Signals, seg: Seg) -> Option<bool> {
         .map(|s| s.forward == seg.forward)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 struct Entry {
     seg: Seg,
     /// Owned by this train (under it, or reserved through a signal). Planned
@@ -143,6 +143,7 @@ struct Entry {
     claimed: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Train {
     pub id: u32,
     /// The year it was built, which decides what it looks like.
@@ -182,9 +183,11 @@ pub struct Train {
     pub boarded: Option<(f32, f32, f64)>,
     /// Distance to the target station from each segment, and the target and
     /// track version it was computed for.
+    #[serde(skip)]
     routing: Option<Routing>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Routing {
     target: StationId,
     version: u64,
@@ -317,7 +320,7 @@ fn distances(rails: &Layer, stations: &Stations, station: StationId) -> HashMap<
     best.into_iter().map(|(s, d)| (s, d as f32 / 1000.0)).collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpawnError {
     NoTrack,
     Junction,
@@ -325,7 +328,7 @@ pub enum SpawnError {
     Occupied,
 }
 
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Trains {
     pub list: Vec<Train>,
     /// The current year; new trains are built in it.
@@ -855,6 +858,7 @@ impl Trains {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum Extend {
     Ok,
     Blocked,

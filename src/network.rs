@@ -41,7 +41,7 @@ pub fn midpoint(tile: (i32, i32), edge: u8) -> (i32, i32) {
 
 /// One segment of a diagonal walk: the tile it crosses and the edges it
 /// enters and leaves by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Step {
     pub tile: (i32, i32),
     pub enter: u8,
@@ -79,7 +79,7 @@ pub fn diagonal_walk(start: (i32, i32), (sx, sz): (i32, i32), end: (i32, i32)) -
 }
 
 /// A per-tile bitmask layer covering the map.
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Layer {
     pub size_x: usize,
     pub size_z: usize,
@@ -113,7 +113,7 @@ impl Layer {
 }
 
 /// A change to one tile: bits to remove, then bits to add.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Piece {
     pub tile: (i32, i32),
     pub add: u8,
@@ -127,7 +127,7 @@ impl Piece {
 }
 
 /// Why a plan can't be built.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blocked {
     Water,
     Slope,
@@ -142,7 +142,7 @@ pub enum Blocked {
 
 /// A dragged-out piece of network. All or nothing: if any piece doesn't fit,
 /// none of it is built.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Plan {
     pub pieces: Vec<Piece>,
     pub blocked: Option<Blocked>,

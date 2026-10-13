@@ -17,7 +17,7 @@ pub const BLOCK_HEIGHT: f32 = 0.5;
 pub const CHUNK_SIZE: usize = 32;
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Material {
     #[default]
     Air = 0,
@@ -50,7 +50,7 @@ impl Material {
 /// Corners are numbered anticlockwise when seen from above (x east, z south):
 /// bit 0 = (x0, z0), bit 1 = (x1, z0), bit 2 = (x1, z1), bit 3 = (x0, z1).
 /// `FULL` is an ordinary cube. A mask of 0 would have no volume and is never stored.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shape(pub u8);
 
 impl Shape {
@@ -86,7 +86,7 @@ impl Shape {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Block {
     pub material: Material,
     pub shape: Shape,
@@ -122,6 +122,25 @@ pub struct World {
     /// rises (`flood.rs`).
     pub dry: std::collections::HashSet<(i32, i32)>,
     blocks: Vec<Block>,
+    /// Which world this is, and how many edits each chunk has had: together they change whenever
+    /// a chunk's blocks do, so a save can reuse a chunk's encoding until then.
+    stamp: u64,
+    chunk_edits: Vec<u32>,
+}
+
+/// What a save keeps of the world besides its blocks.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Header {
+    pub size_x: usize,
+    pub size_z: usize,
+    pub height: usize,
+    pub sea_level: u16,
+    pub dry: std::collections::HashSet<(i32, i32)>,
+}
+
+fn fresh_stamp() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl World {
@@ -133,6 +152,8 @@ impl World {
             sea_level,
             dry: Default::default(),
             blocks: vec![Block::AIR; size_x * size_z * height],
+            stamp: fresh_stamp(),
+            chunk_edits: vec![0; size_x.div_ceil(CHUNK_SIZE) * size_z.div_ceil(CHUNK_SIZE)],
         }
     }
 
@@ -169,6 +190,67 @@ impl World {
     pub fn set(&mut self, x: usize, y: usize, z: usize, block: Block) {
         let i = self.index(x, y, z);
         self.blocks[i] = block;
+        let chunk = (z / CHUNK_SIZE) * self.chunks_x() + x / CHUNK_SIZE;
+        self.chunk_edits[chunk] += 1;
+    }
+
+    /// Changes whenever any block in the chunk (`cz * chunks_x + cx`) does (see `stamp`).
+    pub fn chunk_version(&self, chunk: usize) -> (u64, u32) {
+        (self.stamp, self.chunk_edits[chunk])
+    }
+
+    /// For saving: everything but the blocks.
+    pub fn header(&self) -> Header {
+        Header {
+            size_x: self.size_x,
+            size_z: self.size_z,
+            height: self.height,
+            sea_level: self.sea_level,
+            dry: self.dry.clone(),
+        }
+    }
+
+    /// For saving: one chunk's blocks as runs of the same block, column by column. Columns are mostly
+    /// a few long runs, so this is small, and smaller still compressed.
+    pub fn chunk_runs(&self, chunk: usize) -> Vec<(Block, u32)> {
+        let (cx, cz) = (chunk % self.chunks_x(), chunk / self.chunks_x());
+        let mut runs: Vec<(Block, u32)> = Vec::new();
+        for z in cz * CHUNK_SIZE..((cz + 1) * CHUNK_SIZE).min(self.size_z) {
+            for x in cx * CHUNK_SIZE..((cx + 1) * CHUNK_SIZE).min(self.size_x) {
+                for &b in self.column(x, z) {
+                    match runs.last_mut() {
+                        Some((last, n)) if *last == b => *n += 1,
+                        _ => runs.push((b, 1)),
+                    }
+                }
+            }
+        }
+        runs
+    }
+
+    /// A saved world: its header and each chunk's runs, in order. `None` if they don't fit together.
+    pub fn from_saved(header: Header, chunks: Vec<Vec<(Block, u32)>>) -> Option<World> {
+        let mut w = World::new(header.size_x, header.size_z, header.height, header.sea_level);
+        w.dry = header.dry;
+        if chunks.len() != w.chunk_edits.len() {
+            return None;
+        }
+        for (chunk, runs) in chunks.into_iter().enumerate() {
+            let (cx, cz) = (chunk % w.chunks_x(), chunk / w.chunks_x());
+            let mut blocks = runs.into_iter().flat_map(|(b, n)| std::iter::repeat_n(b, n as usize));
+            for z in cz * CHUNK_SIZE..((cz + 1) * CHUNK_SIZE).min(w.size_z) {
+                for x in cx * CHUNK_SIZE..((cx + 1) * CHUNK_SIZE).min(w.size_x) {
+                    let start = w.index(x, 0, z);
+                    for i in start..start + w.height {
+                        w.blocks[i] = blocks.next()?;
+                    }
+                }
+            }
+            if blocks.next().is_some() {
+                return None;
+            }
+        }
+        Some(w)
     }
 
     /// The blocks of one column, bottom to top.

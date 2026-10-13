@@ -25,7 +25,7 @@ pub const AIRPORT_COST: u32 = 8_000;
 /// A body of water smaller than this is a pond, not somewhere to sail.
 const MIN_SEA: u32 = 200;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Port,
     Airport,
@@ -38,7 +38,7 @@ pub enum Kind {
 /// Local coordinates: `u` runs along the runway, `v` across it. Row 0 is the
 /// runway, row 1 the apron, row 2 the terminal. (For a runway along z, `v`
 /// grows towards -x, to match how the box renderer rotates props.)
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AirportLayout {
     /// North-west tile of the footprint.
     pub x0: i32,
@@ -102,7 +102,7 @@ impl AirportLayout {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
     /// A land tile on the coast, and the water tile boats tie up in.
     Port {
@@ -116,7 +116,7 @@ pub enum Site {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Terminal {
     pub id: TerminalId,
     pub name: String,
@@ -169,7 +169,7 @@ impl Terminal {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct Terminals {
     pub list: BTreeMap<TerminalId, Terminal>,
     by_tile: HashMap<(i32, i32), TerminalId>,
@@ -248,7 +248,7 @@ impl Blockers<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteBlocked {
     Water,
     NotCoast,
@@ -272,7 +272,7 @@ impl SiteBlocked {
 }
 
 /// A planned terminal: where it goes, what it costs, and any ground to level.
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct SitePlan {
     pub site: Option<Site>,
     pub tiles: Vec<(i32, i32)>,
@@ -393,13 +393,13 @@ pub fn plan_airport(world: &World, sea: &Sea, blockers: &Blockers, centre: (i32,
 }
 
 /// A vehicle's list of terminals to visit in turn, and which is next.
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct Orders {
     pub list: Vec<TerminalId>,
     pub current: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OrderEdit {
     Up(usize),
     Down(usize),

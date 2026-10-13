@@ -53,7 +53,7 @@ pub fn piece_ends(piece: u8) -> ((f32, f32), (f32, f32)) {
 /// A path signal. It faces one way along its piece: trains may only pass it
 /// travelling that way, and only once they've reserved a path through the
 /// block ahead. Nothing may enter a signalled block from behind its signals.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Signal {
     /// The track piece it stands beside.
     pub piece: u8,
@@ -64,13 +64,13 @@ pub struct Signal {
 
 /// Signals by tile. At most one per tile, and only on tiles with a single
 /// track piece (not junctions).
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Signals {
     pub by_tile: BTreeMap<(i32, i32), Signal>,
 }
 
 /// What left-clicking a tile with the signal tool will do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignalClick {
     Place,
     Flip,
@@ -534,6 +534,7 @@ fn plan_with(
 
 /// A planned path's heights are chosen along its length (see `grade_profile`)
 /// so the line climbs gently instead of cutting through hills.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Grade {
     /// The most the ground may move at any corner, and corners moved in all.
     max_shift: i32,

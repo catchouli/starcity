@@ -14,6 +14,7 @@ const MIN_FOV: f32 = 0.02;
 /// FOV change per second while transitioning.
 const FOV_SPEED: f32 = 4.0;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Camera {
     /// The point on the ground the camera orbits and looks at.
     pub focus: Vec3,

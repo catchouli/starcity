@@ -25,14 +25,14 @@ const CLEARANCE: f32 = 2.0;
 /// Spacing of terrain-following waypoints along a cruise, in tiles.
 const SAMPLE: f32 = 8.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 struct Wp {
     /// x, height, z in world units.
     p: Vec3,
     speed: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 enum Stage {
     Parked {
         at: TerminalId,
@@ -47,6 +47,7 @@ enum Stage {
     },
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Plane {
     pub id: u32,
     /// The year it was built, which decides what it looks like.
@@ -94,7 +95,7 @@ impl Plane {
     }
 }
 
-#[derive(Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Planes {
     pub list: Vec<Plane>,
     /// The current year; new planes are built in it.

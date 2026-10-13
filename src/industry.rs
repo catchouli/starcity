@@ -21,7 +21,7 @@ pub const STOCK_CAP: u32 = 400;
 /// How far (tiles) from any platform of a station an industry still counts as served.
 pub const CATCHMENT: i32 = 3;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     CoalMine,
     IronOreMine,
@@ -322,7 +322,7 @@ impl Kind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Industry {
     pub id: usize,
     pub kind: Kind,
@@ -346,7 +346,7 @@ pub struct Industry {
 }
 
 /// Something that happened to an industry this month.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     /// It has been neglected too long and will shut within the year.
     Closing(usize),
@@ -403,7 +403,7 @@ impl Industry {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct Industries {
     pub list: Vec<Industry>,
     by_tile: HashMap<(i32, i32), usize>,
@@ -653,6 +653,7 @@ impl Industries {
 
 // --- Placement --------------------------------------------------------------------------
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Rng(u64);
 
 impl Rng {
