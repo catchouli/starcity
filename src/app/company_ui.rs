@@ -548,6 +548,21 @@ impl StarcityApp {
         let mut open = self.ui.show_finance;
         let value = self.company.value(&self.assets);
         let wellbeing = self.wellbeing;
+        // What the Forecast program sees: the headlines coming, and this year's income carried
+        // forward through them.
+        let foresight = self.company.effects.foresight;
+        let forecast = (foresight >= 0.5).then(|| {
+            let date = self.clock.year_f64() as f32;
+            let seed = self.params.seed;
+            let (now, next) = (crate::events::active(date, seed), crate::events::active(date + 1.0, seed));
+            let earned = self.company.ledger.income() as f32 / (date.fract().max(1.0 / 12.0));
+            let projected = earned * next.passengers.max(next.freight) / now.passengers.max(now.freight).max(0.01);
+            let coming: Vec<(i32, &str, &str)> = crate::events::coming(date, foresight, seed)
+                .into_iter()
+                .map(|(s, i)| (s as i32, crate::events::EVENTS[i].title, crate::events::EVENTS[i].text))
+                .collect();
+            (projected as i64, coming)
+        });
         let world_now = crate::events::active_titles(self.clock.year_f64() as f32, self.params.seed);
         let (mut borrow, mut repay) = (false, false);
         let c = &self.company;
@@ -565,6 +580,18 @@ impl StarcityApp {
                 ui.end_row();
             });
             ui.label(format!("Wellbeing {:.0} / 100 (Company → Charter and ledgers)", wellbeing));
+            if let Some((income, coming)) = &forecast {
+                ui.separator();
+                ui.label(egui::RichText::new(format!("Forecast ({foresight:.0} years ahead)")).strong());
+                ui.label(format!("Next year's income, as things stand: about {}", money(*income)));
+                if coming.is_empty() {
+                    ui.label("Nothing in the news ahead.");
+                }
+                for (year, title, text) in coming {
+                    ui.label(format!("{year}: {title}. {text}"));
+                }
+                ui.separator();
+            }
             for title in &world_now {
                 ui.label(egui::RichText::new(format!("In the news: {title}")).color(win95::warn()));
             }

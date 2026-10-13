@@ -69,8 +69,9 @@ impl StarcityApp {
                     compute::Program::Design => "construction",
                     compute::Program::Research => "years of technology",
                     compute::Program::Agents => "actions a month",
+                    compute::Program::Forecast => "years of foresight",
                 };
-                let research = matches!(p, compute::Program::Research | compute::Program::Agents);
+                let research = matches!(p, compute::Program::Research | compute::Program::Agents | compute::Program::Forecast);
                 let sign = if p == compute::Program::Analytics { "+" } else if research { "" } else { "-" };
                 let (now_text, top_text) = if research {
                     (format!("{now:.1}"), format!("{ceiling:.1}"))

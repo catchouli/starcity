@@ -81,6 +81,8 @@ pub fn tier(total: f64) -> usize {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Program {
     Analytics,
+    /// Sees the headlines coming: years of foresight.
+    Forecast,
     Optimiser,
     Design,
     /// Pulls every model and industry's introduction year forward (the Tech Pace).
@@ -89,8 +91,9 @@ pub enum Program {
     Agents,
 }
 
-pub const PROGRAMS: [Program; 5] = [
+pub const PROGRAMS: [Program; 6] = [
     Program::Analytics,
+    Program::Forecast,
     Program::Optimiser,
     Program::Design,
     Program::Research,
@@ -105,6 +108,7 @@ impl Program {
     pub fn name(self) -> &'static str {
         match self {
             Program::Analytics => "Route analytics",
+            Program::Forecast => "Forecasting",
             Program::Optimiser => "Fleet optimiser",
             Program::Design => "Generative design",
             Program::Research => "Research",
@@ -115,6 +119,7 @@ impl Program {
     pub fn blurb(self) -> &'static str {
         match self {
             Program::Analytics => "Better timetables and loading: every fare pays more.",
+            Program::Forecast => "Sees what the coming years will bring (Finances window): the headlines before they happen.",
             Program::Optimiser => "Smoother running and fewer queues: lower running costs.",
             Program::Design => "Plans cheaper cuts and routes: lower construction costs.",
             Program::Research => "Brings new machines and industries forward: the Tech Pace, in years.",
@@ -125,6 +130,7 @@ impl Program {
     pub fn from_year(self) -> i32 {
         match self {
             Program::Analytics => 2003,
+            Program::Forecast => 2008,
             Program::Optimiser => 2015,
             Program::Design => 2026,
             Program::Research => 2030,
@@ -137,6 +143,7 @@ impl Program {
     pub fn strongest(self, year: i32) -> f32 {
         let (lo, hi, span) = match self {
             Program::Analytics => (0.03, 0.12, 22.0),
+            Program::Forecast => (1.0, 20.0, 32.0),
             Program::Optimiser => (0.05, 0.25, 20.0),
             Program::Design => (0.10, 0.50, 14.0),
             Program::Research => (0.5, 4.0, 20.0),
@@ -150,6 +157,7 @@ impl Program {
     pub fn need(self, year: i32, fleet: u32) -> f64 {
         let base = match self {
             Program::Analytics => 300.0,
+            Program::Forecast => 400.0,
             Program::Optimiser => 500.0,
             Program::Design => 800.0,
             Program::Research => 1500.0,
@@ -172,7 +180,7 @@ impl Program {
 /// How the monthly compute is shared: a fraction for each program, the rest sold as hosting.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Allocation {
-    pub share: [f32; 5],
+    pub share: [f32; 6],
 }
 
 impl Allocation {
@@ -197,6 +205,8 @@ pub struct Effects {
     pub tech_pace: f32,
     /// How many things the agents can do a month.
     pub agent_actions: f32,
+    /// Years ahead the Forecast sees.
+    pub foresight: f32,
 }
 
 pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Effects {
@@ -207,6 +217,7 @@ pub fn effects(alloc: &Allocation, year: i32, monthly_cu: f64, fleet: u32) -> Ef
         build_discount: e(Program::Design),
         tech_pace: e(Program::Research),
         agent_actions: e(Program::Agents),
+        foresight: e(Program::Forecast),
     }
 }
 
@@ -324,7 +335,7 @@ mod tests {
         assert_eq!(a.hosting(), 1.0);
         a.set(Program::Analytics, 0.7);
         a.set(Program::Optimiser, 0.7);
-        assert!((a.share[1] - 0.3).abs() < 1e-6);
+        assert!((a.share[Program::Optimiser.index()] - 0.3).abs() < 1e-6);
         assert!(a.hosting().abs() < 1e-6);
         a.set(Program::Analytics, 0.1);
         assert!((a.hosting() - 0.6).abs() < 1e-6);

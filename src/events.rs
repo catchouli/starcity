@@ -242,6 +242,16 @@ pub fn active_titles(date: f32, seed: u32) -> Vec<&'static str> {
         .collect()
 }
 
+/// Events that start after `date` and within `years` of it, soonest first: (start, index).
+pub fn coming(date: f32, years: f32, seed: u32) -> Vec<(f32, usize)> {
+    let mut out: Vec<(f32, usize)> = (0..EVENTS.len())
+        .map(|i| (start(i, seed), i))
+        .filter(|&(s, _)| s > date && s <= date + years)
+        .collect();
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
 /// Events that started in `(from, to]`, as indices, for headlines. A jump of more than a year (the
 /// date slider) reports nothing, so seeking doesn't flood the screen.
 pub fn started_between(from: f32, to: f32, seed: u32) -> Vec<usize> {
@@ -295,5 +305,19 @@ mod tests {
             .sum();
         assert!(all >= EVENTS.len() - 1 && all <= EVENTS.len(), "{all}");
         assert!(started_between(2000.0, 2050.0, 9).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod forecast_tests {
+    use super::*;
+
+    #[test]
+    fn the_forecast_sees_what_is_coming_within_its_horizon() {
+        let soon = coming(2007.5, 1.0, 4);
+        assert!(soon.iter().all(|&(s, _)| s > 2007.5 && s <= 2008.5));
+        let far = coming(2007.5, 20.0, 4);
+        assert!(far.len() > soon.len());
+        assert!(far.windows(2).all(|w| w[0].0 <= w[1].0), "soonest first");
     }
 }
