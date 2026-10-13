@@ -109,6 +109,8 @@ pub struct UiState {
     pub show_fund: bool,
     /// Force a look instead of the one the year brings.
     pub look_override: Option<win95::Look>,
+    /// The year, so looks from later decades stay locked.
+    pub year: i32,
     /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
     pub show_next_step: bool,
     /// The Assistant shows its whole checklist, not just a one-line pill.
@@ -166,7 +168,16 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
                 s.look_override = None;
             }
             for look in win95::Look::ALL {
-                if ui.radio(s.look_override == Some(look), look.name()).clicked() {
+                let unlocked = look.from_year() <= s.year;
+                let label = if unlocked {
+                    look.name().to_string()
+                } else {
+                    format!("{} (from {})", look.name(), look.from_year())
+                };
+                if ui
+                    .add_enabled(unlocked, egui::RadioButton::new(s.look_override == Some(look), label))
+                    .clicked()
+                {
                     s.look_override = Some(look);
                 }
             }

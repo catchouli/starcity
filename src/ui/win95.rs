@@ -53,6 +53,18 @@ impl Look {
         }
     }
 
+    /// The first year the company's software can have this look: it is unlocked from then on.
+    pub fn from_year(self) -> i32 {
+        match self {
+            Look::Classic => 2000,
+            Look::Glass => 2010,
+            Look::Sleek => 2020,
+            Look::Holo => 2030,
+            Look::Chrome => 2040,
+            Look::Ambient => 2048,
+        }
+    }
+
     fn index(self) -> u8 {
         Look::ALL.iter().position(|&l| l == self).unwrap() as u8
     }

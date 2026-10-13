@@ -527,23 +527,6 @@ impl StarcityApp {
         }
     }
 
-    /// The headline of the day, with what it does, until it is dismissed.
-    pub(super) fn news_window(&mut self, ctx: &egui::Context) {
-        let Some(&i) = self.news.first() else { return };
-        let e = &crate::events::EVENTS[i];
-        let (mut open, mut ok) = (true, false);
-        win95::window(ctx, "Extra! Extra!", &mut open, egui::pos2(380.0, 160.0), |ui| {
-            ui.set_width(300.0);
-            ui.label(egui::RichText::new(e.title).heading());
-            ui.label(e.text);
-            ui.add_space(4.0);
-            ok = ui.button("OK").clicked();
-        });
-        if !open || ok {
-            self.news.remove(0);
-        }
-    }
-
     pub(super) fn finance_window(&mut self, ctx: &egui::Context) {
         let mut open = self.ui.show_finance;
         let value = self.company.value(&self.assets);

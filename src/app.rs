@@ -4,6 +4,7 @@ mod company_ui;
 mod compute_ui;
 mod craft;
 mod industry_ui;
+mod news_ui;
 
 use crate::boats::Boats;
 use crate::camera::Camera;
@@ -239,6 +240,7 @@ impl StarcityApp {
                 show_fund: crate::devtools::DevTools::window("fund"),
                 #[cfg(target_arch = "wasm32")]
                 show_fund: false,
+                year: 2000,
                 look_override: std::env::var("STARCITY_LOOK").ok().and_then(|v| {
                     win95::Look::ALL
                         .into_iter()
@@ -2036,6 +2038,11 @@ impl StarcityApp {
 
     /// Menu bar, toolbar and status bar around the 3D view.
     fn game_ui(&mut self, ui: &mut egui::Ui, rs: &RenderState) {
+        self.ui.year = self.year;
+        if self.ui.look_override.is_some_and(|l| l.from_year() > self.year) && std::env::var("STARCITY_LOOK").is_err() {
+            // The date went back past it: it isn't unlocked any more.
+            self.ui.look_override = None;
+        }
         let want = self.ui.look_override.unwrap_or_else(|| win95::Look::for_year(self.year));
         if want != win95::look() {
             win95::set_look(want);
