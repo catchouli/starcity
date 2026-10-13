@@ -37,6 +37,42 @@ impl StarcityApp {
         self.demo_connect();
         self.demo_expressway();
         self.demo_walls();
+        self.demo_headquarters();
+        self.demo_programs();
+    }
+
+    /// The headquarters grows with the years, on the timeline the balance report gives a steady player
+    /// (and shrinks back when the date goes back).
+    fn demo_headquarters(&mut self) {
+        let year = self.year;
+        let level = [(2036, 6), (2026, 5), (2018, 4), (2014, 3), (2006, 2), (2000, 1)]
+            .iter()
+            .find(|&&(y, _)| year >= y)
+            .map_or(0, |&(_, l)| l);
+        if self.company.hq_level != level {
+            self.company.hq_level = level;
+            self.static_changed = true;
+        }
+    }
+
+    /// Compute shared out as a sensible player would in each era, so the programs show.
+    fn demo_programs(&mut self) {
+        use crate::compute::Program;
+        let year = self.tech_year();
+        let mut alloc = crate::compute::Allocation::default();
+        for (program, share) in [
+            (Program::Analytics, 0.15),
+            (Program::Forecast, 0.1),
+            (Program::Optimiser, 0.15),
+            (Program::Design, 0.15),
+            (Program::Research, 0.15),
+        ] {
+            if year >= program.from_year() {
+                alloc.set(program, share);
+            }
+        }
+        self.compute_alloc = alloc;
+        self.refresh_effects();
     }
 
     /// Trucks in the demo: from each food plant and factory near a town, a road (if it needs one) to
