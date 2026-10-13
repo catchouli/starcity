@@ -799,12 +799,12 @@ impl StarcityApp {
 
     /// Demo mode: ferry lines between coastal towns and flights between the
     /// biggest cities. Returns (ports, boats, airports, planes).
-    /// Demo: a bus line across each of the three biggest towns, between two stops on its roads.
+    /// Demo: a bus line across each of the eight biggest towns, between two stops on its roads.
     pub(super) fn demo_buses(&mut self) -> usize {
         let mut towns: Vec<(u32, (i32, i32))> = self.towns.list.iter().map(|t| (self.towns.population(t.id), t.centre)).collect();
         towns.sort_by(|a, b| b.0.cmp(&a.0));
         let mut lines = 0;
-        for &(_, (cx, cz)) in towns.iter().take(3) {
+        for &(_, (cx, cz)) in towns.iter().take(8) {
             let roads: Vec<(i32, i32)> = (cz - 12..=cz + 12)
                 .flat_map(|z| (cx - 12..=cx + 12).map(move |x| (x, z)))
                 .filter(|&(x, z)| {

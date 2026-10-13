@@ -70,6 +70,40 @@ impl StarcityApp {
         gone
     }
 
+    /// Seeking back to `date`: industries of later years close, the sea goes back down to its level then,
+    /// and the demo takes down what belongs to later years.
+    pub(super) fn rewind_world(&mut self, date: f64) {
+        let year = date.floor() as i32;
+        for i in 0..self.industries.list.len() {
+            let ind = &self.industries.list[i];
+            if !ind.closed && ind.kind.from_year() > year {
+                for t in self.industries.release(i) {
+                    self.towns.occupied.set(t.0, t.1, 0);
+                }
+                self.industries.list[i].closed = true;
+                self.static_changed = true;
+            }
+        }
+        self.founded_year = 0;
+        let level = self.flood.start + flood::rise(date as f32);
+        if self.world.sea_level > level {
+            self.world.sea_level = level;
+            let world = &self.world;
+            let keep: Vec<(i32, i32)> = world
+                .dry
+                .iter()
+                .copied()
+                .filter(|&(x, z)| world.surface(x, z).is_some_and(|(b, _)| b < level))
+                .collect();
+            self.world.dry = keep.into_iter().collect();
+            self.flood.pending.clear();
+            self.renderer.ocean[1] = self.world.sea_level as f32 * crate::terrain::BLOCK_HEIGHT;
+            self.sea = None;
+            self.remesh_all = true;
+        }
+        self.demo_rewind(year);
+    }
+
     /// Once a month: the sea rises when its year comes, floods a share of what it will take, and
     /// warns ahead of the next rise.
     pub(super) fn flood_month(&mut self) {

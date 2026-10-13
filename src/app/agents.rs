@@ -84,10 +84,16 @@ impl StarcityApp {
                 signals: &self.signals,
                 rails: &mut self.rails,
                 stations: &mut self.stations,
+                level: true,
+                terraform: Vec::new(),
             };
-            let Some(line) = crate::scenario::build_line_between(&mut railway, from, to) else {
+            let line = crate::scenario::build_line_between(&mut railway, from, to);
+            let terraform = std::mem::take(&mut railway.terraform);
+            let Some(line) = line else {
                 continue;
             };
+            let moved = crate::terrain::edit::apply(&mut self.world, &terraform);
+            self.levelled_pending.extend(moved);
             let mut changed = Vec::new();
             for z in 0..self.rails.size_z as i32 {
                 for x in 0..self.rails.size_x as i32 {

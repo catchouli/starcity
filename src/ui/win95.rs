@@ -122,6 +122,10 @@ fn pal() -> Palette {
         return new;
     }
     let old = palette_of(Look::ALL[(BLEND_FROM.load(Ordering::Relaxed) as usize).min(5)]);
+    // From dark glass to light (or back), a middle grey reads badly: switch at the halfway point.
+    if old.dark_ui != new.dark_ui {
+        return if t < 0.5 { old } else { new };
+    }
     let mix = |a: Color32, b: Color32| a.lerp_to_gamma(b, t);
     Palette {
         face: mix(old.face, new.face),
@@ -131,7 +135,7 @@ fn pal() -> Palette {
         dark: mix(old.dark, new.dark),
         accent: mix(old.accent, new.accent),
         accent_end: mix(old.accent_end, new.accent_end),
-        text: if t < 0.5 && old.dark_ui == new.dark_ui { mix(old.text, new.text) } else { new.text },
+        text: mix(old.text, new.text),
         radius: new.radius,
         dark_ui: new.dark_ui,
     }
@@ -834,6 +838,22 @@ mod tests {
             let lum = |c: Color32| c.r() as i32 * 3 + c.g() as i32 * 6 + c.b() as i32;
             assert!((lum(f) - lum(t)).abs() > 1500, "{} has low contrast", l.name());
         }
+        set_look(Look::Classic);
+        // In the same test: the look is global, and tests run side by side.
+        text_stays_readable_through_a_blend();
+    }
+
+    fn text_stays_readable_through_a_blend() {
+        for (from, to) in Look::ALL.windows(2).map(|w| (w[0], w[1])) {
+            for step in 0..=10 {
+                set_look(to);
+                set_blend(from, step as f32 / 10.0);
+                let (f, t) = (pal().face, pal().text);
+                let lum = |c: Color32| c.r() as i32 * 3 + c.g() as i32 * 6 + c.b() as i32;
+                assert!((lum(f) - lum(t)).abs() > 900, "{} to {} at {step}/10", from.name(), to.name());
+            }
+        }
+        set_blend(Look::Classic, 1.0);
         set_look(Look::Classic);
     }
 }

@@ -22,6 +22,10 @@ pub struct Railway<'a> {
     pub signals: &'a Signals,
     pub rails: &'a mut Layer,
     pub stations: &'a mut Stations,
+    /// When the simple route fails, fall back to the player's router, which levels the ground; the
+    /// levelling it needs collects here for the caller to apply to the world.
+    pub level: bool,
+    pub terraform: Vec<((i32, i32), u16)>,
 }
 
 /// A built line: its two stations, and the tile to start a train on at the
@@ -47,11 +51,15 @@ const TOWN: Reach = Reach {
     along: 6..18,
     across: &[0, 2, -2, 4, -4, 6, -6],
 };
-/// By an industry: close enough to be in its three-tile catchment.
-const INDUSTRY: Reach = Reach {
-    along: 3..5,
-    across: &[0, 1, -1, 2, -2, 3, -3],
-};
+/// By an industry of `size` tiles: just outside its yard, close enough to be in its three-tile
+/// catchment.
+fn industry_reach(size: i32) -> Reach {
+    let out = size / 2 + 1;
+    Reach {
+        along: out..out + 3,
+        across: &[0, 1, -1, 2, -2, 3, -3, 4, -4],
+    }
+}
 
 /// One line between two towns (their centres), or nothing, with everything rolled back if it can't
 /// be built. What the People agents use to reach a town nobody serves.
@@ -83,8 +91,9 @@ pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
         if lines.len() >= max {
             break;
         }
-        // Keep it simple: each town gets at most one line.
-        if used.contains(&a) || used.contains(&b) {
+        // Each town gets at most two lines, so the network branches without crowding.
+        let lines_at = |t: (i32, i32)| used.iter().filter(|&&u| u == t).count();
+        if lines_at(a) >= 2 || lines_at(b) >= 2 {
             continue;
         }
         let saved = (rw.rails.clone(), rw.stations.clone());
@@ -103,12 +112,25 @@ pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
 pub struct FreightLine {
     pub line: Line,
     pub cargo: crate::cargo::Cargo,
+    /// The industries it joins (indices into `Industries::list`).
+    pub maker: usize,
+    pub user: usize,
 }
 
 /// Joins industries that make something to ones that use it, nearest first, so the demo shows every
 /// chain: coal to the power station, ore and coal to the steel mill, timber to the sawmill, grain to
 /// the food plant, steel and planks to the factory. Each maker gets one line.
 pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries, max: usize) -> Vec<FreightLine> {
+    build_freight_for(rw, industries, max, None)
+}
+
+/// The same, only for lines touching one of `only` (industries founded since the last time).
+pub fn build_freight_for(
+    rw: &mut Railway,
+    industries: &crate::industry::Industries,
+    max: usize,
+    only: Option<&std::collections::HashSet<usize>>,
+) -> Vec<FreightLine> {
     use crate::cargo::Cargo;
     use crate::industry::Kind;
     let chains = [
@@ -136,7 +158,7 @@ pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries,
     let mut lines = Vec::new();
     let mut used: Vec<(usize, usize)> = Vec::new();
     for (maker, user, cargo) in chains {
-        for a in industries.list.iter().filter(|i| i.kind == maker) {
+        for a in industries.list.iter().filter(|i| i.kind == maker && !i.closed) {
             if lines.len() >= max {
                 return lines;
             }
@@ -144,20 +166,27 @@ pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries,
             let mut options: Vec<_> = industries
                 .list
                 .iter()
-                .filter(|b| b.kind == user && !used.contains(&(a.id, b.id)))
+                .filter(|b| b.kind == user && !b.closed && !used.contains(&(a.id, b.id)))
+                .filter(|b| only.is_none_or(|o| o.contains(&a.id) || o.contains(&b.id)))
                 .map(|b| {
                     let (ca, cb) = (centre(a), centre(b));
                     ((ca.0 - cb.0).pow(2) + (ca.1 - cb.1).pow(2), b)
                 })
-                .filter(|(d2, _)| (20 * 20..170 * 170).contains(d2))
+                // Industries founded later are often far from their partners: look further for them.
+                .filter(|(d2, _)| (20 * 20..if only.is_some() { 260 * 260 } else { 170 * 170 }).contains(d2))
                 .collect();
             options.sort_by_key(|(d2, _)| *d2);
-            for (_, b) in options.into_iter().take(5) {
+            for (_, b) in options.into_iter().take(if only.is_some() { 8 } else { 5 }) {
                 let saved = (rw.rails.clone(), rw.stations.clone());
-                match try_line(rw, centre(a), centre(b), &INDUSTRY, &INDUSTRY) {
+                match try_line(rw, centre(a), centre(b), &industry_reach(a.size()), &industry_reach(b.size())) {
                     Some(line) => {
                         used.push((a.id, b.id));
-                        lines.push(FreightLine { line, cargo });
+                        lines.push(FreightLine {
+                            line,
+                            cargo,
+                            maker: a.id,
+                            user: b.id,
+                        });
                         break;
                     }
                     None => (*rw.rails, *rw.stations) = saved,
@@ -188,8 +217,26 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32), reach_a: &Reach, rea
     let dir = to_xz(s, 0);
     let start = (to_xz(a_end.0 + s, a_end.1), dir);
     let goal = to_xz(b_end.0 - s, b_end.1);
-    let pieces = route(rw, start.0, dir, goal)?;
-    let plan = Plan::from_pieces(pieces);
+    let plan = match route(rw, start.0, dir, goal) {
+        Some(pieces) => Plan::from_pieces(pieces),
+        None if rw.level => {
+            // From platform end to platform end, as the player would drag it, so it joins the track;
+            // failing that, from just beyond each end.
+            let (pa, pb) = (to_xz(a_end.0, a_end.1), to_xz(b_end.0, b_end.1));
+            let ok = |p: &Plan| p.blocked.is_none() && !p.is_empty();
+            let plan = rails::plan_route(rw.world, rw.rails, rw.roads, rw.buildings, rw.signals, pa, pb);
+            let plan = if ok(&plan) {
+                plan
+            } else {
+                rails::plan_route(rw.world, rw.rails, rw.roads, rw.buildings, rw.signals, start.0, goal)
+            };
+            if !ok(&plan) {
+                return None;
+            }
+            plan
+        }
+        None => return None,
+    };
     plan.build(rw.rails);
 
     let (from, to) = (
@@ -199,6 +246,7 @@ fn try_line(rw: &mut Railway, a: (i32, i32), b: (i32, i32), reach_a: &Reach, rea
     if !trains::reachable(rw.rails, rw.stations, from, to) || !trains::reachable(rw.rails, rw.stations, to, from) {
         return None;
     }
+    rw.terraform.extend(plan.terraform.iter().copied());
     // Start the train on the third platform tile, facing along the line.
     let start = station_a[2];
     Some(Line {
@@ -337,6 +385,8 @@ mod tests {
             signals: &signals,
             rails: &mut rails,
             stations: &mut stations,
+            level: false,
+            terraform: Vec::new(),
         };
         let lines = build_lines(&mut rw, &towns, 12);
         assert!(!lines.is_empty(), "no lines among {} towns", towns.list.len());
@@ -376,8 +426,10 @@ mod tests {
             signals: &signals,
             rails: &mut rails,
             stations: &mut stations,
+            level: true,
+            terraform: Vec::new(),
         };
-        let freight = build_freight(&mut rw, &industries, 16);
+        let freight = build_freight(&mut rw, &industries, 40);
         let cargos: std::collections::HashSet<_> = freight.iter().map(|f| f.cargo).collect();
         eprintln!(
             "{} freight lines carrying {} kinds of cargo",
@@ -407,4 +459,5 @@ mod tests {
             );
         }
     }
+
 }

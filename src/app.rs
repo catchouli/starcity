@@ -4,6 +4,7 @@ mod charter_ui;
 mod company_ui;
 mod compute_ui;
 mod craft;
+mod demo;
 mod flood_ui;
 mod industry_ui;
 mod news_ui;
@@ -107,6 +108,10 @@ pub struct StarcityApp {
     walls: Layer,
     /// The latest warning of the next rise, for the Assistant.
     flood_warning: Option<String>,
+    /// Demo mode's record of what it built and when (`app/demo.rs`); `None` outside the demo.
+    demo: Option<demo::DemoState>,
+    /// Every chunk needs meshing again (the sea level went back down).
+    remesh_all: bool,
     planes: Planes,
     selected_craft: Option<Craft>,
     selected_terminal: Option<TerminalId>,
@@ -306,6 +311,8 @@ impl StarcityApp {
             flood: Default::default(),
             walls: Layer::new(1, 1),
             flood_warning: None,
+            demo: None,
+            remesh_all: false,
             planes: Planes::default(),
             selected_craft: None,
             selected_terminal: None,
@@ -540,6 +547,7 @@ impl StarcityApp {
     /// Demo mode (`--demo` / `?demo`): rail lines between neighbouring towns,
     /// each with a train running back and forth.
     fn start_demo(&mut self) {
+        self.demo = Some(demo::DemoState::default());
         let mut railway = crate::scenario::Railway {
             world: &self.world,
             roads: &self.roads,
@@ -547,8 +555,13 @@ impl StarcityApp {
             signals: &self.signals,
             rails: &mut self.rails,
             stations: &mut self.stations,
+            level: true,
+            terraform: Vec::new(),
         };
-        let lines = crate::scenario::build_lines(&mut railway, &self.towns, 12);
+        let lines = crate::scenario::build_lines(&mut railway, &self.towns, 24);
+        let terraform = std::mem::take(&mut railway.terraform);
+        let moved = crate::terrain::edit::apply(&mut self.world, &terraform);
+        self.demo_levelled.extend(moved);
         let mut running = 0;
         for line in &lines {
             if let Ok(id) = self.trains.spawn(&self.rails, line.start, line.forward, 3) {
@@ -564,8 +577,13 @@ impl StarcityApp {
             signals: &self.signals,
             rails: &mut self.rails,
             stations: &mut self.stations,
+            level: true,
+            terraform: Vec::new(),
         };
-        let freight = crate::scenario::build_freight(&mut railway, &self.industries, 16);
+        let freight = crate::scenario::build_freight(&mut railway, &self.industries, 40);
+        let terraform = std::mem::take(&mut railway.terraform);
+        let moved = crate::terrain::edit::apply(&mut self.world, &terraform);
+        self.demo_levelled.extend(moved);
         let mut freight_trains = 0;
         for f in &freight {
             if let Ok(id) = self.trains.spawn(&self.rails, f.line.start, f.line.forward, 3) {
@@ -575,6 +593,12 @@ impl StarcityApp {
             }
         }
         log::info!("demo: {} freight lines, {freight_trains} trains", freight.len());
+        // Everything on the map now has had its chance to be joined up; later industries are joined
+        // as they're founded.
+        let all: std::collections::HashSet<usize> = self.industries.list.iter().map(|i| i.id).collect();
+        if let Some(demo) = &mut self.demo {
+            demo.connected = all;
+        }
         let ids: Vec<StationId> = self.stations.list.keys().copied().collect();
         for id in ids {
             self.name_station(id);
@@ -586,6 +610,8 @@ impl StarcityApp {
         self.track_version += 1;
         let (ports, boats, airports, planes) = self.demo_sea_and_air();
         let bus_lines = self.demo_buses();
+        let truck_lines = self.demo_trucks();
+        self.demo_month();
         log::info!(
             "demo: {ports} ports, {} boats, {airports} airports, {} planes",
             self.boats.list.len(),
@@ -593,7 +619,7 @@ impl StarcityApp {
         );
         self.message = Some((
             format!(
-                "Demo: {} rail, {freight_trains} freight trains, {boats} ferries, {planes} planes, {bus_lines} bus lines",
+                "Demo: {} rail, {freight_trains} freight trains, {boats} ferries, {planes} planes, {bus_lines} bus and {truck_lines} truck lines",
                 lines.len()
             ),
             10.0,
@@ -689,8 +715,14 @@ impl StarcityApp {
             }
             self.set_year(year);
         }
+        if (target as i32) < self.year || target < self.clock.year_f64() {
+            self.rewind_world(target);
+        }
         self.clock.set_year_f64(target);
         self.renderer.era_chrome = crate::era::chrome(target);
+        // What the new date brings: industries of its era, and in the demo, what it would have built.
+        self.found_industries();
+        self.demo_month();
         self.static_changed = true;
         self.props_changed = true;
         self.scene_dirty = true;
@@ -1222,6 +1254,25 @@ impl StarcityApp {
     fn name_station(&mut self, id: StationId) {
         let Some(station) = self.stations.get(id) else { return };
         let (x, z) = station.centre();
+        // Out in the country, a station is named after the industry it serves.
+        if let Some(&ind) = self.industries.near(&station.tiles).first() {
+            if self.towns.nearest((x as i32, z as i32), 12).is_none() {
+                let kind = self.industries.list[ind].kind.name();
+                let place = self
+                    .towns
+                    .nearest((x as i32, z as i32), 120)
+                    .map(|t| format!("{} ", self.towns.list[t as usize].name))
+                    .unwrap_or_default();
+                let base = format!("{place}{kind}");
+                let taken = |name: &str| self.stations.list.values().any(|s| s.id != id && s.name == name);
+                let name = [base.clone(), format!("{base} 2"), format!("{base} 3")]
+                    .into_iter()
+                    .find(|n| !taken(n))
+                    .unwrap_or(base);
+                self.stations.list.get_mut(&id).unwrap().name = name;
+                return;
+            }
+        }
         let Some(town) = self.towns.nearest((x as i32, z as i32), 30) else {
             return;
         };
@@ -1281,7 +1332,7 @@ impl StarcityApp {
         self.tick_terminals();
         if self.sky_areas.is_empty() {
             self.sky_month();
-            self.demo_expressway();
+            self.demo_month();
         }
         self.industry_clock += 1.0;
         if self.industry_clock >= crate::company::MONTH_SECONDS {
@@ -2391,6 +2442,15 @@ impl eframe::App for StarcityApp {
         self.handle_arrivals();
         self.handle_craft_arrivals();
         changed.append(&mut self.levelled_pending);
+        if std::mem::take(&mut self.remesh_all) {
+            // One tile per chunk is enough: remeshing works chunk by chunk.
+            let step = crate::terrain::CHUNK_SIZE as i32;
+            for z in (0..self.world.size_z as i32).step_by(step as usize) {
+                for x in (0..self.world.size_x as i32).step_by(step as usize) {
+                    changed.push((x + step / 2, z + step / 2));
+                }
+            }
+        }
         self.remesh_tiles(&rs, &changed);
         self.update_light(now, frame_dt);
 

@@ -132,6 +132,8 @@ mod tests {
                 signals: &signals,
                 rails: &mut rails,
                 stations: &mut stations,
+                level: false,
+                terraform: Vec::new(),
             };
             build_lines(&mut rw, &towns, 12)
         };

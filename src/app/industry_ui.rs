@@ -33,8 +33,8 @@ impl StarcityApp {
         self.power_towns();
         self.prosperity_month();
         self.sky_month();
-        self.demo_expressway();
         self.flood_month();
+        self.demo_month();
         // A storm holds launches; the fuel and goods wait for next month.
         self.industries.launches_held = self.planes.grounded;
         let made = self.industries.month();
@@ -127,23 +127,6 @@ impl StarcityApp {
             };
             self.towns.list[i].prosperity = crate::towns::prosperity(&reasons);
         }
-    }
-
-    /// Demo mode, once the expressway's year has come: one between the two biggest cities, as an
-    /// L of two straight runs.
-    pub(super) fn demo_expressway(&mut self) {
-        if !self.company.sandbox || self.tech_year() < crate::expressway::FROM || !self.express.height.is_empty() {
-            return;
-        }
-        let mut towns: Vec<(u32, (i32, i32))> = self.towns.list.iter().map(|t| (t.pop, t.centre)).collect();
-        towns.sort_by(|a, b| b.0.cmp(&a.0));
-        let (Some(&(_, a)), Some(&(_, b))) = (towns.first(), towns.get(1)) else { return };
-        let corner = (b.0, a.1);
-        for (from, to) in [(a, corner), (corner, b)] {
-            let plan = self.express.plan(from, to);
-            self.express.build(&plan, &self.world);
-        }
-        self.static_changed = true;
     }
 
     /// How many flying cars each city has this month.
@@ -251,7 +234,7 @@ impl StarcityApp {
 
     /// When the year turns, the industries it brings in are founded: data centres from 2005, AI campuses
     /// from 2020 (GAME-DESIGN.md §5.8).
-    fn found_industries(&mut self) {
+    pub(super) fn found_industries(&mut self) {
         let year = self.tech_year();
         if self.founded_year == year {
             return;
