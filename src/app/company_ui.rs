@@ -424,7 +424,7 @@ impl StarcityApp {
                     let colour = if *ok {
                         egui::Color32::BLACK
                     } else {
-                        egui::Color32::from_rgb(0xc0, 0x10, 0x10)
+                        win95::bad()
                     };
                     ui.label(
                         egui::RichText::new(if *ok {
@@ -683,7 +683,7 @@ impl StarcityApp {
         let reqs = self.company.contract_requirements(&self.link, &self.facts);
         let expanded = self.ui.assistant_expanded;
         let (mut toggle, mut hide, mut look) = (false, false, false);
-        let frame = egui::Frame::NONE.fill(win95::FACE).inner_margin(egui::Margin::same(6));
+        let frame = egui::Frame::NONE.fill(win95::face()).inner_margin(egui::Margin::same(6));
         let response = egui::Area::new(egui::Id::new("assistant_panel"))
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(egui::pos2(area.left() + 12.0, area.bottom() - 12.0))
@@ -743,7 +743,7 @@ impl StarcityApp {
                     }
                     if let Some(h) = hint {
                         ui.add_space(2.0);
-                        ui.label(egui::RichText::new(h).color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));
+                        ui.label(egui::RichText::new(h).color(win95::warn()));
                     }
                     if step.hq {
                         look = ui.button("Show my headquarters").clicked();

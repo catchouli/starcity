@@ -107,6 +107,8 @@ pub struct UiState {
     pub show_hq: bool,
     pub show_compute: bool,
     pub show_fund: bool,
+    /// Force a look instead of the one the year brings.
+    pub look_override: Option<win95::Look>,
     /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
     pub show_next_step: bool,
     /// The Assistant shows its whole checklist, not just a one-line pill.
@@ -158,6 +160,16 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
             }
             ui.separator();
             ui.checkbox(&mut s.show_debug, "Debug window\tF3");
+            ui.separator();
+            ui.label("Interface style");
+            if ui.radio(s.look_override.is_none(), "Follows the years").clicked() {
+                s.look_override = None;
+            }
+            for look in win95::Look::ALL {
+                if ui.radio(s.look_override == Some(look), look.name()).clicked() {
+                    s.look_override = Some(look);
+                }
+            }
         });
         ui.menu_button("Company", |ui| {
             if ui.button("Finances").clicked() {
@@ -428,7 +440,7 @@ fn icon_speed(p: &Painter, r: Rect, speed: Speed) {
                     pos2(r.min.x + (x + 0.2) * r.width(), r.min.y + 0.85 * r.height()),
                 ),
                 0.0,
-                Color32::BLACK,
+                win95::text(),
             );
         }
     } else {
@@ -437,7 +449,7 @@ fn icon_speed(p: &Painter, r: Rect, speed: Speed) {
             egui::Align2::CENTER_CENTER,
             speed.label(),
             egui::FontId::proportional(13.0),
-            Color32::BLACK,
+            win95::text(),
         );
     }
 }

@@ -152,7 +152,7 @@ impl StarcityApp {
             ui.set_width(300.0);
             ui.label("The council founds it on the best site the map has. You then connect it.");
             if !sandbox && level < 2 {
-                ui.label(egui::RichText::new("Needs the Regional office.").color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));
+                ui.label(egui::RichText::new("Needs the Regional office.").color(win95::warn()));
             }
             ui.separator();
             for kind in crate::industry::Kind::ALL.into_iter().filter(|k| k.available(year)) {
@@ -273,7 +273,7 @@ impl StarcityApp {
                         egui::RichText::new(
                             "No station serves it yet: build one within three tiles to collect or deliver cargo.",
                         )
-                        .color(egui::Color32::from_rgb(0x90, 0x30, 0x10)),
+                        .color(win95::warn()),
                     );
                 } else {
                     ui.label(format!("Served by {}", serving.join(", ")));

@@ -40,7 +40,7 @@ impl StarcityApp {
                 if year < p.from_year() {
                     ui.label(
                         egui::RichText::new(format!("{}: available from {}", p.name(), p.from_year()))
-                            .color(egui::Color32::GRAY),
+                            .color(win95::text().gamma_multiply(0.5)),
                     );
                     continue;
                 }

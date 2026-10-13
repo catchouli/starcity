@@ -228,6 +228,11 @@ impl StarcityApp {
                 show_fund: crate::devtools::DevTools::window("fund"),
                 #[cfg(target_arch = "wasm32")]
                 show_fund: false,
+                look_override: std::env::var("STARCITY_LOOK").ok().and_then(|v| {
+                    win95::Look::ALL
+                        .into_iter()
+                        .find(|l| l.name().to_lowercase().starts_with(&v.to_lowercase()))
+                }),
                 show_next_step: true,
                 assistant_expanded: true,
                 go_hq: false,
@@ -2007,8 +2012,13 @@ impl StarcityApp {
 
     /// Menu bar, toolbar and status bar around the 3D view.
     fn game_ui(&mut self, ui: &mut egui::Ui, rs: &RenderState) {
+        let want = self.ui.look_override.unwrap_or_else(|| win95::Look::for_year(self.year));
+        if want != win95::look() {
+            win95::set_look(want);
+            win95::apply(ui.ctx());
+        }
         let panel = egui::Frame::NONE
-            .fill(win95::FACE)
+            .fill(win95::face())
             .inner_margin(egui::Margin::symmetric(4, 2));
         let compute_text = format!("Compute {}", crate::compute::show(self.compute.total));
         let compute_rate = format!("+{}/s", crate::compute::show(self.compute.rate));
