@@ -438,6 +438,16 @@ impl StarcityApp {
         if let Some(year) = DevTools::year() {
             self.seek_to(year as f64);
         }
+        // `STARCITY_FLOOD=1`: run the sea's next seven months at once (to see a rise).
+        if std::env::var_os("STARCITY_FLOOD").is_some() {
+            for _ in 0..7 {
+                self.flood_month();
+            }
+        }
+        // `STARCITY_THEN=2010`: then seek again (back, to try rewinding).
+        if let Some(then) = std::env::var("STARCITY_THEN").ok().and_then(|v| v.parse::<f64>().ok()) {
+            self.seek_to(then);
+        }
         if let Some(hour) = DevTools::hour() {
             self.clock = Clock::starting_at(hour);
         }

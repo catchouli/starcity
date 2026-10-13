@@ -7,6 +7,7 @@
 //! - `STARCITY_DEBUG=1`: open the debug window at startup.
 //! - `STARCITY_DEMO=roads`: lay out some sample roads around the camera.
 //! - `STARCITY_HOUR=22`: the game starts at this hour of the day (default 8).
+//! - `STARCITY_THEN=2010`: after `STARCITY_YEAR`, seek again (back, to try rewinding).
 //! - `STARCITY_YEAR=2045`: fast-forward the game to this year before the first frame
 //!   (towns grow and get redeveloped, vehicle fleets turn over), to see the future.
 //! - `STARCITY_ZOOM=30`: initial zoom (visible height in tiles at the focus).

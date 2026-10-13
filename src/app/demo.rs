@@ -9,7 +9,8 @@ use std::collections::HashSet;
 /// Something the demo built, and the year it belongs to.
 pub(super) struct DemoBuilt {
     pub year: i32,
-    pub rails: Vec<(i32, i32)>,
+    /// Track tiles it changed, and what each held before (restored when it comes down).
+    pub rails: Vec<((i32, i32), u8)>,
     pub trains: Vec<u32>,
     pub what: Built,
 }
@@ -149,7 +150,8 @@ impl StarcityApp {
                 trains.push(id);
             }
         }
-        let rails = self.rails_changed_since(&before);
+        let changed = self.rails_changed_since(&before);
+        let rails: Vec<((i32, i32), u8)> = changed.iter().map(|&(x, z)| ((x, z), before.get(x, z))).collect();
         let year = self.year;
         log::info!("demo {year}: {} new freight lines for {} new industries", lines.len(), fresh.len());
         let demo = self.demo.as_mut().unwrap();
@@ -167,7 +169,7 @@ impl StarcityApp {
                     self.name_station(id);
                 }
             }
-            self.mark_infra(&rails);
+            self.mark_infra(&changed);
             self.track_version += 1;
             self.plan_epoch += 1;
             self.props_changed = true;
@@ -265,10 +267,11 @@ impl StarcityApp {
             for id in b.trains {
                 self.trains.remove(id);
             }
-            for &(x, z) in &b.rails {
-                self.rails.set(x, z, 0);
+            for &((x, z), was) in &b.rails {
+                self.rails.set(x, z, was);
             }
-            self.mark_infra(&b.rails);
+            let tiles: Vec<(i32, i32)> = b.rails.iter().map(|&(t, _)| t).collect();
+            self.mark_infra(&tiles);
             match b.what {
                 Built::Freight => {}
                 Built::Expressway => {
