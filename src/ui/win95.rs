@@ -677,6 +677,56 @@ pub fn compute_pane(ui: &mut Ui, width: f32, total: &str, rate: &str, spark: &[f
     response
 }
 
+/// A ticked or empty box with a line of text beside it: a Win95 check box in Classic, a rounded
+/// accent box in the later looks. For checklists that report rather than take input.
+pub fn check_row(ui: &mut Ui, done: bool, text: &str) {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
+        let rect = rect.translate(vec2(0.0, 2.0));
+        let p = ui.painter();
+        let pl = pal();
+        let tick = |colour: Color32| {
+            let at = |x: f32, y: f32| pos2(rect.min.x + x * rect.width(), rect.min.y + y * rect.height());
+            p.add(egui::Shape::line(
+                vec![at(0.22, 0.52), at(0.42, 0.72), at(0.8, 0.28)],
+                Stroke::new(2.0, colour),
+            ));
+        };
+        match look() {
+            Look::Classic => {
+                p.rect_filled(rect, 0.0, Color32::WHITE);
+                edge(p, rect, pl.shadow, pl.highlight);
+                edge(p, rect.shrink(1.0), pl.dark, pl.light);
+                if done {
+                    tick(Color32::BLACK);
+                }
+            }
+            Look::Holo | Look::Ambient => {
+                p.rect_stroke(rect, corner(2), Stroke::new(1.0, pl.highlight.gamma_multiply(if done { 1.0 } else { 0.5 })), StrokeKind::Inside);
+                if done {
+                    p.rect_filled(rect.shrink(2.0), corner(1), pl.highlight.gamma_multiply(0.25));
+                    tick(pl.highlight);
+                }
+            }
+            _ => {
+                if done {
+                    p.rect_filled(rect, corner(4), pl.accent);
+                    tick(Color32::WHITE);
+                } else {
+                    p.rect_filled(rect, corner(4), pl.light);
+                    p.rect_stroke(rect, corner(4), Stroke::new(1.0, pl.dark), StrokeKind::Inside);
+                }
+            }
+        }
+        let mut label = egui::RichText::new(text);
+        if done {
+            label = label.color(pl.text.gamma_multiply(0.65));
+        }
+        ui.add(egui::Label::new(label).wrap());
+    });
+}
+
 /// A sunken status bar pane holding some text.
 pub fn status_pane(ui: &mut Ui, width: f32, text: &str) {
     let height = ui.spacing().interact_size.y;

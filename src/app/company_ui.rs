@@ -635,7 +635,7 @@ impl StarcityApp {
                     ui.label(egui::RichText::new(format!("Next: {}", next.name)).strong());
                     ui.label(format!("Unlocks: {}.", next.unlocks.to_lowercase()));
                     for r in &reqs {
-                        ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+                        win95::check_row(ui, r.met, &r.text);
                     }
                     upgrade = ui
                         .add_enabled(
@@ -760,14 +760,14 @@ impl StarcityApp {
                             money(*reward as i64)
                         ));
                         for r in &reqs {
-                            ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+                            win95::check_row(ui, r.met, &r.text);
                         }
                     }
                     if !goals.is_empty() {
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new("Goals this year").strong());
                         for (text, done) in &goals {
-                            ui.label(format!("{} {text}", if *done { "[x]" } else { "[ ]" }));
+                            win95::check_row(ui, *done, text);
                         }
                     }
                     if let Some(h) = hint {
