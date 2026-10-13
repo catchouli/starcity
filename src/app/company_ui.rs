@@ -571,6 +571,12 @@ impl StarcityApp {
         }
         self.last_event_date = date;
         let world = crate::events::active(date, seed);
+        let storm = crate::events::storm(date, seed);
+        if storm && !self.planes.grounded {
+            let now = self.last_time;
+            self.show_message("Storm warning: flights are grounded and launches held until it passes", now + 5.0);
+        }
+        self.planes.grounded = storm;
         self.company.world = world;
         // After the singularity towns grow twice as fast, without waiting for anything.
         self.towns.growth_mult = world.growth * if self.converged { 2.0 } else { 1.0 };

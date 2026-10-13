@@ -224,6 +224,20 @@ pub fn active(date: f32, seed: u32) -> Mods {
     m
 }
 
+/// Storms (§10.9): from 2030, about one month in twenty has one somewhere over the map. Flights are
+/// grounded and launches held while it lasts. A pure function of the month and the game's seed.
+pub fn storm(date: f32, seed: u32) -> bool {
+    if date < 2030.0 {
+        return false;
+    }
+    let month = (date * 12.0).floor() as u32;
+    let mut h = month.wrapping_mul(0x9E37_79B1) ^ seed.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 13;
+    h % 20 == 0
+}
+
 /// The events whose effects are in force at `date`, for the Finances window.
 pub fn active_titles(date: f32, seed: u32) -> Vec<&'static str> {
     EVENTS
@@ -311,6 +325,13 @@ mod tests {
 #[cfg(test)]
 mod forecast_tests {
     use super::*;
+
+    #[test]
+    fn storms_come_after_2030_now_and_then() {
+        assert!((0..240).all(|m| !storm(2000.0 + m as f32 / 12.0, 3)));
+        let stormy = (0..240).filter(|&m| storm(2030.0 + m as f32 / 12.0, 3)).count();
+        assert!((4..=30).contains(&stormy), "{stormy} stormy months in twenty years");
+    }
 
     #[test]
     fn the_forecast_sees_what_is_coming_within_its_horizon() {

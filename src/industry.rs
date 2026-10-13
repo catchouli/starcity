@@ -389,6 +389,8 @@ pub struct Industries {
     drift_rng: u64,
     /// After the singularity (§10.5): factories make without waiting for their inputs.
     pub post_singularity: bool,
+    /// A storm: spaceports keep their fuel and goods and launch nothing this month.
+    pub launches_held: bool,
 }
 
 /// A primary industry closes after this many months of poor service, if its output has shrunk below this.
@@ -576,6 +578,9 @@ impl Industries {
             }
             // The Array is a building site: what's delivered stays there.
             if kind == Kind::ConvergenceArray {
+                continue;
+            }
+            if kind == Kind::Spaceport && self.launches_held {
                 continue;
             }
             if kind == Kind::Spaceport && ind.pad_closed > 0 {

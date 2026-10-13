@@ -102,6 +102,8 @@ pub struct Planes {
     /// Planes that have just landed and parked: (plane, airport).
     pub arrivals: Vec<(u32, TerminalId)>,
     next_id: u32,
+    /// A storm: nothing takes off.
+    pub grounded: bool,
 }
 
 /// Cruising height: above the highest terrain the generator makes.
@@ -188,10 +190,13 @@ impl Planes {
     /// the next frame.
     pub fn update(&mut self, dt: f32, world: &World, terminals: &Terminals) -> bool {
         let cruise = cruise_height(world);
+        let grounded = self.grounded;
         let Planes { list, arrivals, .. } = self;
         let mut active = false;
         for plane in list.iter_mut() {
-            if !plane.stopped {
+            // In a storm, planes on the ground stay there; ones in the air come down as usual.
+            let held = grounded && matches!(plane.stage, Stage::Parked { .. });
+            if !plane.stopped && !held {
                 step(plane, dt, world, terminals, cruise, arrivals);
             }
             active |= plane.active();

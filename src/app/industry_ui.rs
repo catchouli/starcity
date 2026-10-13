@@ -34,6 +34,8 @@ impl StarcityApp {
         self.prosperity_month();
         self.sky_month();
         self.demo_expressway();
+        // A storm holds launches; the fuel and goods wait for next month.
+        self.industries.launches_held = self.planes.grounded;
         let made = self.industries.month();
         self.compute_month();
         self.space_month();
