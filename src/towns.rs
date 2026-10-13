@@ -139,6 +139,8 @@ pub struct Reasons {
     pub goods: bool,
     /// Nano-goods or lunar glass on the shelves.
     pub luxury: bool,
+    /// The hyper expressway reaches it.
+    pub expressway: bool,
     /// Kinds of working industry within 30 tiles.
     pub industry_kinds: u32,
     /// A server farm, data centre or AI campus within 30 tiles.
@@ -153,6 +155,7 @@ pub fn prosperity(r: &Reasons) -> f32 {
         + if r.fed { 0.4 } else { 0.0 }
         + if r.goods { 0.4 } else { 0.0 }
         + if r.luxury { 0.6 } else { 0.0 }
+        + if r.expressway { 0.8 } else { 0.0 }
         + 0.1 * r.industry_kinds.min(8) as f32
         + if r.compute { 0.5 } else { 0.0 };
     p.min(5.0)
@@ -883,7 +886,7 @@ mod tests {
         assert_eq!(prosperity(&Reasons::default()), 1.0);
         let fed = Reasons { stations: 2, served: 60.0, fed: true, goods: true, ..Default::default() };
         assert!(prosperity(&fed) > 3.0);
-        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, luxury: true, industry_kinds: 20, compute: true };
+        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, luxury: true, expressway: true, industry_kinds: 20, compute: true };
         assert_eq!(prosperity(&all), 5.0);
     }
 }

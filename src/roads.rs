@@ -59,6 +59,23 @@ pub fn check(world: &World, rails: &Layer, buildings: &Layer, x: i32, z: i32, bi
     )
 }
 
+/// The pieces a drag from `a` to `b` adds to `roads`, with no checks against the ground (for the
+/// elevated expressway, which goes over everything).
+pub fn shape(roads: &Layer, a: (i32, i32), b: (i32, i32)) -> Plan {
+    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+    let pieces = if dx == 0 && dz == 0 {
+        Vec::new()
+    } else if dx.abs() >= 2 * dz.abs() {
+        straight(roads, a, (dx.signum(), 0), dx.abs())
+    } else if dz.abs() >= 2 * dx.abs() {
+        straight(roads, a, (0, dz.signum()), dz.abs())
+    } else {
+        let n = (dx.abs() + dz.abs() + 1) / 2;
+        diagonal(roads, a, (dx.signum(), dz.signum()), n)
+    };
+    Plan::from_pieces(pieces)
+}
+
 /// Plans a road dragged from tile `a` to tile `b`. A drag mostly along one axis
 /// gives a straight road along that axis; a drag closer to 45° gives a diagonal.
 pub fn plan(world: &World, roads: &Layer, rails: &Layer, buildings: &Layer, a: (i32, i32), b: (i32, i32)) -> Plan {

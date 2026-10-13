@@ -403,6 +403,7 @@ impl StarcityApp {
     pub(super) fn plan_cost(&self, plan: &crate::network::Plan) -> u32 {
         let unit = match (self.plan_network, self.ui.tool) {
             (_, crate::ui::Tool::Station) => company::STATION_TILE,
+            (_, crate::ui::Tool::Expressway) => crate::expressway::PIECE,
             (super::Network::Road, _) => company::ROAD_PIECE,
             (super::Network::Rail, _) => company::RAIL_PIECE,
         };

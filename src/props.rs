@@ -253,6 +253,55 @@ pub fn boats(models: &Models, world: &World, boats: &Boats) -> Placed {
 }
 
 /// Planes, with a shadow on the ground while they're in the air.
+/// The hyper expressway: a deck piece for each road-style piece, on pillars every other tile.
+pub fn expressway(models: &Models, world: &World, ex: &crate::expressway::Expressway) -> Placed {
+    let (Some(half), Some(diag), Some(pillar)) = (
+        models.pick(Role::Prop, "expressway_half", 2040, 0),
+        models.pick(Role::Prop, "expressway_diag", 2040, 0),
+        models.pick(Role::Prop, "expressway_pillar", 2040, 0),
+    ) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (&tile, &h) in &ex.height {
+        let bits = ex.layer.get(tile.0, tile.1);
+        for i in 0..8 {
+            let piece = 1u8 << i;
+            if bits & piece == 0 {
+                continue;
+            }
+            let seg = crate::vehicles::RoadSeg { tile, piece, forward: true };
+            let (a, b) = seg.ends();
+            let c = (a + b) * 0.5;
+            let m = if crate::expressway::is_half(piece) { half } else { diag };
+            out.push((m, ModelInstance::at([c.x, h, c.y], yaw_of(b - a))));
+        }
+        if (tile.0 + tile.1) % 2 == 0 {
+            let (x, z) = (tile.0 as f32 + 0.5, tile.1 as f32 + 0.5);
+            let mut y = world.height_at(x, z);
+            while y < h - 0.05 {
+                out.push((pillar, ModelInstance::at([x, y, z], 0.0)));
+                y += 1.0;
+            }
+        }
+    }
+    out
+}
+
+/// Pods on the expressway.
+pub fn pods(models: &Models, ex: &crate::expressway::Expressway) -> Placed {
+    let Some(m) = models.pick(Role::Prop, "express_pod", 2040, 0) else {
+        return Vec::new();
+    };
+    ex.pods
+        .iter()
+        .map(|p| {
+            let (pos, dir) = ex.pod_place(p);
+            (m, ModelInstance::at(pos.to_array(), yaw_of(dir)))
+        })
+        .collect()
+}
+
 /// Flying cars over the cities.
 pub fn skycars(models: &Models, cars: &crate::skycars::SkyCars) -> Placed {
     let Some(m) = models.pick(Role::Prop, "flying_car", 2040, 0) else {

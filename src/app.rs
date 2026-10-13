@@ -99,6 +99,8 @@ pub struct StarcityApp {
     boats: Boats,
     /// The company's buses (§7.2).
     buses: crate::buses::Buses,
+    /// The hyper expressway (§7.6).
+    express: crate::expressway::Expressway,
     planes: Planes,
     selected_craft: Option<Craft>,
     selected_terminal: Option<TerminalId>,
@@ -289,6 +291,7 @@ impl StarcityApp {
             terminals: Terminals::default(),
             boats: Boats::default(),
             buses: Default::default(),
+            express: crate::expressway::Expressway::new(1, 1),
             planes: Planes::default(),
             selected_craft: None,
             selected_terminal: None,
@@ -734,6 +737,7 @@ impl StarcityApp {
         self.terminals = Terminals::default();
         self.boats = Boats::default();
         self.buses = Default::default();
+        self.express = crate::expressway::Expressway::new(self.world.size_x, self.world.size_z);
         self.planes = Planes::default();
         self.selected_craft = None;
         self.selected_terminal = None;
@@ -834,7 +838,7 @@ impl StarcityApp {
         // Every building tool works by dragging from a start tile to the cursor.
         let mut changes = Changes::default();
         let primary = egui::PointerButton::Primary;
-        if !self.company.tool_unlocked(self.ui.tool) {
+        if !self.tool_open(self.ui.tool) {
             self.ui.tool = Tool::Pointer;
         }
         let tool = self.ui.tool;
@@ -896,7 +900,7 @@ impl StarcityApp {
         }
         if !matches!(
             tool,
-            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail | Tool::Station
+            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail | Tool::Station | Tool::Expressway
         ) {
             self.drag_start = None;
         } else if response.drag_started_by(primary) {
@@ -919,6 +923,7 @@ impl StarcityApp {
                 Network::Road,
             ),
             (Tool::Rail, Some(a), Some(b)) => (self.rail_plan_cached(a, b), Network::Rail),
+            (Tool::Expressway, Some(a), Some(b)) => (self.express.plan(a, b), Network::Road),
             (Tool::Station, Some(a), Some(b)) => {
                 let sp = self.stations.plan(
                     &self.world,
@@ -982,7 +987,7 @@ impl StarcityApp {
                 })
             }
             // While dragging a road or track, the preview shows where it goes.
-            Tool::Road | Tool::Rail | Tool::Station if self.drag_start.is_some() => None,
+            Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway if self.drag_start.is_some() => None,
             Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus => self.sea_tool_hover(tool),
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
@@ -1038,10 +1043,27 @@ impl StarcityApp {
         }
     }
 
+    /// Whether a tool can be used: the headquarters has unlocked it and its year has come.
+    fn tool_open(&self, tool: Tool) -> bool {
+        self.company.tool_unlocked(tool)
+            && (tool != Tool::Expressway || self.company.sandbox || self.tech_year() >= crate::expressway::FROM)
+    }
+
     /// Applies the active tool to a dragged-out span of tiles.
     fn apply_tool(&mut self, a: (i32, i32), b: (i32, i32)) -> Changes {
         match self.ui.tool {
             Tool::Bulldoze => self.clear(a, b, Clear::Everything),
+            Tool::Expressway => {
+                let plan = self.express.plan(a, b);
+                if !plan.is_empty() {
+                    let cost = plan.pieces.len() as u32 * crate::expressway::PIECE;
+                    if self.pay(Item::Construction, cost) {
+                        self.express.build(&plan, &self.world);
+                        self.static_changed = true;
+                    }
+                }
+                Changes::default()
+            }
             Tool::RemoveRoad => self.clear(a, b, Clear::Roads),
             Tool::RemoveRail => self.clear(a, b, Clear::Rails),
             Tool::Road => {
@@ -1141,6 +1163,10 @@ impl StarcityApp {
             self.props_changed = true;
         }
         if what == Clear::Everything {
+            if self.express.clear(a, b) {
+                self.static_changed = true;
+                self.props_changed = true;
+            }
             if self.towns.demolish(a, b) {
                 self.static_changed = true;
             }
@@ -1213,6 +1239,7 @@ impl StarcityApp {
         self.tick_terminals();
         if self.sky_areas.is_empty() {
             self.sky_month();
+            self.demo_expressway();
         }
         self.industry_clock += 1.0;
         if self.industry_clock >= crate::company::MONTH_SECONDS {
@@ -1291,6 +1318,7 @@ impl StarcityApp {
             placed.extend(props::buildings(&self.models, &self.world, &self.towns));
             placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
             placed.extend(props::industries(&self.models, &self.world, &self.industries));
+            placed.extend(props::expressway(&self.models, &self.world, &self.express));
             if let Some(hq) = &self.hq {
                 placed.extend(props::hq(&self.models, &self.world, hq, self.company.hq_level));
             }
@@ -1307,6 +1335,7 @@ impl StarcityApp {
             placed.extend(props::planes(&self.models, &self.world, &self.planes));
             placed.extend(props::rockets(&self.models, &self.world, &self.rockets));
             placed.extend(props::skycars(&self.models, &self.skycars));
+            placed.extend(props::pods(&self.models, &self.express));
             self.renderer
                 .set_models(&rs.device, &rs.queue, ModelLayer::Dynamic, &mut placed);
             self.scene_dirty = true;
@@ -2118,7 +2147,8 @@ impl StarcityApp {
         let cash_text = company_ui::money(self.company.cash);
         let step = self.company.next_step(&self.assets, &self.facts, &self.link);
         let company = &self.company;
-        let unlocked = |t: Tool| company.tool_unlocked(t);
+        let future_open = self.tech_year() >= crate::expressway::FROM || company.sandbox;
+        let unlocked = |t: Tool| company.tool_unlocked(t) && (t != Tool::Expressway || future_open);
         let info = ui::ToolbarInfo {
             clock: &clock_text,
             daylight: self.light.day,
@@ -2293,6 +2323,7 @@ impl eframe::App for StarcityApp {
             vehicles_moved |= self.vehicles.update(step, &self.roads, &self.towns);
             craft_moved |= self.step_craft(step);
             craft_moved |= self.step_rockets(step);
+            craft_moved |= self.express.update(step);
             if !self.skycars.list.is_empty() {
                 let world = &self.world;
                 craft_moved |= self.skycars.update(step, &self.sky_areas, |p| world.height_at(p.x, p.y));

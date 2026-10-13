@@ -811,6 +811,27 @@ model("props/bus_stop", "prop", "bus_stop", [
     **{"from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
 
 
+DECK = mat("Deck", "#c9ced8", metallic=0.4, roughness=0.3)
+LANE = mat("LaneGlow", "#5fe3ff", emissive=1.0)
+model("props/expressway_half", "prop", "expressway_half", [
+    box("Deck", DECK, (0.0, 0.03, 0.0), (0.5, 0.06, 0.7)),
+    box("BarrierL", GLASS, (0.0, 0.1, 0.34), (0.5, 0.08, 0.02)), box("BarrierR", GLASS, (0.0, 0.1, -0.34), (0.5, 0.08, 0.02)),
+    box("Lane", LANE, (0.0, 0.065, 0.0), (0.5, 0.01, 0.03))],
+    **{"from": 2030, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+model("props/expressway_diag", "prop", "expressway_diag", [
+    box("Deck", DECK, (0.0, 0.03, 0.0), (0.72, 0.06, 0.7)),
+    box("BarrierL", GLASS, (0.0, 0.1, 0.34), (0.72, 0.08, 0.02)), box("BarrierR", GLASS, (0.0, 0.1, -0.34), (0.72, 0.08, 0.02)),
+    box("Lane", LANE, (0.0, 0.065, 0.0), (0.72, 0.01, 0.03))],
+    **{"from": 2030, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+model("props/expressway_pillar", "prop", "expressway_pillar", [
+    cyl("Pillar", mat("PillarConcrete", "#b4b8c0", metallic=0.2), (0.0, 0.5, 0.0), 0.09, 1.0, seg=10)],
+    **{"from": 2030, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+model("props/express_pod", "prop", "express_pod", [
+    box("Body", mat("PodBody", "#f4f6fa", metallic=0.6, roughness=0.15), (0.0, 0.06, 0.0), (0.3, 0.1, 0.14)),
+    box("Glow", LANE, (0.0, 0.02, 0.0), (0.26, 0.02, 0.12))],
+    **{"from": 2030, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

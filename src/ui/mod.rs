@@ -23,6 +23,7 @@ pub enum Tool {
     Plane,
     BusStop,
     Bus,
+    Expressway,
 }
 
 impl Tool {
@@ -43,6 +44,7 @@ impl Tool {
             Tool::Plane => "Place plane",
             Tool::BusStop => "Build bus stop",
             Tool::Bus => "Place bus",
+            Tool::Expressway => "Build hyper expressway",
         }
     }
 
@@ -69,6 +71,9 @@ impl Tool {
             Tool::Plane => "Click an airport to park a plane there, then click the plane to give it airports to visit.",
             Tool::BusStop => "Click a road to put a bus stop on it. People within four tiles wait there.",
             Tool::Bus => "Click a bus stop to put a bus there, then click the bus to give it stops to visit.",
+            Tool::Expressway => {
+                "Drag to lay an elevated autonomous expressway (from 2035): straight over hills, towns and lines. Cities it reaches grow much faster."
+            }
         }
     }
 
@@ -95,6 +100,7 @@ impl Tool {
             Tool::Plane => icon_plane(p, r),
             Tool::BusStop => icon_bus_stop(p, r),
             Tool::Bus => icon_bus(p, r),
+            Tool::Expressway => icon_expressway(p, r),
         }
     }
 }
@@ -247,7 +253,7 @@ pub struct ToolbarInfo<'a> {
 
 pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     const SIZE: f32 = 30.0;
-    let groups: [(&str, &[Tool]); 5] = [
+    let groups: [(&str, &[Tool]); 6] = [
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus]),
@@ -256,6 +262,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
             &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
         ),
         ("Sea & air", &[Tool::Port, Tool::Boat, Tool::Airport, Tool::Plane]),
+        ("Future", &[Tool::Expressway]),
     ];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -291,7 +298,8 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
             if i > 0 {
                 win95::separator(ui, SIZE);
             }
-            if !label.is_empty() {
+            // Group names only where there's room: on a laptop-sized window the buttons come first.
+            if !label.is_empty() && ui.ctx().content_rect().width() > 1500.0 {
                 ui.label(*label);
             }
             for &tool in *tools {
@@ -453,6 +461,16 @@ fn icon_plane(p: &Painter, r: Rect) {
         Color32::from_rgb(0xbe, 0x34, 0x2a),
         Stroke::NONE,
     ));
+}
+
+fn icon_expressway(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    for x in [0.2, 0.75] {
+        p.rect_filled(Rect::from_min_max(at(x, 0.45), at(x + 0.08, 1.0)), 0.0, Color32::from_gray(0x90));
+    }
+    p.rect_filled(Rect::from_min_max(at(0.0, 0.3), at(1.0, 0.48)), 0.0, Color32::from_rgb(0xc9, 0xce, 0xd8));
+    p.rect_filled(Rect::from_min_max(at(0.0, 0.37), at(1.0, 0.41)), 0.0, Color32::from_rgb(0x2a, 0xc8, 0xf0));
+    p.rect_filled(Rect::from_min_max(at(0.3, 0.2), at(0.5, 0.3)), 1.0, Color32::from_gray(0xf4));
 }
 
 fn icon_bus(p: &Painter, r: Rect) {
