@@ -121,6 +121,7 @@ impl StarcityApp {
                 served: t.served,
                 fed: t.food > 0.0,
                 goods: t.goods > 0.0,
+                luxury: t.luxury > 0.0,
                 industry_kinds: kinds.len() as u32,
                 compute: kinds.iter().any(|k| k.compute_scale() > 0.0),
             };
@@ -153,7 +154,7 @@ impl StarcityApp {
             .industries
             .list
             .iter()
-            .filter(|i| !i.closed && i.kind == crate::industry::Kind::PowerStation && i.made_last_month > 0)
+            .filter(|i| !i.closed && i.kind.power_mw() < 0.0 && i.made_last_month > 0)
             .map(|i| i.centre())
             .collect();
         for t in &mut self.towns.list {
@@ -267,6 +268,9 @@ impl StarcityApp {
     /// (GAME-DESIGN.md §10.4).
     fn space_month(&mut self) {
         let date = self.clock.year_f64() as f32;
+        // Research brings the farther destinations sooner, as it does the machines.
+        let tech_date = date + (self.tech_year() - self.year) as f32;
+        let to = crate::space::Destination::for_year(tech_date);
         let now = self.clock.days();
         let mut messages = Vec::new();
         for i in 0..self.industries.list.len() {
@@ -281,7 +285,7 @@ impl StarcityApp {
                 self.launch_rng ^= self.launch_rng >> 7;
                 self.launch_rng ^= self.launch_rng << 17;
                 let roll = (self.launch_rng >> 11) as f32 / (1u64 << 53) as f32;
-                let l = crate::space::launch(date, roll);
+                let l = crate::space::launch(date, roll, to);
                 let reach = if self.charter_active() { self.charter.launch_factor() } else { 1.0 };
                 self.company.earn(crate::company::Item::Launches, (l.revenue as f32 * reach) as u32);
                 self.company.charge(crate::company::Item::Running, l.cost);
@@ -292,9 +296,26 @@ impl StarcityApp {
                     self.industries.list[i].pad_closed = 1;
                     messages.push("A launch failed. The cargo is lost and the pad is shut for a month.".to_string());
                 } else {
+                    // What comes back goes to the stations that serve the spaceport, for the ground industries.
+                    let mut back = Vec::new();
+                    for (cargo, units) in to.returns(date) {
+                        let ind = &self.industries.list[i];
+                        let mut serving: Vec<&mut crate::stations::Station> = self
+                            .stations
+                            .list
+                            .values_mut()
+                            .filter(|s| ind.near(&s.tiles, CATCHMENT))
+                            .collect();
+                        let got = exchange::collect(&mut serving, cargo, units);
+                        if got > 0 {
+                            back.push(format!("{got} {}", cargo.name().to_lowercase()));
+                        }
+                    }
                     let net = l.revenue as i64 - l.cost as i64;
+                    let back = if back.is_empty() { String::new() } else { format!(", back came {}", back.join(" and ")) };
                     messages.push(format!(
-                        "Launch: {} earned, {} to run: net {}",
+                        "Launch to {}{back}: {} earned, {} to run: net {}",
+                        to.name(),
                         super::company_ui::money(l.revenue as i64),
                         super::company_ui::money(l.cost as i64),
                         super::company_ui::money(net)
@@ -422,7 +443,7 @@ pub(super) fn room_for(
 
 /// What towns buy.
 pub(super) fn is_for_towns(cargo: Cargo) -> bool {
-    matches!(cargo, Cargo::Food | Cargo::Goods | Cargo::Fuel)
+    matches!(cargo, Cargo::Food | Cargo::Goods | Cargo::Fuel | Cargo::NanoGoods | Cargo::LunarGlass)
 }
 
 fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
@@ -468,7 +489,11 @@ fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
             ui.label(format!("Turns {} into {}", inputs_text(ind), list.join(" and ")));
         }
     } else {
-        ui.label("Burns coal to make electricity for industry within 30 tiles");
+        ui.label(format!(
+            "Burns {} to make up to {} MW for industry within 30 tiles",
+            kind.inputs()[0].0.name().to_lowercase(),
+            -kind.power_mw()
+        ));
     }
     for &(cargo, _) in kind.inputs() {
         ui.label(format!(

@@ -31,6 +31,8 @@ pub struct Town {
     /// Seconds of food and of goods the town has left in its shops.
     pub food: f32,
     pub goods: f32,
+    /// Seconds of nano-goods and lunar glass: the future's luxuries, a big reason to grow.
+    pub luxury: f32,
     /// A working power station is within 40 tiles: a little faster growth.
     pub powered: bool,
     /// How much reason it has to grow (1 to 5), recomputed monthly from its connections, service,
@@ -61,6 +63,20 @@ impl Town {
     /// Units of a cargo that cover its need for three months.
     pub fn need(&self) -> f32 {
         (self.pop as f32 / 20.0).max(10.0)
+    }
+
+    /// A delivery of anything a town buys.
+    pub fn receive(&mut self, cargo: crate::cargo::Cargo, units: u32) {
+        use crate::cargo::Cargo;
+        match cargo {
+            Cargo::Food => self.stock(false, units),
+            Cargo::Goods => self.stock(true, units),
+            Cargo::NanoGoods | Cargo::LunarGlass => {
+                let seconds = units as f32 / self.need() * SUPPLY_SECONDS * 2.0;
+                self.luxury = (self.luxury + seconds).min(4.0 * SUPPLY_SECONDS);
+            }
+            _ => {}
+        }
     }
 
     /// A delivery of food (or goods): puts that much on the shelves, up to six months' worth.
@@ -121,6 +137,8 @@ pub struct Reasons {
     pub served: f32,
     pub fed: bool,
     pub goods: bool,
+    /// Nano-goods or lunar glass on the shelves.
+    pub luxury: bool,
     /// Kinds of working industry within 30 tiles.
     pub industry_kinds: u32,
     /// A server farm, data centre or AI campus within 30 tiles.
@@ -134,6 +152,7 @@ pub fn prosperity(r: &Reasons) -> f32 {
         + 0.8 * (r.served / 50.0).min(1.0)
         + if r.fed { 0.4 } else { 0.0 }
         + if r.goods { 0.4 } else { 0.0 }
+        + if r.luxury { 0.6 } else { 0.0 }
         + 0.1 * r.industry_kinds.min(8) as f32
         + if r.compute { 0.5 } else { 0.0 };
     p.min(5.0)
@@ -293,6 +312,7 @@ impl Towns {
             pop: 0,
             food: 0.0,
             goods: 0.0,
+            luxury: 0.0,
             powered: false,
             prosperity: 1.0,
         });
@@ -365,6 +385,7 @@ impl Towns {
             town.served *= 0.995f32.powf(dt);
             town.food = (town.food - dt).max(0.0);
             town.goods = (town.goods - dt).max(0.0);
+            town.luxury = (town.luxury - dt).max(0.0);
             // Steady growth, faster with good passenger service and with the shops stocked.
             town.growth += dt * (0.05 + town.served * 0.01) * town.growth_factor() * self.growth_mult;
             while self.list[i].growth >= 1.0 {
@@ -799,6 +820,7 @@ mod tests {
             pop,
             food: 0.0,
             goods: 0.0,
+            luxury: 0.0,
             powered: false,
             prosperity: 1.0,
         }
@@ -861,7 +883,7 @@ mod tests {
         assert_eq!(prosperity(&Reasons::default()), 1.0);
         let fed = Reasons { stations: 2, served: 60.0, fed: true, goods: true, ..Default::default() };
         assert!(prosperity(&fed) > 3.0);
-        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, industry_kinds: 20, compute: true };
+        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, luxury: true, industry_kinds: 20, compute: true };
         assert_eq!(prosperity(&all), 5.0);
     }
 }

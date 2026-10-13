@@ -40,10 +40,13 @@ pub enum Kind {
     OilWell,
     Refinery,
     Spaceport,
+    RegolithWorks,
+    FusionPlant,
+    NanoFab,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 17] = [
+    pub const ALL: [Kind; 20] = [
         Kind::CoalMine,
         Kind::IronOreMine,
         Kind::Forest,
@@ -61,6 +64,9 @@ impl Kind {
         Kind::OilWell,
         Kind::Refinery,
         Kind::Spaceport,
+        Kind::RegolithWorks,
+        Kind::FusionPlant,
+        Kind::NanoFab,
     ];
 
     /// The model kind in `assets/models/industries/`.
@@ -83,6 +89,9 @@ impl Kind {
             Kind::OilWell => "oil_well",
             Kind::Refinery => "refinery",
             Kind::Spaceport => "spaceport",
+            Kind::RegolithWorks => "regolith_works",
+            Kind::FusionPlant => "fusion_plant",
+            Kind::NanoFab => "nano_fab",
         }
     }
 
@@ -105,6 +114,9 @@ impl Kind {
             Kind::OilWell => "Oil well",
             Kind::Refinery => "Refinery",
             Kind::Spaceport => "Spaceport",
+            Kind::RegolithWorks => "Regolith works",
+            Kind::FusionPlant => "Fusion plant",
+            Kind::NanoFab => "Nano-fabricator",
         }
     }
 
@@ -112,7 +124,7 @@ impl Kind {
     pub fn size(self) -> i32 {
         match self {
             Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry | Kind::OilWell => 3,
-            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre | Kind::Refinery => 4,
+            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre | Kind::Refinery | Kind::RegolithWorks | Kind::FusionPlant | Kind::NanoFab => 4,
             Kind::AiCampus | Kind::Spaceport => 5,
         }
     }
@@ -127,6 +139,9 @@ impl Kind {
             Kind::AiCampus => 250_000,
             Kind::Spaceport => 250_000,
             Kind::Refinery => 60_000,
+            Kind::RegolithWorks => 150_000,
+            Kind::FusionPlant => 400_000,
+            Kind::NanoFab => 300_000,
             k if k.is_primary() => 20_000,
             _ => 40_000,
         }
@@ -137,6 +152,9 @@ impl Kind {
         match self {
             Kind::DataCentre => 2005,
             Kind::Spaceport => 2027,
+            Kind::RegolithWorks => 2032,
+            Kind::FusionPlant => 2035,
+            Kind::NanoFab => 2040,
             Kind::AiCampus => 2020,
             _ => 2000,
         }
@@ -157,7 +175,13 @@ impl Kind {
             Kind::PowerStation => 3.0,
             Kind::SteelMill | Kind::Factory | Kind::ServerFarm | Kind::SilicaQuarry | Kind::DataCentre => 2.0,
             Kind::Sawmill | Kind::FoodPlant => 3.0,
-            Kind::ChipFab | Kind::AiCampus | Kind::Refinery | Kind::Spaceport => 1.0,
+            Kind::ChipFab
+            | Kind::AiCampus
+            | Kind::Refinery
+            | Kind::Spaceport
+            | Kind::RegolithWorks
+            | Kind::FusionPlant
+            | Kind::NanoFab => 1.0,
             Kind::OilWell => 3.0,
         }
     }
@@ -174,6 +198,9 @@ impl Kind {
             Kind::ChipFab => &[(Cargo::Silicon, 1)],
             Kind::DataCentre | Kind::AiCampus => &[(Cargo::Chips, 1)],
             Kind::Refinery => &[(Cargo::Oil, 1)],
+            Kind::RegolithWorks => &[(Cargo::Regolith, 1)],
+            Kind::FusionPlant => &[(Cargo::Helium3, 1)],
+            Kind::NanoFab => &[(Cargo::RareMetals, 1), (Cargo::Goods, 1)],
             Kind::Spaceport => &[(Cargo::Fuel, crate::space::FUEL), (Cargo::Goods, crate::space::PAYLOAD)],
             _ => &[],
         }
@@ -194,7 +221,14 @@ impl Kind {
             Kind::ChipFab => &[(Cargo::Chips, 1)],
             Kind::OilWell => &[(Cargo::Oil, 1)],
             Kind::Refinery => &[(Cargo::Fuel, 1)],
-            Kind::PowerStation | Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus | Kind::Spaceport => &[],
+            Kind::RegolithWorks => &[(Cargo::LunarGlass, 1)],
+            Kind::NanoFab => &[(Cargo::NanoGoods, 1)],
+            Kind::PowerStation
+            | Kind::ServerFarm
+            | Kind::DataCentre
+            | Kind::AiCampus
+            | Kind::Spaceport
+            | Kind::FusionPlant => &[],
         }
     }
 
@@ -230,6 +264,9 @@ impl Kind {
             Kind::OilWell => 70,
             Kind::Refinery => 70,
             Kind::Spaceport => 3,
+            Kind::RegolithWorks => 60,
+            Kind::FusionPlant => 20,
+            Kind::NanoFab => 40,
         }
     }
 
@@ -245,6 +282,9 @@ impl Kind {
             Kind::AiCampus => 60.0,
             Kind::Refinery => 20.0,
             Kind::Spaceport => 50.0,
+            Kind::RegolithWorks => 30.0,
+            Kind::FusionPlant => -400.0,
+            Kind::NanoFab => 40.0,
             _ => 0.0,
         }
     }
@@ -406,8 +446,9 @@ impl Industries {
         for ind in self.list.iter().filter(|i| !i.closed) {
             let mw = ind.kind.power_mw();
             if mw < 0.0 {
-                // A power station makes power in proportion to the coal it has to burn.
-                let fuel = (ind.stock[Cargo::Coal.index()] as f32 / ind.kind.batches() as f32).min(1.0);
+                // A power station makes power in proportion to the fuel it has to burn (coal, or Helium-3).
+                let burns = ind.kind.inputs()[0].0;
+                let fuel = (ind.stock[burns.index()] as f32 / ind.kind.batches() as f32).min(1.0);
                 sources.push(power::Source {
                     at: ind.centre(),
                     mw: -mw * fuel,
@@ -492,9 +533,10 @@ impl Industries {
             };
             ind.made_last_month = 0;
             let kind = ind.kind;
-            if kind == Kind::PowerStation {
-                let burn = ind.stock[Cargo::Coal.index()].min(kind.batches());
-                ind.stock[Cargo::Coal.index()] -= burn;
+            if kind.power_mw() < 0.0 {
+                let fuel = kind.inputs()[0].0.index();
+                let burn = ind.stock[fuel].min(kind.batches());
+                ind.stock[fuel] -= burn;
                 ind.made_last_month = burn;
                 continue;
             }
@@ -670,6 +712,8 @@ impl Ctx<'_> {
             Kind::Refinery => (town >= 12.0)
                 .then(|| 1.0 / (1.0 + nearest_of(Kind::OilWell).min(200.0) / 60.0)),
             Kind::Spaceport => (town >= 30.0 && self.near_water(ci, 10)).then(|| 1.0 / (1.0 + town / 80.0)),
+            Kind::RegolithWorks | Kind::NanoFab => (10.0..45.0).contains(&town).then(|| 1.0 - town / 45.0),
+            Kind::FusionPlant => (12.0..40.0).contains(&town).then_some(1.0),
         }?;
         Some(rule)
     }
@@ -1113,5 +1157,25 @@ mod tests {
         }
         assert!(oil >= 4, "oil wells on {oil}/5 maps");
         assert!(found >= 3, "spaceports on {found}/5 maps");
+    }
+
+    #[test]
+    fn helium_3_runs_a_fusion_plant_that_powers_a_nano_fab_and_regolith_becomes_glass() {
+        let mut ind = Industries::default();
+        let fusion = ind.add(Kind::FusionPlant, (0, 0));
+        let fab = ind.add(Kind::NanoFab, (8, 0));
+        let works = ind.add(Kind::RegolithWorks, (16, 0));
+        ind.deliver(fab, Cargo::RareMetals, 100);
+        ind.deliver(fab, Cargo::Goods, 100);
+        ind.deliver(works, Cargo::Regolith, 100);
+        // No Helium-3: the fab and the works run on their own generators.
+        ind.month();
+        assert!(ind.list[fab].power < 0.01);
+        ind.deliver(fusion, Cargo::Helium3, 40);
+        let made = ind.month();
+        assert!(ind.list[fab].power > 0.99, "400 MW is plenty");
+        assert!(made.iter().any(|&(i, c, _)| i == fab && c == Cargo::NanoGoods));
+        assert!(made.iter().any(|&(i, c, _)| i == works && c == Cargo::LunarGlass));
+        assert!(ind.list[fusion].stock[Cargo::Helium3.index()] < 40, "it burns Helium-3");
     }
 }

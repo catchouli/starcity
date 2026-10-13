@@ -23,9 +23,14 @@ pub enum Cargo {
     Goods,
     Silicon,
     Chips,
+    Regolith,
+    LunarGlass,
+    Helium3,
+    RareMetals,
+    NanoGoods,
 }
 
-pub const COUNT: usize = 14;
+pub const COUNT: usize = 19;
 
 /// What kind of vehicle body can carry it (GAME-DESIGN.md §4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +57,11 @@ impl Cargo {
         Cargo::Goods,
         Cargo::Silicon,
         Cargo::Chips,
+        Cargo::Regolith,
+        Cargo::LunarGlass,
+        Cargo::Helium3,
+        Cargo::RareMetals,
+        Cargo::NanoGoods,
     ];
 
     pub fn index(self) -> usize {
@@ -74,6 +84,11 @@ impl Cargo {
             Cargo::Goods => "Goods",
             Cargo::Silicon => "Silicon",
             Cargo::Chips => "Chips",
+            Cargo::Regolith => "Regolith",
+            Cargo::LunarGlass => "Lunar glass",
+            Cargo::Helium3 => "Helium-3",
+            Cargo::RareMetals => "Rare metals",
+            Cargo::NanoGoods => "Nano-goods",
         }
     }
 
@@ -83,7 +98,8 @@ impl Cargo {
             Cargo::Passengers => "passengers",
             Cargo::Mail => "bags",
             Cargo::Oil | Cargo::Fuel => "kl",
-            Cargo::Goods | Cargo::Chips => "crates",
+            Cargo::Goods | Cargo::Chips | Cargo::NanoGoods => "crates",
+            Cargo::Helium3 => "canisters",
             _ => "t",
         }
     }
@@ -91,7 +107,9 @@ impl Cargo {
     pub fn class(self) -> Class {
         match self {
             Cargo::Passengers | Cargo::Mail => Class::People,
-            Cargo::Coal | Cargo::IronOre | Cargo::Grain | Cargo::Oil | Cargo::Fuel | Cargo::Silicon => Class::Bulk,
+            Cargo::Coal | Cargo::IronOre | Cargo::Grain | Cargo::Oil | Cargo::Fuel | Cargo::Silicon | Cargo::Regolith => {
+                Class::Bulk
+            }
             Cargo::Food => Class::Fresh,
             _ => Class::General,
         }
@@ -114,6 +132,11 @@ impl Cargo {
             Cargo::Goods => 6.4,
             Cargo::Silicon => 3.4,
             Cargo::Chips => 9.0,
+            Cargo::Regolith => 4.0,
+            Cargo::LunarGlass => 8.0,
+            Cargo::Helium3 => 12.0,
+            Cargo::RareMetals => 9.0,
+            Cargo::NanoGoods => 16.0,
         }
     }
 
@@ -133,6 +156,10 @@ impl Cargo {
             Cargo::Goods => (30.0, 70.0),
             Cargo::Silicon => (100.0, 150.0),
             Cargo::Chips => (40.0, 80.0),
+            Cargo::Regolith => (100.0, 150.0),
+            Cargo::LunarGlass | Cargo::RareMetals => (60.0, 120.0),
+            Cargo::Helium3 => (40.0, 80.0),
+            Cargo::NanoGoods => (30.0, 60.0),
         }
     }
 

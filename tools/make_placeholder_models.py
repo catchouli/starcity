@@ -791,6 +791,17 @@ model("props/flying_car", "prop", "flying_car", [
     box("Glow", mat("PodGlow", "#62e0ff", emissive=1.0), (0.0, 0.07, 0.0), (0.3, 0.02, 0.16))],
     **{"from": 2028, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
 
+industry("regolith_works", "regolith_works", 4, [pad(4, CONCRETE),
+    box("Kiln", mat("KilnWall", "#8d8f97"), (-0.6, 0.45, -0.4), (1.8, 0.9, 1.4)), cyl("Furnace", mat("Melt", "#ffb36a", emissive=0.7), (0.9, 0.35, -0.8), 0.35, 0.7, seg=14),
+    box("Dust", mat("Regolith", "#b8b4ac"), (0.8, 0.15, 0.9), (1.2, 0.3, 0.9)), box("GlassStack", mat("LunarGlass", "#9fd8ff", metallic=0.7, roughness=0.1), (-1.0, 0.2, 1.1), (1.0, 0.4, 0.6))])
+industry("fusion_plant", "fusion_plant", 4, [pad(4, mat("FusionPad", "#d7dbe3")),
+    sphere("Torus", mat("FusionShell", "#e8ecf2", metallic=0.6, roughness=0.2), (0.0, 0.7, 0.0), (1.2, 0.6, 1.2), lat=8, lon=20),
+    box("Ring", mat("FusionGlow", "#7af0ff", emissive=1.0), (0.0, 0.7, 0.0), (2.5, 0.08, 0.08)), box("Ring2", mat("FusionGlow", "#7af0ff", emissive=1.0), (0.0, 0.7, 0.0), (0.08, 0.08, 2.5)),
+    box("Hall", mat("FusionHall", "#9aa3b0"), (1.4, 0.3, 1.4), (1.0, 0.6, 0.8))])
+industry("nano_fab", "nano_fab", 4, [pad(4, CONCRETE),
+    box("Clean", mat("NanoWall", "#f2f4f8", metallic=0.3, roughness=0.2), (-0.2, 0.55, -0.2), (2.8, 1.1, 2.2)),
+    box("Band", mat("NanoGlow", "#c27aff", emissive=0.9), (-0.2, 0.75, 0.92), (2.6, 0.1, 0.03)), cyl("Vent", STEEL, (1.3, 1.3, -1.1), 0.18, 0.6, seg=10)])
+
 
 def main():
     for path, parts, extras in MODELS:

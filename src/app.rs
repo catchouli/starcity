@@ -1227,7 +1227,7 @@ impl StarcityApp {
             let left = self.deliver_to_industries(&tiles, cargo, delivered);
             if left > 0 && industry_ui::is_for_towns(cargo) {
                 if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
-                    self.towns.list[town as usize].stock(cargo == Cargo::Goods, left);
+                    self.towns.list[town as usize].receive(cargo, left);
                 }
             }
             let income = self.pay_fare(cargo, delivered, d.boarded, (x, z));

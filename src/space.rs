@@ -41,6 +41,69 @@ pub fn failure_chance(year: f32) -> f32 {
 /// Upkeep of a spaceport, a month (£).
 pub const UPKEEP: u32 = 8_000;
 
+/// Where a launch goes (§10.4). They open with the years; farther pays more, costs more to fly,
+/// and sends something back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Destination {
+    Orbit,
+    Moon,
+    Asteroids,
+}
+
+impl Destination {
+    pub const ALL: [Destination; 3] = [Destination::Orbit, Destination::Moon, Destination::Asteroids];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Destination::Orbit => "the orbital station",
+            Destination::Moon => "the lunar base",
+            Destination::Asteroids => "the asteroid belt",
+        }
+    }
+
+    pub fn from_year(self) -> f32 {
+        match self {
+            Destination::Orbit => 2027.0,
+            Destination::Moon => 2031.0,
+            Destination::Asteroids => 2040.0,
+        }
+    }
+
+    /// What a load of goods pays there.
+    pub fn revenue(self) -> u32 {
+        match self {
+            Destination::Orbit => REVENUE,
+            Destination::Moon => 100_000,
+            Destination::Asteroids => 220_000,
+        }
+    }
+
+    /// How much dearer than an orbital launch it is to fly there.
+    pub fn cost_factor(self) -> f32 {
+        match self {
+            Destination::Orbit => 1.0,
+            Destination::Moon => 2.0,
+            Destination::Asteroids => 4.0,
+        }
+    }
+
+    /// What comes back, for the ground industries (units per launch).
+    pub fn returns(self, year: f32) -> Vec<(crate::cargo::Cargo, u32)> {
+        use crate::cargo::Cargo;
+        match self {
+            Destination::Orbit => Vec::new(),
+            Destination::Moon if year >= 2034.0 => vec![(Cargo::Regolith, 60), (Cargo::Helium3, 30)],
+            Destination::Moon => vec![(Cargo::Regolith, 60)],
+            Destination::Asteroids => vec![(Cargo::RareMetals, 60)],
+        }
+    }
+
+    /// The farthest one open in `year` (what a spaceport flies to).
+    pub fn for_year(year: f32) -> Destination {
+        *Destination::ALL.iter().rev().find(|d| year >= d.from_year()).unwrap_or(&Destination::Orbit)
+    }
+}
+
 /// A launch's result: what it earned, what it cost to run, and whether it failed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Launch {
@@ -50,11 +113,11 @@ pub struct Launch {
 }
 
 /// `roll` is a number from 0 to 1 that decides failure.
-pub fn launch(year: f32, roll: f32) -> Launch {
+pub fn launch(year: f32, roll: f32, to: Destination) -> Launch {
     let failed = roll < failure_chance(year);
     Launch {
-        revenue: if failed { 0 } else { REVENUE },
-        cost: operating_cost(year).round() as u32,
+        revenue: if failed { 0 } else { to.revenue() },
+        cost: (operating_cost(year) * to.cost_factor()).round() as u32,
         failed,
     }
 }
@@ -83,7 +146,22 @@ mod tests {
         }
         assert!((failure_chance(2027.0) - 0.06).abs() < 1e-6);
         assert!((failure_chance(2050.0) - 0.003).abs() < 1e-6);
-        assert!(launch(2030.0, 0.0).failed && !launch(2030.0, 0.99).failed);
-        assert_eq!(launch(2030.0, 0.0).revenue, 0);
+        assert!(launch(2030.0, 0.0, Destination::Orbit).failed && !launch(2030.0, 0.99, Destination::Orbit).failed);
+        assert_eq!(launch(2030.0, 0.0, Destination::Orbit).revenue, 0);
+    }
+
+    #[test]
+    fn the_moon_and_the_asteroids_open_later_pay_more_and_send_things_back() {
+        assert_eq!(Destination::for_year(2028.0), Destination::Orbit);
+        assert_eq!(Destination::for_year(2032.0), Destination::Moon);
+        assert_eq!(Destination::for_year(2045.0), Destination::Asteroids);
+        let net = |y: f32, d: Destination| {
+            let l = launch(y, 0.99, d);
+            l.revenue as f32 - l.cost as f32
+        };
+        assert!(net(2032.0, Destination::Moon) < 0.0, "the moon loses money at first");
+        assert!(net(2042.0, Destination::Moon) > 40_000.0);
+        assert!(net(2045.0, Destination::Asteroids) > net(2045.0, Destination::Moon));
+        assert!(Destination::Moon.returns(2035.0).len() == 2 && Destination::Orbit.returns(2035.0).is_empty());
     }
 }
