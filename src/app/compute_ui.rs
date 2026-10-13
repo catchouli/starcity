@@ -13,7 +13,11 @@ impl StarcityApp {
 
     /// The year the world's technology has reached for this company: the calendar year plus the Tech Pace.
     pub(super) fn tech_year(&self) -> i32 {
-        let reach = if self.year >= super::charter_ui::CHARTER_FROM { self.charter.tech_bonus() } else { 0.0 };
+        let reach = if self.year >= super::charter_ui::CHARTER_FROM {
+            self.charter.tech_bonus()
+        } else {
+            0.0
+        };
         self.year + (self.company.effects.tech_pace + reach).floor() as i32
     }
 
@@ -43,9 +47,9 @@ impl StarcityApp {
             ui.label("Share it out. Whatever you don't give a program is sold as hosting for money.");
             for p in PROGRAMS {
                 ui.add_space(4.0);
-                if year < p.from_year() {
+                if year < p.first_year() {
                     ui.label(
-                        egui::RichText::new(format!("{}: available from {}", p.name(), p.from_year()))
+                        egui::RichText::new(format!("{}: available from {}", p.name(), p.first_year()))
                             .color(win95::text().gamma_multiply(0.5)),
                     );
                     continue;
@@ -71,8 +75,17 @@ impl StarcityApp {
                     compute::Program::Agents => "actions a month",
                     compute::Program::Forecast => "years of foresight",
                 };
-                let research = matches!(p, compute::Program::Research | compute::Program::Agents | compute::Program::Forecast);
-                let sign = if p == compute::Program::Analytics { "+" } else if research { "" } else { "-" };
+                let research = matches!(
+                    p,
+                    compute::Program::Research | compute::Program::Agents | compute::Program::Forecast
+                );
+                let sign = if p == compute::Program::Analytics {
+                    "+"
+                } else if research {
+                    ""
+                } else {
+                    "-"
+                };
                 let (now_text, top_text) = if research {
                     (format!("{now:.1}"), format!("{ceiling:.1}"))
                 } else {

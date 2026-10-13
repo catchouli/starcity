@@ -288,20 +288,18 @@ fn text(v: &serde_json::Value) -> Option<String> {
 /// without their custom properties.
 fn manifest() -> &'static serde_json::Map<String, serde_json::Value> {
     static MANIFEST: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> = std::sync::OnceLock::new();
-    MANIFEST.get_or_init(|| {
-        serde_json::from_str(include_str!("../assets/models/models.json")).unwrap_or_default()
-    })
+    MANIFEST.get_or_init(|| serde_json::from_str(include_str!("../assets/models/models.json")).unwrap_or_default())
 }
 
 /// Custom properties from the scene and every node, flattened (first wins).
 fn extras(doc: &gltf::Document) -> serde_json::Map<String, serde_json::Value> {
     let mut all = serde_json::Map::new();
     let mut add = |raw: &Option<Box<serde_json::value::RawValue>>| {
-        if let Some(raw) = raw {
-            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(raw.get()) {
-                for (k, v) in map {
-                    all.entry(k).or_insert(v);
-                }
+        if let Some(raw) = raw
+            && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(raw.get())
+        {
+            for (k, v) in map {
+                all.entry(k).or_insert(v);
             }
         }
     };
@@ -391,7 +389,7 @@ fn load_glb(name: &str, bytes: &[u8]) -> Result<(ModelMeta, MeshData), String> {
             }
             // A mirrored node flips the winding; keep triangles facing out.
             let flip = world.determinant() < 0.0;
-            for t in indices.chunks_exact(3) {
+            for t in indices.as_chunks::<3>().0 {
                 if flip {
                     mesh.indices.extend([first + t[0], first + t[2], first + t[1]]);
                 } else {
@@ -441,7 +439,7 @@ fn load_glb(name: &str, bytes: &[u8]) -> Result<(ModelMeta, MeshData), String> {
 
 fn flat_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut n = vec![Vec3::ZERO; positions.len()];
-    for t in indices.chunks_exact(3) {
+    for t in indices.as_chunks::<3>().0 {
         let [a, b, c] = [t[0], t[1], t[2]].map(|i| Vec3::from(positions[i as usize]));
         let f = (b - a).cross(c - a);
         for &i in t {
@@ -685,7 +683,10 @@ mod tests {
         stripped.extend_from_slice(&text);
         stripped.extend_from_slice(rest);
         let (without, _) = load_glb(name, &stripped).unwrap();
-        assert_eq!((without.kind.as_str(), without.tiles, without.from), (with.kind.as_str(), with.tiles, with.from));
+        assert_eq!(
+            (without.kind.as_str(), without.tiles, without.from),
+            (with.kind.as_str(), with.tiles, with.from)
+        );
         assert_eq!(without.kind, "hq_2");
     }
 }

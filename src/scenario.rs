@@ -175,7 +175,13 @@ pub fn build_freight_for(
             options.sort_by_key(|(d2, _)| *d2);
             for (_, b) in options.into_iter().take(if only.is_some() { 8 } else { 5 }) {
                 let saved = (rw.rails.clone(), rw.stations.clone());
-                match try_line(rw, centre(a), centre(b), &industry_reach(a.size()), &industry_reach(b.size())) {
+                match try_line(
+                    rw,
+                    centre(a),
+                    centre(b),
+                    &industry_reach(a.size()),
+                    &industry_reach(b.size()),
+                ) {
                     Some(line) => {
                         used.push((a.id, b.id));
                         lines.push(FreightLine { line, cargo });
@@ -265,7 +271,7 @@ fn route(rw: &Railway, start: (i32, i32), dir: (i32, i32), goal: (i32, i32)) -> 
     // What a tile would hold if the track went in by `d_in` and out by `d_out`.
     let piece = |d_in: usize, d_out: usize| {
         if d_in == d_out {
-            if d_in % 2 == 0 { rails::X } else { rails::Y }
+            if d_in.is_multiple_of(2) { rails::X } else { rails::Y }
         } else {
             let (i, o) = (DIRS[d_in], DIRS[d_out]);
             rails::diagonal_piece(
@@ -451,5 +457,4 @@ mod tests {
             );
         }
     }
-
 }

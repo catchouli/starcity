@@ -470,6 +470,9 @@ mod tests {
         // The median call, not the single worst: a test run in parallel gets descheduled now and then.
         times.sort();
         let median = times[times.len() / 2];
-        assert!(median.as_millis() < 20, "a typical call took {median:?} (worst {worst:?})");
+        assert!(
+            median.as_millis() < 20,
+            "a typical call took {median:?} (worst {worst:?})"
+        );
     }
 }

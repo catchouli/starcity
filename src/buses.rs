@@ -273,7 +273,11 @@ mod tests {
             buses.update(0.1, &roads, &terminals);
             calls.extend(buses.arrivals.drain(..).map(|(_, t)| t));
         }
-        assert!(calls.len() >= 4, "{calls:?} {}", buses.get(id).unwrap().status(&terminals));
+        assert!(
+            calls.len() >= 4,
+            "{calls:?} {}",
+            buses.get(id).unwrap().status(&terminals)
+        );
         assert_eq!(&calls[..2], &[b, a]);
     }
 

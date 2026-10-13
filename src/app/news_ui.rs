@@ -27,7 +27,7 @@ pub fn news_style(year: i32) -> NewsStyle {
 
 /// The news follows the interface: picking an older look brings its way of reading the news back too.
 pub fn style_for(look: win95::Look) -> NewsStyle {
-    news_style(look.from_year())
+    news_style(look.first_year())
 }
 
 /// "Fuel price spike" -> "fuel-price-spike", for the address bar.
@@ -69,52 +69,62 @@ impl StarcityApp {
 /// 2000–2009: a page in Internet Explorer.
 fn browser(ctx: &egui::Context, e: &Event) -> bool {
     let (mut open, mut ok) = (true, false);
-    win95::window(ctx, "Microsoft Internet Explorer", &mut open, egui::pos2(330.0, 130.0), |ui| {
-        ui.set_width(380.0);
-        ui.horizontal(|ui| {
-            for menu in ["File", "Edit", "View", "Favorites", "Tools", "Help"] {
-                ui.label(menu);
-            }
-        });
-        ui.horizontal(|ui| {
-            for b in ["Back", "Forward", "Stop", "Refresh", "Home"] {
-                ui.add_enabled(false, egui::Button::new(b).small());
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Address");
-            let mut url = format!("http://www.starcity-news.com/headlines/{}", slug(e.title));
-            ui.add(egui::TextEdit::singleline(&mut url).desired_width(f32::INFINITY));
-        });
-        egui::Frame::NONE
-            .fill(Color32::WHITE)
-            .stroke(egui::Stroke::new(1.0, Color32::from_gray(0x80)))
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(
-                    egui::RichText::new("STARCITY NEWS NETWORK")
-                        .color(Color32::from_rgb(0x00, 0x33, 0x99))
-                        .strong(),
-                );
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(e.title)
-                        .color(Color32::from_rgb(0x00, 0x00, 0xee))
-                        .underline()
-                        .size(20.0),
-                );
-                ui.label(egui::RichText::new(e.text).color(Color32::BLACK));
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new("Best viewed in Internet Explorer 5 at 800x600").small().color(Color32::GRAY));
+    win95::window(
+        ctx,
+        "Microsoft Internet Explorer",
+        &mut open,
+        egui::pos2(330.0, 130.0),
+        |ui| {
+            ui.set_width(380.0);
+            ui.horizontal(|ui| {
+                for menu in ["File", "Edit", "View", "Favorites", "Tools", "Help"] {
+                    ui.label(menu);
+                }
             });
-        ui.horizontal(|ui| {
-            ui.label("Done");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ok = ui.button("Close").clicked();
+            ui.horizontal(|ui| {
+                for b in ["Back", "Forward", "Stop", "Refresh", "Home"] {
+                    ui.add_enabled(false, egui::Button::new(b).small());
+                }
             });
-        });
-    });
+            ui.horizontal(|ui| {
+                ui.label("Address");
+                let mut url = format!("http://www.starcity-news.com/headlines/{}", slug(e.title));
+                ui.add(egui::TextEdit::singleline(&mut url).desired_width(f32::INFINITY));
+            });
+            egui::Frame::NONE
+                .fill(Color32::WHITE)
+                .stroke(egui::Stroke::new(1.0, Color32::from_gray(0x80)))
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        egui::RichText::new("STARCITY NEWS NETWORK")
+                            .color(Color32::from_rgb(0x00, 0x33, 0x99))
+                            .strong(),
+                    );
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(e.title)
+                            .color(Color32::from_rgb(0x00, 0x00, 0xee))
+                            .underline()
+                            .size(20.0),
+                    );
+                    ui.label(egui::RichText::new(e.text).color(Color32::BLACK));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("Best viewed in Internet Explorer 5 at 800x600")
+                            .small()
+                            .color(Color32::GRAY),
+                    );
+                });
+            ui.horizontal(|ui| {
+                ui.label("Done");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ok = ui.button("Close").clicked();
+                });
+            });
+        },
+    );
     !open || ok
 }
 
@@ -130,7 +140,12 @@ fn phone(ctx: &egui::Context, e: &Event, date: &str) -> bool {
                 .fill(Color32::from_rgb(0x12, 0x12, 0x14))
                 .corner_radius(egui::CornerRadius::same(30))
                 .inner_margin(egui::Margin::same(10))
-                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(110) })
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: Color32::from_black_alpha(110),
+                })
                 .show(ui, |ui| {
                     egui::Frame::NONE
                         .fill(Color32::from_rgb(0x3a, 0x6e, 0xa8))
@@ -153,13 +168,21 @@ fn phone(ctx: &egui::Context, e: &Event, date: &str) -> bool {
                                 .show(ui, |ui| {
                                     ui.set_width(ui.available_width());
                                     ui.label(
-                                        egui::RichText::new("STARCITY NEWS  now").color(Color32::from_gray(0x55)).small(),
+                                        egui::RichText::new("STARCITY NEWS  now")
+                                            .color(Color32::from_gray(0x55))
+                                            .small(),
                                     );
                                     ui.label(egui::RichText::new(e.title).color(Color32::BLACK).strong());
                                     ui.label(egui::RichText::new(e.text).color(Color32::from_gray(0x22)).small());
                                     ui.add_space(4.0);
                                     dismiss = ui
-                                        .add(egui::Button::new(egui::RichText::new("Swipe to dismiss").color(Color32::from_rgb(0x0a, 0x60, 0xd0))).frame(false))
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("Swipe to dismiss")
+                                                    .color(Color32::from_rgb(0x0a, 0x60, 0xd0)),
+                                            )
+                                            .frame(false),
+                                        )
                                         .clicked();
                                 });
                             ui.add_space(150.0);
@@ -178,8 +201,15 @@ fn feed(ctx: &egui::Context, e: &Event, i: usize) -> bool {
         ui.set_width(330.0);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 17.0, Color32::from_rgb(0x0a, 0x84, 0xff));
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "S", egui::FontId::proportional(16.0), Color32::WHITE);
+            ui.painter()
+                .circle_filled(rect.center(), 17.0, Color32::from_rgb(0x0a, 0x84, 0xff));
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "S",
+                egui::FontId::proportional(16.0),
+                Color32::WHITE,
+            );
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("Starcity News  (verified)").strong());
                 ui.label(egui::RichText::new("@starcitynews  ·  just now").small());

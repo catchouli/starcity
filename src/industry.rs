@@ -127,8 +127,24 @@ impl Kind {
     /// Footprint in tiles (square).
     pub fn size(self) -> i32 {
         match self {
-            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry | Kind::OilWell => 3,
-            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre | Kind::Refinery | Kind::RegolithWorks | Kind::FusionPlant | Kind::NanoFab => 4,
+            Kind::CoalMine
+            | Kind::IronOreMine
+            | Kind::Forest
+            | Kind::Sawmill
+            | Kind::FoodPlant
+            | Kind::ServerFarm
+            | Kind::SilicaQuarry
+            | Kind::OilWell => 3,
+            Kind::Farm
+            | Kind::PowerStation
+            | Kind::SteelMill
+            | Kind::Factory
+            | Kind::ChipFab
+            | Kind::DataCentre
+            | Kind::Refinery
+            | Kind::RegolithWorks
+            | Kind::FusionPlant
+            | Kind::NanoFab => 4,
             Kind::AiCampus | Kind::Spaceport | Kind::ConvergenceArray => 5,
         }
     }
@@ -153,7 +169,7 @@ impl Kind {
     }
 
     /// The first year it can be built.
-    pub fn from_year(self) -> i32 {
+    pub fn first_year(self) -> i32 {
         match self {
             Kind::DataCentre => 2005,
             Kind::Spaceport => 2027,
@@ -168,7 +184,7 @@ impl Kind {
 
     /// Whether new ones are founded in `year` (server farms give way to the cloud).
     pub fn available(self, year: i32) -> bool {
-        year >= self.from_year() && (self != Kind::ServerFarm || year <= 2015)
+        year >= self.first_year() && (self != Kind::ServerFarm || year <= 2015)
     }
 
     /// How many a default map starts with (scaled by area).
@@ -372,7 +388,12 @@ impl Industry {
     /// How many units of `cargo` it would take now.
     pub fn room(&self, cargo: Cargo) -> u32 {
         if self.kind == Kind::ConvergenceArray {
-            let need = self.kind.inputs().iter().find(|&&(c, _)| c == cargo).map_or(0, |&(_, n)| n);
+            let need = self
+                .kind
+                .inputs()
+                .iter()
+                .find(|&&(c, _)| c == cargo)
+                .map_or(0, |&(_, n)| n);
             need.saturating_sub(self.stock[cargo.index()])
         } else if self.kind.inputs().iter().any(|&(c, _)| c == cargo) {
             STOCK_CAP.saturating_sub(self.stock[cargo.index()])
@@ -548,8 +569,12 @@ impl Industries {
             let well_served = ratings.get(ind.id).is_some_and(|&r| r > 0.6);
             let up = next() < if well_served { 0.7 } else { 0.3 };
             let step = 0.03 + 0.12 * next();
-            ind.production = if up { ind.production * (1.0 + step) } else { ind.production * (1.0 - step) }
-                .clamp(0.1, 3.0);
+            ind.production = if up {
+                ind.production * (1.0 + step)
+            } else {
+                ind.production * (1.0 - step)
+            }
+            .clamp(0.1, 3.0);
         }
         events
     }
@@ -753,15 +778,15 @@ impl Ctx<'_> {
             Kind::FoodPlant => (town < 15.0).then_some(1.0),
             Kind::Factory => (town < 20.0).then_some(1.0),
             Kind::ServerFarm => (6.0..25.0).contains(&town).then(|| 1.0 - town / 25.0),
-            Kind::SilicaQuarry => ((ground == Material::Sand || base >= self.median)
-                && ground != Material::Grass)
+            Kind::SilicaQuarry => ((ground == Material::Sand || base >= self.median) && ground != Material::Grass)
                 .then(|| field(self.seed ^ 19, ci.0, ci.1, 40) + 0.2),
             Kind::ChipFab => (town >= 8.0 && self.near_water(ci, 20)).then(|| 1.0 / (1.0 + town / 40.0)),
             Kind::DataCentre => (6.0..35.0).contains(&town).then(|| 1.0 - town / 35.0),
             Kind::AiCampus => (15.0..60.0).contains(&town).then(|| 1.0 / (1.0 + town / 60.0)),
-            Kind::OilWell => self.near_water(ci, 14).then(|| field(self.seed ^ 55, ci.0, ci.1, 40) + 0.2),
-            Kind::Refinery => (town >= 12.0)
-                .then(|| 1.0 / (1.0 + nearest_of(Kind::OilWell).min(200.0) / 60.0)),
+            Kind::OilWell => self
+                .near_water(ci, 14)
+                .then(|| field(self.seed ^ 55, ci.0, ci.1, 40) + 0.2),
+            Kind::Refinery => (town >= 12.0).then(|| 1.0 / (1.0 + nearest_of(Kind::OilWell).min(200.0) / 60.0)),
             Kind::Spaceport => (town >= 30.0 && self.near_water(ci, 10)).then(|| 1.0 / (1.0 + town / 80.0)),
             Kind::RegolithWorks | Kind::NanoFab => (10.0..45.0).contains(&town).then(|| 1.0 - town / 45.0),
             Kind::FusionPlant => (12.0..40.0).contains(&town).then_some(1.0),
@@ -1074,7 +1099,10 @@ mod tests {
         // No power station within reach: the farm runs on its own generator at 30%.
         ind.month();
         let slow = ind.list[farm].made_last_month;
-        assert_eq!(slow, (Kind::ServerFarm.batches() as f32 * power::GENERATOR_FLOOR).round() as u32);
+        assert_eq!(
+            slow,
+            (Kind::ServerFarm.batches() as f32 * power::GENERATOR_FLOOR).round() as u32
+        );
         assert_eq!(ind.list[farm].stock[Cargo::Goods.index()], 100 - slow);
         // With a stocked power station beside it, the full forty batches.
         let plant = ind.add(Kind::PowerStation, (6, 0));
@@ -1180,7 +1208,11 @@ mod tests {
         assert!(made.iter().any(|&(i, c, n)| i == well && c == Cargo::Oil && n == 70));
         ind.deliver(refinery, Cargo::Oil, 100);
         let made = ind.month();
-        assert!(made.iter().any(|&(i, c, n)| i == refinery && c == Cargo::Fuel && n == 70), "{made:?}");
+        assert!(
+            made.iter()
+                .any(|&(i, c, n)| i == refinery && c == Cargo::Fuel && n == 70),
+            "{made:?}"
+        );
         ind.deliver(port, Cargo::Fuel, 400);
         ind.deliver(port, Cargo::Goods, 400);
         ind.month();
@@ -1239,10 +1271,18 @@ mod tests {
         assert_eq!(ind.deliver(array, Cargo::Helium3, 500), 300, "only what it still needs");
         ind.deliver(array, Cargo::RareMetals, 200);
         ind.month();
-        assert_eq!(ind.list[array].stock[Cargo::Helium3.index()], 300, "a building site, not a factory");
+        assert_eq!(
+            ind.list[array].stock[Cargo::Helium3.index()],
+            300,
+            "a building site, not a factory"
+        );
         let p = Industries::convergence_progress(&ind.list[array]);
         assert!((p - (1.0 + 200.0 / 600.0) / 4.0).abs() < 1e-4, "{p}");
-        for (c, n) in [(Cargo::RareMetals, 400), (Cargo::NanoGoods, 600), (Cargo::LunarGlass, 600)] {
+        for (c, n) in [
+            (Cargo::RareMetals, 400),
+            (Cargo::NanoGoods, 600),
+            (Cargo::LunarGlass, 600),
+        ] {
             ind.deliver(array, c, n);
         }
         assert_eq!(Industries::convergence_progress(&ind.list[array]), 1.0);

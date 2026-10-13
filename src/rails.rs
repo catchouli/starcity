@@ -243,7 +243,7 @@ const DIRS: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 /// travelling `DIRS[d_out]`: a straight, or a curve across the corner.
 fn step_piece(d_in: usize, d_out: usize) -> u8 {
     if d_in == d_out {
-        if d_in % 2 == 0 { X } else { Y }
+        if d_in.is_multiple_of(2) { X } else { Y }
     } else {
         let (i, o) = (DIRS[d_in], DIRS[d_out]);
         diagonal_piece(network::opposite(edge_towards(i.0, i.1)), edge_towards(o.0, o.1))

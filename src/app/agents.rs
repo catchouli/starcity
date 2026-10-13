@@ -53,7 +53,7 @@ impl StarcityApp {
             .filter(|t| t.pop >= 150 && !self.town_served(t.centre))
             .map(|t| (t.pop, t.centre))
             .collect();
-        lonely.sort_by(|a, b| b.0.cmp(&a.0));
+        lonely.sort_by_key(|x| std::cmp::Reverse(x.0));
         let order = crate::catalog::TrainOrder::default();
         for &(_, from) in lonely.iter().take(3) {
             let Some(to) = self
@@ -72,7 +72,9 @@ impl StarcityApp {
             };
             let distance = (((to.0 - from.0).pow(2) + (to.1 - from.1).pow(2)) as f32).sqrt();
             let estimate = (distance * 1.5) as u32 * company::RAIL_PIECE + 8 * company::STATION_TILE + order.price();
-            if self.facts.vehicles >= self.company.vehicle_limit() || !self.company.can_afford(self.company.build_price(estimate) * 2) {
+            if self.facts.vehicles >= self.company.vehicle_limit()
+                || !self.company.can_afford(self.company.build_price(estimate) * 2)
+            {
                 return false;
             }
             let before = self.rails.clone();
@@ -104,7 +106,8 @@ impl StarcityApp {
             }
             let station_tiles = self.stations.tile_count().saturating_sub(stations_before) as u32;
             let cost = changed.len() as u32 * company::RAIL_PIECE + station_tiles * company::STATION_TILE;
-            self.company.spend(Item::Construction, cost.min(self.company.cash.max(0) as u32));
+            self.company
+                .spend(Item::Construction, cost.min(self.company.cash.max(0) as u32));
             if let Ok(id) = self.trains.spawn(&self.rails, line.start, line.forward, order.cars()) {
                 self.company.spend(Item::Vehicles, order.price());
                 let t = self.trains.train(id);
@@ -166,7 +169,9 @@ impl StarcityApp {
             }
         }
         let Some((_, id)) = best else { return false };
-        let Some(model) = self.trains.list.iter().find(|t| t.id == id) else { return false };
+        let Some(model) = self.trains.list.iter().find(|t| t.id == id) else {
+            return false;
+        };
         let (orders, cars, cargo, speed, price, running, loco) = (
             model.orders.clone(),
             model.cars,

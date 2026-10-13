@@ -67,7 +67,7 @@ impl StarcityApp {
             (Program::Design, 0.15),
             (Program::Research, 0.15),
         ] {
-            if year >= program.from_year() {
+            if year >= program.first_year() {
                 alloc.set(program, share);
             }
         }
@@ -94,7 +94,9 @@ impl StarcityApp {
         for (id, cargo) in sites {
             let ind = self.industries.list[id].clone();
             let (cx, cz) = (ind.tile.0 + ind.size() / 2, ind.tile.1 + ind.size() / 2);
-            let Some(town) = self.towns.nearest((cx, cz), 30) else { continue };
+            let Some(town) = self.towns.nearest((cx, cz), 30) else {
+                continue;
+            };
             let tc = self.towns.list[town as usize].centre;
             // The town's road tile nearest the industry, and a start just outside the industry's yard
             // on the side facing the town.
@@ -189,7 +191,11 @@ impl StarcityApp {
         let changed = self.rails_changed_since(&before);
         let rails: Vec<((i32, i32), u8)> = changed.iter().map(|&(x, z)| ((x, z), before.get(x, z))).collect();
         let year = self.year;
-        log::info!("demo {year}: {} new freight lines for {} new industries", lines.len(), fresh.len());
+        log::info!(
+            "demo {year}: {} new freight lines for {} new industries",
+            lines.len(),
+            fresh.len()
+        );
         let demo = self.demo.as_mut().unwrap();
         demo.connected.extend(fresh);
         if !rails.is_empty() {
@@ -231,8 +237,10 @@ impl StarcityApp {
             return;
         }
         let mut towns: Vec<(u32, (i32, i32))> = self.towns.list.iter().map(|t| (t.pop, t.centre)).collect();
-        towns.sort_by(|a, b| b.0.cmp(&a.0));
-        let (Some(&(_, a)), Some(&(_, b))) = (towns.first(), towns.get(1)) else { return };
+        towns.sort_by_key(|x| std::cmp::Reverse(x.0));
+        let (Some(&(_, a)), Some(&(_, b))) = (towns.first(), towns.get(1)) else {
+            return;
+        };
         let corner = (b.0, a.1);
         for (from, to) in [(a, corner), (corner, b)] {
             let plan = self.express.plan(from, to);
@@ -254,7 +262,12 @@ impl StarcityApp {
     fn demo_walls(&mut self) {
         let date = self.clock.year_f64() as f32;
         let first = crate::flood::RISES[0];
-        if date < first - 3.0 || self.demo.as_ref().is_some_and(|d| d.built.iter().any(|b| matches!(b.what, Built::Walls(_)))) {
+        if date < first - 3.0
+            || self
+                .demo
+                .as_ref()
+                .is_some_and(|d| d.built.iter().any(|b| matches!(b.what, Built::Walls(_))))
+        {
             return;
         }
         let risk = self.flood.at_risk(&self.world, &self.walls);
@@ -272,8 +285,14 @@ impl StarcityApp {
             .iter()
             .copied()
             .filter(|&(x, z)| (x - centre.0).abs() <= 30 && (z - centre.1).abs() <= 30)
-            .filter(|&(x, z)| [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dz)| self.world.underwater(x + dx, z + dz)))
-            .filter(|&(x, z)| self.roads.get(x, z) == 0 && self.rails.get(x, z) == 0 && self.towns.occupied.get(x, z) == 0)
+            .filter(|&(x, z)| {
+                [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|(dx, dz)| self.world.underwater(x + dx, z + dz))
+            })
+            .filter(|&(x, z)| {
+                self.roads.get(x, z) == 0 && self.rails.get(x, z) == 0 && self.towns.occupied.get(x, z) == 0
+            })
             .collect();
         log::info!("demo {}: {} tiles of sea wall by {}", self.year, tiles.len(), town.name);
         for &(x, z) in &tiles {
@@ -296,7 +315,8 @@ impl StarcityApp {
     /// Dragging the date back: what the demo built in later years comes down again.
     pub(super) fn demo_rewind(&mut self, year: i32) {
         let Some(demo) = &mut self.demo else { return };
-        let (later, keep): (Vec<DemoBuilt>, Vec<DemoBuilt>) = std::mem::take(&mut demo.built).into_iter().partition(|b| b.year > year);
+        let (later, keep): (Vec<DemoBuilt>, Vec<DemoBuilt>) =
+            std::mem::take(&mut demo.built).into_iter().partition(|b| b.year > year);
         demo.built = keep;
         log::info!("demo: back to {year}, taking down {} later builds", later.len());
         for b in later {

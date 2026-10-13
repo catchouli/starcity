@@ -130,7 +130,10 @@ pub fn buildings(models: &Models, world: &World, towns: &Towns) -> Placed {
         } else {
             0.0
         };
-        out.push((model, ModelInstance::at([cx, world.height_at(cx, cz), cz], yaw).building()));
+        out.push((
+            model,
+            ModelInstance::at([cx, world.height_at(cx, cz), cz], yaw).building(),
+        ));
     }
     out
 }
@@ -272,7 +275,11 @@ pub fn expressway(models: &Models, world: &World, ex: &crate::expressway::Expres
             if bits & piece == 0 {
                 continue;
             }
-            let seg = crate::vehicles::RoadSeg { tile, piece, forward: true };
+            let seg = crate::vehicles::RoadSeg {
+                tile,
+                piece,
+                forward: true,
+            };
             let (a, b) = seg.ends();
             let c = (a + b) * 0.5;
             let m = if crate::expressway::is_half(piece) { half } else { diag };

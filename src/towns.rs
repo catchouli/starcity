@@ -250,7 +250,7 @@ impl Towns {
                 }
             }
         }
-        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        candidates.sort_by_key(|x| std::cmp::Reverse(x.0));
         for (_, c) in candidates {
             if towns.list.len() >= wanted {
                 break;
@@ -870,7 +870,11 @@ mod tests {
         for _ in 0..100 {
             towns.update(1.0, &world, &mut r, &rails, &models);
         }
-        assert!((towns.list[0].food - 80.0).abs() < 0.5, "a full shelf (six months) less 100 seconds: {}", towns.list[0].food);
+        assert!(
+            (towns.list[0].food - 80.0).abs() < 0.5,
+            "a full shelf (six months) less 100 seconds: {}",
+            towns.list[0].food
+        );
         for _ in 0..100 {
             towns.update(1.0, &world, &mut r, &rails, &models);
         }
@@ -891,9 +895,24 @@ mod tests {
     #[test]
     fn prosperity_rewards_every_reason_to_grow_and_tops_out() {
         assert_eq!(prosperity(&Reasons::default()), 1.0);
-        let fed = Reasons { stations: 2, served: 60.0, fed: true, goods: true, ..Default::default() };
+        let fed = Reasons {
+            stations: 2,
+            served: 60.0,
+            fed: true,
+            goods: true,
+            ..Default::default()
+        };
         assert!(prosperity(&fed) > 3.0);
-        let all = Reasons { stations: 9, served: 900.0, fed: true, goods: true, luxury: true, expressway: true, industry_kinds: 20, compute: true };
+        let all = Reasons {
+            stations: 9,
+            served: 900.0,
+            fed: true,
+            goods: true,
+            luxury: true,
+            expressway: true,
+            industry_kinds: 20,
+            compute: true,
+        };
         assert_eq!(prosperity(&all), 5.0);
     }
 }

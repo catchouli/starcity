@@ -76,7 +76,7 @@ impl StarcityApp {
         let year = date.floor() as i32;
         for i in 0..self.industries.list.len() {
             let ind = &self.industries.list[i];
-            if !ind.closed && ind.kind.from_year() > year {
+            if !ind.closed && ind.kind.first_year() > year {
                 for t in self.industries.release(i) {
                     self.towns.occupied.set(t.0, t.1, 0);
                 }
@@ -125,9 +125,14 @@ impl StarcityApp {
             for &t in &flooded {
                 self.towns.demolish(t, t);
                 self.remove_terminals(t, t);
-                let changes = self
-                    .sim
-                    .clear(&mut self.world, &mut self.roads, &mut self.rails, t, t, Clear::Everything);
+                let changes = self.sim.clear(
+                    &mut self.world,
+                    &mut self.roads,
+                    &mut self.rails,
+                    t,
+                    t,
+                    Clear::Everything,
+                );
                 self.mark_infra(&changes.infra);
                 if let Some(id) = self.industries.at(t) {
                     for tile in self.industries.release(id) {
@@ -161,7 +166,7 @@ impl StarcityApp {
                     hit.push((t.name.clone(), n));
                 }
             }
-            hit.sort_by(|a, b| b.1.cmp(&a.1));
+            hit.sort_by_key(|x| std::cmp::Reverse(x.1));
             let (name, n) = hit.first()?;
             let more = if hit.len() > 1 { format!(" ({} other towns too)", hit.len() - 1) } else { String::new() };
             Some(format!(

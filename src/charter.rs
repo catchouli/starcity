@@ -8,10 +8,22 @@ pub struct Charter {
 }
 
 pub const PRIORITIES: [(&str, &str); 4] = [
-    ("Profit", "Agents favour high-yield routes: more trains where cargo is piling up."),
-    ("People", "Agents connect towns nobody serves yet, and keep shelves stocked."),
-    ("Planet", "Agents build carefully: construction costs more, the air stays cleaner."),
-    ("Reach", "Agents push for space and the future: research goes faster, launches pay more."),
+    (
+        "Profit",
+        "Agents favour high-yield routes: more trains where cargo is piling up.",
+    ),
+    (
+        "People",
+        "Agents connect towns nobody serves yet, and keep shelves stocked.",
+    ),
+    (
+        "Planet",
+        "Agents build carefully: construction costs more, the air stays cleaner.",
+    ),
+    (
+        "Reach",
+        "Agents push for space and the future: research goes faster, launches pay more.",
+    ),
 ];
 
 pub const PROFIT: usize = 0;
@@ -21,9 +33,7 @@ pub const REACH: usize = 3;
 
 impl Default for Charter {
     fn default() -> Charter {
-        Charter {
-            weights: [0.25; 4],
-        }
+        Charter { weights: [0.25; 4] }
     }
 }
 
@@ -157,8 +167,18 @@ mod tests {
 
     #[test]
     fn wellbeing_and_the_three_endings() {
-        let good = People { served: 0.9, supplied: 0.8, power: 1.0, clean: 0.9 };
-        let bad = People { served: 0.2, supplied: 0.1, power: 0.5, clean: 0.2 };
+        let good = People {
+            served: 0.9,
+            supplied: 0.8,
+            power: 1.0,
+            clean: 0.9,
+        };
+        let bad = People {
+            served: 0.2,
+            supplied: 0.1,
+            power: 0.5,
+            clean: 0.2,
+        };
         assert!(wellbeing(&good) > 80.0 && wellbeing(&bad) < 30.0);
         let mut greedy = Charter::default();
         greedy.set(REACH, 0.6);

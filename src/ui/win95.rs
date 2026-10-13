@@ -1,6 +1,8 @@
 //! Windows 95 look for egui: grey surfaces, bevelled edges, navy selection.
 
-use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, Response, Sense, Shadow, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, Painter, Rect, Response, Sense, Shadow, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
+};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub const FACE: Color32 = Color32::from_rgb(0xc0, 0xc0, 0xc0);
@@ -29,7 +31,14 @@ pub enum Look {
 }
 
 impl Look {
-    pub const ALL: [Look; 6] = [Look::Classic, Look::Glass, Look::Sleek, Look::Holo, Look::Chrome, Look::Ambient];
+    pub const ALL: [Look; 6] = [
+        Look::Classic,
+        Look::Glass,
+        Look::Sleek,
+        Look::Holo,
+        Look::Chrome,
+        Look::Ambient,
+    ];
 
     pub fn for_year(year: i32) -> Look {
         match year {
@@ -54,7 +63,7 @@ impl Look {
     }
 
     /// The first year the company's software can have this look: it is unlocked from then on.
-    pub fn from_year(self) -> i32 {
+    pub fn first_year(self) -> i32 {
         match self {
             Look::Classic => 2000,
             Look::Glass => 2010,
@@ -268,7 +277,11 @@ pub fn apply(ctx: &egui::Context) {
     let classic = look() == Look::Classic;
     ctx.all_styles_mut(|style| {
         let v = &mut style.visuals;
-        *v = if p.dark_ui { egui::Visuals::dark() } else { egui::Visuals::light() };
+        *v = if p.dark_ui {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
         v.override_text_color = None;
         v.panel_fill = p.face;
         v.window_fill = p.face;
@@ -276,7 +289,12 @@ pub fn apply(ctx: &egui::Context) {
         v.window_shadow = if classic || look() == Look::Ambient {
             Shadow::NONE
         } else {
-            Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(70) }
+            Shadow {
+                offset: [0, 6],
+                blur: 18,
+                spread: 0,
+                color: Color32::from_black_alpha(70),
+            }
         };
         v.popup_shadow = v.window_shadow;
         v.window_corner_radius = corner(p.radius);
@@ -313,7 +331,13 @@ pub fn apply(ctx: &egui::Context) {
         // bg_fill is used for slider grooves and checkbox boxes, which are white in Win95; buttons
         // use weak_bg_fill and stay grey.
         for wv in [&mut w.inactive, &mut w.hovered, &mut w.active] {
-            wv.bg_fill = if p.dark_ui { p.light } else if classic { Color32::WHITE } else { p.light };
+            wv.bg_fill = if p.dark_ui {
+                p.light
+            } else if classic {
+                Color32::WHITE
+            } else {
+                p.light
+            };
         }
         w.hovered.weak_bg_fill = if classic { LIGHT } else { p.light };
         w.active.weak_bg_fill = if classic { SHADOW } else { p.shadow };
@@ -392,7 +416,13 @@ fn gradient(p: &Painter, rect: Rect, top: Color32, bottom: Color32, radius: u8) 
     let mid = top.lerp_to_gamma(bottom, 0.5);
     p.rect_filled(rect, r, mid);
     let inner = rect.shrink2(vec2(r * 0.5, 0.0));
-    gradient(p, Rect::from_min_max(inner.min + vec2(0.0, r * 0.4), inner.max - vec2(0.0, r * 0.4)), top, bottom, 0);
+    gradient(
+        p,
+        Rect::from_min_max(inner.min + vec2(0.0, r * 0.4), inner.max - vec2(0.0, r * 0.4)),
+        top,
+        bottom,
+        0,
+    );
 }
 
 /// Paints a title bar across the top of a window. Returns true if the close button was clicked.
@@ -422,7 +452,11 @@ fn title_bar(ui: &mut Ui, title: &str) -> bool {
         Look::Holo | Look::Ambient => {
             p.line_segment(
                 [pos2(rect.min.x, rect.max.y), pos2(rect.max.x, rect.max.y)],
-                Stroke::new(1.0, pl.highlight.gamma_multiply(if look() == Look::Holo { 0.8 } else { 0.35 })),
+                Stroke::new(
+                    1.0,
+                    pl.highlight
+                        .gamma_multiply(if look() == Look::Holo { 0.8 } else { 0.35 }),
+                ),
             );
             p.line_segment(
                 [pos2(rect.min.x, rect.max.y), pos2(rect.min.x + 36.0, rect.max.y)],
@@ -443,10 +477,22 @@ fn title_bar(ui: &mut Ui, title: &str) -> bool {
     };
     let at = rect.min.x + if look() == Look::Classic { 5.0 } else { 8.0 };
     let font = egui::FontId::proportional(if look() == Look::Classic { 13.0 } else { 14.0 });
-    p.text(pos2(at, rect.center().y), egui::Align2::LEFT_CENTER, title, font.clone(), title_colour);
+    p.text(
+        pos2(at, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        font.clone(),
+        title_colour,
+    );
     if bold {
         // Bold by overdrawing one pixel to the right.
-        p.text(pos2(at + 1.0, rect.center().y), egui::Align2::LEFT_CENTER, title, font, title_colour);
+        p.text(
+            pos2(at + 1.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            title,
+            font,
+            title_colour,
+        );
     }
 
     let button = Rect::from_min_size(pos2(rect.max.x - 20.0, rect.center().y - 8.0), vec2(16.0, 16.0));
@@ -464,10 +510,26 @@ fn title_bar(ui: &mut Ui, title: &str) -> bool {
             bevel(p, b, !pressed);
         }
         Look::Sleek => {
-            p.circle_filled(button.center(), 7.0, if response.hovered() { Color32::from_rgb(0xff, 0x5f, 0x57) } else { Color32::from_rgb(0xdd, 0xdd, 0xe2) });
+            p.circle_filled(
+                button.center(),
+                7.0,
+                if response.hovered() {
+                    Color32::from_rgb(0xff, 0x5f, 0x57)
+                } else {
+                    Color32::from_rgb(0xdd, 0xdd, 0xe2)
+                },
+            );
         }
         Look::Glass => {
-            p.circle_filled(button.center(), 8.0, if response.hovered() { Color32::from_rgb(0xe0, 0x50, 0x40) } else { Color32::from_white_alpha(170) });
+            p.circle_filled(
+                button.center(),
+                8.0,
+                if response.hovered() {
+                    Color32::from_rgb(0xe0, 0x50, 0x40)
+                } else {
+                    Color32::from_white_alpha(170)
+                },
+            );
         }
         Look::Chrome => {
             p.circle_filled(button.center(), 8.0, Color32::from_rgb(0xdd, 0xe2, 0xea));
@@ -479,7 +541,12 @@ fn title_bar(ui: &mut Ui, title: &str) -> bool {
             }
         }
     }
-    let c = button.center() + if pressed && look() == Look::Classic { vec2(1.0, 1.0) } else { Vec2::ZERO };
+    let c = button.center()
+        + if pressed && look() == Look::Classic {
+            vec2(1.0, 1.0)
+        } else {
+            Vec2::ZERO
+        };
     let s = Stroke::new(1.5, cross);
     p.line_segment([c + vec2(-3.5, -3.0), c + vec2(3.5, 3.0)], s);
     p.line_segment([c + vec2(3.5, -3.0), c + vec2(-3.5, 3.0)], s);
@@ -502,9 +569,19 @@ pub fn bevel(painter: &Painter, rect: Rect, raised: bool) {
         }
         Look::Glass | Look::Chrome => {
             let r = corner(p.radius.min(8));
-            painter.rect_stroke(rect, r, Stroke::new(1.0, if raised { p.dark.gamma_multiply(0.7) } else { p.shadow }), StrokeKind::Inside);
+            painter.rect_stroke(
+                rect,
+                r,
+                Stroke::new(1.0, if raised { p.dark.gamma_multiply(0.7) } else { p.shadow }),
+                StrokeKind::Inside,
+            );
             if raised {
-                painter.rect_stroke(rect.shrink(1.0), r, Stroke::new(1.0, Color32::from_white_alpha(150)), StrokeKind::Inside);
+                painter.rect_stroke(
+                    rect.shrink(1.0),
+                    r,
+                    Stroke::new(1.0, Color32::from_white_alpha(150)),
+                    StrokeKind::Inside,
+                );
             }
         }
         Look::Sleek => {
@@ -557,7 +634,16 @@ fn fill_face(painter: &Painter, rect: Rect, raised: bool) {
         Look::Chrome if raised => {
             painter.rect_filled(rect, corner(r), p.face);
             gradient(painter, rect.shrink(1.0), Color32::WHITE, p.shadow, 0);
-            gradient(painter, Rect::from_min_max(rect.left_center() + vec2(1.0, 0.0), rect.right_bottom() - vec2(1.0, 1.0)), p.shadow.gamma_multiply(0.9), p.light, 0);
+            gradient(
+                painter,
+                Rect::from_min_max(
+                    rect.left_center() + vec2(1.0, 0.0),
+                    rect.right_bottom() - vec2(1.0, 1.0),
+                ),
+                p.shadow.gamma_multiply(0.9),
+                p.light,
+                0,
+            );
         }
         _ => {
             painter.rect_filled(rect, corner(r), if raised { p.face } else { p.light });
@@ -625,7 +711,11 @@ pub fn tool_button_ex(
     let pl = pal();
     fill_face(p, rect, !pressed);
     if selected && look() != Look::Classic {
-        p.rect_filled(rect.shrink(2.0), corner(pl.radius.min(8)), pl.accent.gamma_multiply(0.35));
+        p.rect_filled(
+            rect.shrink(2.0),
+            corner(pl.radius.min(8)),
+            pl.accent.gamma_multiply(0.35),
+        );
     }
     if selected && look() == Look::Classic {
         // Win95 draws latched buttons with a light dither; a checkerboard of 1px dots.
@@ -698,7 +788,10 @@ pub fn compute_pane(ui: &mut Ui, width: f32, total: &str, rate: &str, spark: &[f
         ink,
     );
     // The sparkline: a straight line means exponential growth.
-    let area = Rect::from_min_max(pos2(rect.max.x - 50.0, rect.min.y + 4.0), pos2(rect.max.x - 5.0, rect.max.y - 4.0));
+    let area = Rect::from_min_max(
+        pos2(rect.max.x - 50.0, rect.min.y + 4.0),
+        pos2(rect.max.x - 5.0, rect.max.y - 4.0),
+    );
     p.text(
         pos2(area.min.x - 6.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
@@ -749,7 +842,12 @@ pub fn check_row(ui: &mut Ui, done: bool, text: &str) {
                 }
             }
             Look::Holo | Look::Ambient => {
-                p.rect_stroke(rect, corner(2), Stroke::new(1.0, pl.highlight.gamma_multiply(if done { 1.0 } else { 0.5 })), StrokeKind::Inside);
+                p.rect_stroke(
+                    rect,
+                    corner(2),
+                    Stroke::new(1.0, pl.highlight.gamma_multiply(if done { 1.0 } else { 0.5 })),
+                    StrokeKind::Inside,
+                );
                 if done {
                     p.rect_filled(rect.shrink(2.0), corner(1), pl.highlight.gamma_multiply(0.25));
                     tick(pl.highlight);
@@ -824,7 +922,9 @@ mod tests {
 
     #[test]
     fn the_look_follows_the_decade_and_never_goes_backwards() {
-        let years = [1999, 2000, 2009, 2010, 2019, 2020, 2029, 2030, 2039, 2040, 2047, 2048, 2050];
+        let years = [
+            1999, 2000, 2009, 2010, 2019, 2020, 2029, 2030, 2039, 2040, 2047, 2048, 2050,
+        ];
         let looks: Vec<Look> = years.iter().map(|&y| Look::for_year(y)).collect();
         assert_eq!(looks[0], Look::Classic);
         assert_eq!(looks[3], Look::Glass);
@@ -855,7 +955,12 @@ mod tests {
                 set_blend(from, step as f32 / 10.0);
                 let (f, t) = (pal().face, pal().text);
                 let lum = |c: Color32| c.r() as i32 * 3 + c.g() as i32 * 6 + c.b() as i32;
-                assert!((lum(f) - lum(t)).abs() > 900, "{} to {} at {step}/10", from.name(), to.name());
+                assert!(
+                    (lum(f) - lum(t)).abs() > 900,
+                    "{} to {} at {step}/10",
+                    from.name(),
+                    to.name()
+                );
             }
         }
         set_blend(Look::Classic, 1.0);

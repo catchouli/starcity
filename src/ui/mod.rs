@@ -69,7 +69,9 @@ impl Tool {
             }
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
-            Tool::SeaWall => "Drag along a coast to build a sea wall. As the sea rises it floods low ground it can reach; land behind a wall stays dry.",
+            Tool::SeaWall => {
+                "Drag along a coast to build a sea wall. As the sea rises it floods low ground it can reach; land behind a wall stays dry."
+            }
             Tool::Port => "Click flat coastal land to build a port. Ferries tie up in the water beside it.",
             Tool::Boat => "Click water to place a ferry, then click it to give it ports to visit.",
             Tool::Airport => "Click to build an airport (O turns the runway). It levels the ground for a price.",
@@ -193,11 +195,11 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
                 s.look_override = None;
             }
             for look in win95::Look::ALL {
-                let unlocked = look.from_year() <= s.year;
+                let unlocked = look.first_year() <= s.year;
                 let label = if unlocked {
                     look.name().to_string()
                 } else {
-                    format!("{} (from {})", look.name(), look.from_year())
+                    format!("{} (from {})", look.name(), look.first_year())
                 };
                 if ui
                     .add_enabled(unlocked, egui::RadioButton::new(s.look_override == Some(look), label))
@@ -266,7 +268,10 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     let groups: [(&str, &[Tool]); 6] = [
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze, Tool::SeaWall]),
-        ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus, Tool::Truck]),
+        (
+            "Roads",
+            &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus, Tool::Truck],
+        ),
         (
             "Rail",
             &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
@@ -476,18 +481,46 @@ fn icon_plane(p: &Painter, r: Rect) {
 fn icon_expressway(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
     for x in [0.2, 0.75] {
-        p.rect_filled(Rect::from_min_max(at(x, 0.45), at(x + 0.08, 1.0)), 0.0, Color32::from_gray(0x90));
+        p.rect_filled(
+            Rect::from_min_max(at(x, 0.45), at(x + 0.08, 1.0)),
+            0.0,
+            Color32::from_gray(0x90),
+        );
     }
-    p.rect_filled(Rect::from_min_max(at(0.0, 0.3), at(1.0, 0.48)), 0.0, Color32::from_rgb(0xc9, 0xce, 0xd8));
-    p.rect_filled(Rect::from_min_max(at(0.0, 0.37), at(1.0, 0.41)), 0.0, Color32::from_rgb(0x2a, 0xc8, 0xf0));
-    p.rect_filled(Rect::from_min_max(at(0.3, 0.2), at(0.5, 0.3)), 1.0, Color32::from_gray(0xf4));
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.3), at(1.0, 0.48)),
+        0.0,
+        Color32::from_rgb(0xc9, 0xce, 0xd8),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.37), at(1.0, 0.41)),
+        0.0,
+        Color32::from_rgb(0x2a, 0xc8, 0xf0),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.3, 0.2), at(0.5, 0.3)),
+        1.0,
+        Color32::from_gray(0xf4),
+    );
 }
 
 fn icon_truck(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
-    p.rect_filled(Rect::from_min_max(at(0.05, 0.25), at(0.62, 0.75)), 1.0, Color32::from_rgb(0xb0, 0x4a, 0x30));
-    p.rect_filled(Rect::from_min_max(at(0.64, 0.4), at(0.95, 0.75)), 1.0, Color32::from_rgb(0x30, 0x50, 0x80));
-    p.rect_filled(Rect::from_min_max(at(0.72, 0.45), at(0.9, 0.58)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+    p.rect_filled(
+        Rect::from_min_max(at(0.05, 0.25), at(0.62, 0.75)),
+        1.0,
+        Color32::from_rgb(0xb0, 0x4a, 0x30),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.64, 0.4), at(0.95, 0.75)),
+        1.0,
+        Color32::from_rgb(0x30, 0x50, 0x80),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.72, 0.45), at(0.9, 0.58)),
+        0.0,
+        Color32::from_rgb(0xcf, 0xe6, 0xf7),
+    );
     for x in [0.22, 0.5, 0.8] {
         p.circle_filled(at(x, 0.8), r.width() * 0.08, Color32::from_gray(0x20));
     }
@@ -495,10 +528,25 @@ fn icon_truck(p: &Painter, r: Rect) {
 
 fn icon_sea_wall(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
-    p.rect_filled(Rect::from_min_max(at(0.0, 0.55), at(0.45, 1.0)), 0.0, Color32::from_rgb(0x2a, 0x6a, 0x9c));
-    p.rect_filled(Rect::from_min_max(at(0.45, 0.2), at(0.65, 1.0)), 0.0, Color32::from_gray(0x9a));
-    p.rect_filled(Rect::from_min_max(at(0.65, 0.7), at(1.0, 1.0)), 0.0, Color32::from_rgb(0x5d, 0x8f, 0x3a));
-    p.line_segment([at(0.45, 0.2), at(0.65, 0.2)], Stroke::new(1.0, Color32::from_gray(0xd0)));
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.55), at(0.45, 1.0)),
+        0.0,
+        Color32::from_rgb(0x2a, 0x6a, 0x9c),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.45, 0.2), at(0.65, 1.0)),
+        0.0,
+        Color32::from_gray(0x9a),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.65, 0.7), at(1.0, 1.0)),
+        0.0,
+        Color32::from_rgb(0x5d, 0x8f, 0x3a),
+    );
+    p.line_segment(
+        [at(0.45, 0.2), at(0.65, 0.2)],
+        Stroke::new(1.0, Color32::from_gray(0xd0)),
+    );
 }
 
 fn icon_bus(p: &Painter, r: Rect) {
@@ -506,9 +554,17 @@ fn icon_bus(p: &Painter, r: Rect) {
     let body = Color32::from_rgb(0x28, 0x6e, 0xc8);
     p.rect_filled(Rect::from_min_max(at(0.08, 0.22), at(0.92, 0.78)), 2.0, body);
     for x in [0.16, 0.36, 0.56] {
-        p.rect_filled(Rect::from_min_max(at(x, 0.3), at(x + 0.14, 0.5)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+        p.rect_filled(
+            Rect::from_min_max(at(x, 0.3), at(x + 0.14, 0.5)),
+            0.0,
+            Color32::from_rgb(0xcf, 0xe6, 0xf7),
+        );
     }
-    p.rect_filled(Rect::from_min_max(at(0.76, 0.3), at(0.88, 0.7)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+    p.rect_filled(
+        Rect::from_min_max(at(0.76, 0.3), at(0.88, 0.7)),
+        0.0,
+        Color32::from_rgb(0xcf, 0xe6, 0xf7),
+    );
     for x in [0.26, 0.72] {
         p.circle_filled(at(x, 0.8), r.width() * 0.09, Color32::from_gray(0x20));
     }
@@ -516,11 +572,29 @@ fn icon_bus(p: &Painter, r: Rect) {
 
 fn icon_bus_stop(p: &Painter, r: Rect) {
     let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
-    p.rect_filled(Rect::from_min_max(at(0.0, 0.78), at(1.0, 1.0)), 0.0, Color32::from_gray(0x50));
-    p.rect_filled(Rect::from_min_max(at(0.45, 0.25), at(0.53, 0.8)), 0.0, Color32::from_gray(0x60));
+    p.rect_filled(
+        Rect::from_min_max(at(0.0, 0.78), at(1.0, 1.0)),
+        0.0,
+        Color32::from_gray(0x50),
+    );
+    p.rect_filled(
+        Rect::from_min_max(at(0.45, 0.25), at(0.53, 0.8)),
+        0.0,
+        Color32::from_gray(0x60),
+    );
     p.circle_filled(at(0.49, 0.24), r.width() * 0.2, Color32::from_rgb(0xf2, 0xc2, 0x30));
-    p.circle_stroke(at(0.49, 0.24), r.width() * 0.2, Stroke::new(1.0, Color32::from_gray(0x30)));
-    p.text(at(0.49, 0.25), egui::Align2::CENTER_CENTER, "B", egui::FontId::proportional(r.height() * 0.3), Color32::from_gray(0x20));
+    p.circle_stroke(
+        at(0.49, 0.24),
+        r.width() * 0.2,
+        Stroke::new(1.0, Color32::from_gray(0x30)),
+    );
+    p.text(
+        at(0.49, 0.25),
+        egui::Align2::CENTER_CENTER,
+        "B",
+        egui::FontId::proportional(r.height() * 0.3),
+        Color32::from_gray(0x20),
+    );
 }
 
 fn icon_speed(p: &Painter, r: Rect, speed: Speed) {

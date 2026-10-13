@@ -107,13 +107,22 @@ impl Ledger {
     }
 
     pub fn income(&self) -> i64 {
-        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts) + self.get(Item::Hosting) + self.get(Item::Launches)
+        self.get(Item::Passengers)
+            + self.get(Item::Freight)
+            + self.get(Item::Contracts)
+            + self.get(Item::Hosting)
+            + self.get(Item::Launches)
     }
 
     pub fn expenses(&self) -> i64 {
         Item::ALL
             .iter()
-            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts | Item::Hosting | Item::Launches))
+            .filter(|&&i| {
+                !matches!(
+                    i,
+                    Item::Passengers | Item::Freight | Item::Contracts | Item::Hosting | Item::Launches
+                )
+            })
             .map(|&i| self.get(i))
             .sum()
     }
@@ -277,8 +286,7 @@ pub const LEVELS: [Level; 7] = [
 ];
 
 /// Levels that exist in the design but are not built yet.
-pub const LATER_LEVELS: &str =
-    "The Orbital Citadel and the Convergence seat come with space and the singularity.";
+pub const LATER_LEVELS: &str = "The Orbital Citadel and the Convergence seat come with space and the singularity.";
 
 /// What moving the headquarters costs: a flat fee and half of what the building has cost so far.
 /// Only from the Regional office on, so it is a late choice and never the first thing to try.
@@ -609,7 +617,11 @@ impl Company {
     }
 
     pub fn spend(&mut self, item: Item, cost: u32) -> bool {
-        let cost = if item == Item::Construction { self.build_price(cost) } else { cost };
+        let cost = if item == Item::Construction {
+            self.build_price(cost)
+        } else {
+            cost
+        };
         if cost == 0 {
             return true;
         }
@@ -714,7 +726,10 @@ impl Company {
                 Site::DataCentre => ("Serve a data centre with a station", facts.serves_data_centre),
                 Site::AiCampus => ("Serve an AI campus with a station", facts.serves_ai_campus),
             };
-            out.push(Requirement { text: text.to_string(), met });
+            out.push(Requirement {
+                text: text.to_string(),
+                met,
+            });
         }
         out
     }
@@ -758,10 +773,9 @@ impl Company {
 
     fn month(&mut self, assets: &Assets, messages: &mut Vec<String>) {
         if !self.sandbox {
-            let running =
-                (assets.train_running + assets.craft_running) as f32 / 12.0
-                    * (1.0 - self.effects.running_discount)
-                    * self.world.running;
+            let running = (assets.train_running + assets.craft_running) as f32 / 12.0
+                * (1.0 - self.effects.running_discount)
+                * self.world.running;
             let upkeep = ((assets.road_pieces + assets.rail_pieces) as f32 * PIECE_UPKEEP
                 + (assets.station_tiles * STATION_UPKEEP) as f32 / 3.0
                 + (assets.ports * PORT_UPKEEP + assets.airports * AIRPORT_UPKEEP) as f32)
@@ -974,8 +988,14 @@ impl Company {
     fn new_goals(&self, year: i32, assets: &Assets, facts: &Facts) -> Vec<Goal> {
         use cargo::Cargo;
         let n = (year - 2000).clamp(0, 50) as u32;
-        let freight = [Cargo::Coal, Cargo::IronOre, Cargo::Timber, Cargo::Grain, Cargo::Steel, Cargo::Goods]
-            [n as usize % 6];
+        let freight = [
+            Cargo::Coal,
+            Cargo::IronOre,
+            Cargo::Timber,
+            Cargo::Grain,
+            Cargo::Steel,
+            Cargo::Goods,
+        ][n as usize % 6];
         let third = if year % 2 == 0 {
             let v = self.value(assets);
             GoalKind::Value(((v as f64 * 1.5) as i64).max(100_000) / 25_000 * 25_000)
@@ -1002,7 +1022,10 @@ impl Company {
                     have >= n,
                 )
             }
-            GoalKind::Value(v) => (format!("Reach a company value of {}", pounds(v)), self.value(assets) >= v),
+            GoalKind::Value(v) => (
+                format!("Reach a company value of {}", pounds(v)),
+                self.value(assets) >= v,
+            ),
             GoalKind::Town(p) => (
                 format!("Serve a town of {p} people with a station"),
                 facts.town_served >= p,
@@ -1028,7 +1051,11 @@ impl Company {
             if met && !g.done {
                 self.goals[i].done = true;
                 self.earn(Item::Contracts, GOAL_REWARD);
-                messages.push(format!("Goal met: {}. The council adds {}.", text.to_lowercase(), pounds(GOAL_REWARD as i64)));
+                messages.push(format!(
+                    "Goal met: {}. The council adds {}.",
+                    text.to_lowercase(),
+                    pounds(GOAL_REWARD as i64)
+                ));
             }
         }
         messages
@@ -1281,7 +1308,11 @@ mod tests {
         assert!(c.spend(Item::Construction, 10_000));
         assert_eq!(before - c.cash, 5_000);
         assert_eq!(c.build_price(1_000), 500);
-        let assets = Assets { trains: 1, train_running: 1200, ..Default::default() };
+        let assets = Assets {
+            trains: 1,
+            train_running: 1200,
+            ..Default::default()
+        };
         let mut full = Company::new(2030);
         let mut cut = Company::new(2030);
         cut.effects.running_discount = 0.25;
@@ -1294,11 +1325,16 @@ mod tests {
     fn yearly_goals_pay_once_and_renew_with_the_year() {
         let mut c = Company::new(2001);
         let (assets, facts) = (Assets::default(), Facts::default());
-        assert!(c.update_goals(2001, &assets, &facts).is_empty(), "goals begin with the Depot office");
+        assert!(
+            c.update_goals(2001, &assets, &facts).is_empty(),
+            "goals begin with the Depot office"
+        );
         c.hq_level = 1;
         assert!(c.update_goals(2001, &assets, &facts).is_empty());
         assert_eq!(c.goals.len(), 3);
-        let GoalKind::Carry(cargo::Cargo::Passengers, n) = c.goals[0].kind else { panic!() };
+        let GoalKind::Carry(cargo::Cargo::Passengers, n) = c.goals[0].kind else {
+            panic!()
+        };
         c.delivered[cargo::Cargo::Passengers.index()] = n;
         let before = c.cash;
         assert_eq!(c.update_goals(2001, &assets, &facts).len(), 1);
@@ -1320,10 +1356,18 @@ mod tests {
         assert_eq!(level(3).vehicles, 400);
         c.hq_level = 3;
         let next = c.requirements(&Assets::default(), &Facts::default());
-        assert!(next.iter().any(|r| r.text.contains("data centre")) && next.iter().any(|r| r.text.contains("milestone")));
-        assert!(next.iter().any(|r| r.text.contains("2012") && !r.met), "2010 is too early for the Data campus");
+        assert!(
+            next.iter().any(|r| r.text.contains("data centre")) && next.iter().any(|r| r.text.contains("milestone"))
+        );
+        assert!(
+            next.iter().any(|r| r.text.contains("2012") && !r.met),
+            "2010 is too early for the Data campus"
+        );
         c.hq_level = 6;
-        assert!(c.requirements(&Assets::default(), &Facts::default()).is_empty(), "the Citadel is the last level for now");
+        assert!(
+            c.requirements(&Assets::default(), &Facts::default()).is_empty(),
+            "the Citadel is the last level for now"
+        );
         assert!(relocation_cost(3) > relocation_cost(2));
     }
 
@@ -1332,13 +1376,31 @@ mod tests {
         assert_ne!(assistant_name(2005), assistant_name(2025));
         let mut c = Company::new(2012);
         c.hq_level = 2;
-        let facts = Facts { compute_sites: 1, ..Default::default() };
+        let facts = Facts {
+            compute_sites: 1,
+            ..Default::default()
+        };
         let step = c.next_step(&Assets::default(), &facts, &LinkFacts::default());
         assert!(step.detail.contains("compute"), "{}", step.detail);
-        let farms = Facts { compute_sites: 0, ..Default::default() };
-        assert!(c.next_step(&Assets::default(), &farms, &LinkFacts::default()).detail.contains("Fund an industry"));
-        let made = Facts { compute_total: 5_000.0, compute_sites: 1, ..Default::default() };
-        assert!(!c.next_step(&Assets::default(), &made, &LinkFacts::default()).detail.contains("compute"));
+        let farms = Facts {
+            compute_sites: 0,
+            ..Default::default()
+        };
+        assert!(
+            c.next_step(&Assets::default(), &farms, &LinkFacts::default())
+                .detail
+                .contains("Fund an industry")
+        );
+        let made = Facts {
+            compute_total: 5_000.0,
+            compute_sites: 1,
+            ..Default::default()
+        };
+        assert!(
+            !c.next_step(&Assets::default(), &made, &LinkFacts::default())
+                .detail
+                .contains("compute")
+        );
     }
 
     #[test]

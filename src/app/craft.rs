@@ -28,7 +28,7 @@ fn thousands(n: u32) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -83,7 +83,8 @@ impl StarcityApp {
                 if plan.blocked.is_none() {
                     self.show_cost(
                         self.company.build_price(plan.cost()),
-                        self.company.build_price(plan.terraform_steps * crate::network::TERRAFORM_COST),
+                        self.company
+                            .build_price(plan.terraform_steps * crate::network::TERRAFORM_COST),
                     );
                 }
                 self.site_hint = Some(match plan.blocked {
@@ -143,7 +144,11 @@ impl StarcityApp {
                 Some(Highlight {
                     a: tile,
                     b: tile,
-                    kind: if road { HighlightKind::Cursor } else { HighlightKind::Bulldoze },
+                    kind: if road {
+                        HighlightKind::Cursor
+                    } else {
+                        HighlightKind::Bulldoze
+                    },
                 })
             }
             Tool::Bus | Tool::Truck => {
@@ -168,7 +173,11 @@ impl StarcityApp {
                 Some(Highlight {
                     a: tile,
                     b: tile,
-                    kind: if stop { HighlightKind::Cursor } else { HighlightKind::Bulldoze },
+                    kind: if stop {
+                        HighlightKind::Cursor
+                    } else {
+                        HighlightKind::Bulldoze
+                    },
                 })
             }
             Tool::Plane => {
@@ -237,7 +246,8 @@ impl StarcityApp {
                     if let Some(id) = self.boats.spawn(sea, tile) {
                         self.company.spend(Item::Vehicles, model.price);
                         if let Some(b) = self.boats.get_mut(id) {
-                            (b.speed, b.capacity, b.price, b.running) = (model.speed, model.capacity, model.price, model.running);
+                            (b.speed, b.capacity, b.price, b.running) =
+                                (model.speed, model.capacity, model.price, model.running);
                         }
                         self.selected_craft = Some(Craft::Boat(id));
                         self.props_changed = true;
@@ -255,7 +265,9 @@ impl StarcityApp {
                 if !self.pay(Item::Construction, company::BUS_STOP) {
                     return Vec::new();
                 }
-                let id = self.terminals.build(crate::terminals::Site::BusStop { tile }, String::new());
+                let id = self
+                    .terminals
+                    .build(crate::terminals::Site::BusStop { tile }, String::new());
                 self.name_terminal(id);
                 self.static_changed = true;
                 let name = self.terminals.get(id).map(|t| t.name.clone()).unwrap_or_default();
@@ -265,15 +277,24 @@ impl StarcityApp {
             Tool::Bus | Tool::Truck => {
                 match self.terminals.at(tile) {
                     Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::BusStop) => {
-                        let model = if tool == Tool::Bus { BUSES[self.buy_bus] } else { TRUCKS[self.buy_truck] };
-                        let cargo = if tool == Tool::Bus { Cargo::Passengers } else { self.truck_cargo };
+                        let model = if tool == Tool::Bus {
+                            BUSES[self.buy_bus]
+                        } else {
+                            TRUCKS[self.buy_truck]
+                        };
+                        let cargo = if tool == Tool::Bus {
+                            Cargo::Passengers
+                        } else {
+                            self.truck_cargo
+                        };
                         if !self.can_add_vehicle(model.price) {
                             return Vec::new();
                         }
                         if let Some(id) = self.buses.spawn(&self.roads, tile) {
                             self.company.spend(Item::Vehicles, model.price);
                             if let Some(b) = self.buses.get_mut(id) {
-                                (b.speed, b.capacity, b.price, b.running) = (model.speed, model.capacity, model.price, model.running);
+                                (b.speed, b.capacity, b.price, b.running) =
+                                    (model.speed, model.capacity, model.price, model.running);
                                 b.cargo = cargo;
                             }
                             self.selected_craft = Some(Craft::Bus(id));
@@ -407,11 +428,11 @@ impl StarcityApp {
             .chain(plane_calls.into_iter().map(|(id, t)| (Craft::Plane(id), t)))
             .chain(bus_calls.into_iter().map(|(id, t)| (Craft::Bus(id), t)));
         for (craft, at) in calls {
-            if let Craft::Bus(id) = craft {
-                if self.buses.get(id).is_some_and(|b| b.cargo != Cargo::Passengers) {
-                    self.truck_arrives(id, at);
-                    continue;
-                }
+            if let Craft::Bus(id) = craft
+                && self.buses.get(id).is_some_and(|b| b.cargo != Cargo::Passengers)
+            {
+                self.truck_arrives(id, at);
+                continue;
             }
             let Some(terminal) = self.terminals.list.get_mut(&at) else {
                 continue;
@@ -466,10 +487,11 @@ impl StarcityApp {
         };
         if units > 0 {
             let left = self.deliver_to_industries(&tiles, cargo, units);
-            if left > 0 && super::industry_ui::is_for_towns(cargo) {
-                if let Some(town) = self.towns.nearest((c.x as i32, c.y as i32), 30) {
-                    self.towns.list[town as usize].receive(cargo, left);
-                }
+            if left > 0
+                && super::industry_ui::is_for_towns(cargo)
+                && let Some(town) = self.towns.nearest((c.x as i32, c.y as i32), 30)
+            {
+                self.towns.list[town as usize].receive(cargo, left);
             }
             self.pay_fare(cargo, units, came_from, (c.x, c.y));
         }
@@ -499,7 +521,10 @@ impl StarcityApp {
         let planes = self.planes.list.iter().map(|p| (Craft::Plane(p.id), p.pos));
         let buses = self.buses.list.iter().map(|b| {
             let (p, _) = b.placement();
-            (Craft::Bus(b.id), Vec3::new(p.x, self.world.height_at(p.x, p.y) + 0.2, p.y))
+            (
+                Craft::Bus(b.id),
+                Vec3::new(p.x, self.world.height_at(p.x, p.y) + 0.2, p.y),
+            )
         });
         boats
             .chain(planes)
@@ -533,6 +558,7 @@ impl StarcityApp {
     }
 
     /// The window shared by boats and planes: status, orders, stop and go.
+    #[allow(clippy::too_many_arguments)]
     fn craft_window(
         &mut self,
         ctx: &egui::Context,
@@ -817,8 +843,13 @@ impl StarcityApp {
     /// biggest cities. Returns (ports, boats, airports, planes).
     /// Demo: a bus line across each of the eight biggest towns, between two stops on its roads.
     pub(super) fn demo_buses(&mut self) -> usize {
-        let mut towns: Vec<(u32, (i32, i32))> = self.towns.list.iter().map(|t| (self.towns.population(t.id), t.centre)).collect();
-        towns.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut towns: Vec<(u32, (i32, i32))> = self
+            .towns
+            .list
+            .iter()
+            .map(|t| (self.towns.population(t.id), t.centre))
+            .collect();
+        towns.sort_by_key(|x| std::cmp::Reverse(x.0));
         let mut lines = 0;
         for &(_, (cx, cz)) in towns.iter().take(8) {
             let roads: Vec<(i32, i32)> = (cz - 12..=cz + 12)
@@ -836,7 +867,11 @@ impl StarcityApp {
             let Some(b) = far.into_iter().take(12).find(|&b| {
                 let bits = self.roads.get(a.0, a.1);
                 (0..8).map(|i| 1u8 << i).filter(|p| bits & p != 0).any(|piece| {
-                    let seg = crate::vehicles::RoadSeg { tile: a, piece, forward: true };
+                    let seg = crate::vehicles::RoadSeg {
+                        tile: a,
+                        piece,
+                        forward: true,
+                    };
                     crate::buses::route(&self.roads, seg, b).is_some()
                 })
             }) else {
@@ -845,7 +880,9 @@ impl StarcityApp {
             let stops: Vec<TerminalId> = [a, b]
                 .into_iter()
                 .map(|tile| {
-                    let id = self.terminals.build(crate::terminals::Site::BusStop { tile }, String::new());
+                    let id = self
+                        .terminals
+                        .build(crate::terminals::Site::BusStop { tile }, String::new());
                     self.name_terminal(id);
                     id
                 })
@@ -867,7 +904,7 @@ impl StarcityApp {
             .iter()
             .map(|t| (self.towns.population(t.id), t.centre))
             .collect();
-        towns.sort_by(|a, b| b.0.cmp(&a.0));
+        towns.sort_by_key(|x| std::cmp::Reverse(x.0));
 
         // Ports: the nearest spot on the coast to each town, within reach.
         self.sea();

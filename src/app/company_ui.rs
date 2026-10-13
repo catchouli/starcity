@@ -365,7 +365,13 @@ impl StarcityApp {
     /// Whether any station serves a working industry of this kind.
     fn serves_kind(&self, kind: crate::industry::Kind) -> bool {
         self.industries.list.iter().any(|i| {
-            !i.closed && i.kind == kind && self.stations.list.values().any(|s| i.near(&s.tiles, crate::industry::CATCHMENT))
+            !i.closed
+                && i.kind == kind
+                && self
+                    .stations
+                    .list
+                    .values()
+                    .any(|s| i.near(&s.tiles, crate::industry::CATCHMENT))
         })
     }
 
@@ -416,9 +422,15 @@ impl StarcityApp {
             .filter(|t| t.pop > crate::towns::WANTS_FOOD && t.served > 1.0)
             .find_map(|t| {
                 if t.food <= 0.0 {
-                    Some(format!("{} has grown to {} people and wants food. Haul some from a food plant to a station in town.", t.name, t.pop))
+                    Some(format!(
+                        "{} has grown to {} people and wants food. Haul some from a food plant to a station in town.",
+                        t.name, t.pop
+                    ))
                 } else if t.pop > crate::towns::WANTS_GOODS && t.goods <= 0.0 {
-                    Some(format!("{} wants goods now. A factory's goods delivered to a station in town will help it grow.", t.name))
+                    Some(format!(
+                        "{} wants goods now. A factory's goods delivered to a station in town will help it grow.",
+                        t.name
+                    ))
                 } else {
                     None
                 }
@@ -427,10 +439,11 @@ impl StarcityApp {
 
     /// The rail route for the preview, searched again only when the drag or the map changes.
     pub(super) fn rail_plan_cached(&mut self, a: (i32, i32), b: (i32, i32)) -> crate::network::Plan {
-        if let Some((key, epoch, plan)) = &self.route_cache {
-            if *key == (a, b) && *epoch == self.plan_epoch {
-                return plan.clone();
-            }
+        if let Some((key, epoch, plan)) = &self.route_cache
+            && *key == (a, b)
+            && *epoch == self.plan_epoch
+        {
+            return plan.clone();
         }
         let plan = crate::rails::plan_route(
             &self.world,
@@ -482,11 +495,7 @@ impl StarcityApp {
             .interactable(false)
             .show(ctx, |ui| {
                 frame.show(ui, |ui| {
-                    let colour = if *ok {
-                        egui::Color32::BLACK
-                    } else {
-                        win95::bad()
-                    };
+                    let colour = if *ok { egui::Color32::BLACK } else { win95::bad() };
                     ui.label(
                         egui::RichText::new(if *ok {
                             text.clone()
@@ -575,7 +584,10 @@ impl StarcityApp {
         let storm = crate::events::storm(date, seed);
         if storm && !self.planes.grounded {
             let now = self.last_time;
-            self.show_message("Storm warning: flights are grounded and launches held until it passes", now + 5.0);
+            self.show_message(
+                "Storm warning: flights are grounded and launches held until it passes",
+                now + 5.0,
+            );
         }
         self.planes.grounded = storm;
         self.company.world = world;
@@ -598,7 +610,10 @@ impl StarcityApp {
         let forecast = (foresight >= 0.5).then(|| {
             let date = self.clock.year_f64() as f32;
             let seed = self.params.seed;
-            let (now, next) = (crate::events::active(date, seed), crate::events::active(date + 1.0, seed));
+            let (now, next) = (
+                crate::events::active(date, seed),
+                crate::events::active(date + 1.0, seed),
+            );
             let earned = self.company.ledger.income() as f32 / (date.fract().max(1.0 / 12.0));
             let projected = earned * next.passengers.max(next.freight) / now.passengers.max(now.freight).max(0.01);
             let coming: Vec<(i32, &str, &str)> = crate::events::coming(date, foresight, seed)
@@ -623,7 +638,10 @@ impl StarcityApp {
                 ui.label(money(value));
                 ui.end_row();
             });
-            ui.label(format!("Wellbeing {:.0} / 100 (Company → Charter and ledgers)", wellbeing));
+            ui.label(format!(
+                "Wellbeing {:.0} / 100 (Company → Charter and ledgers)",
+                wellbeing
+            ));
             if let Some((income, coming)) = &forecast {
                 ui.separator();
                 ui.label(egui::RichText::new(format!("Forecast ({foresight:.0} years ahead)")).strong());
@@ -805,7 +823,9 @@ impl StarcityApp {
         let reqs = self.company.contract_requirements(&self.link, &self.facts);
         let expanded = self.ui.assistant_expanded;
         let (mut toggle, mut hide, mut look) = (false, false, false);
-        let frame = egui::Frame::NONE.fill(win95::face()).inner_margin(egui::Margin::same(6));
+        let frame = egui::Frame::NONE
+            .fill(win95::face())
+            .inner_margin(egui::Margin::same(6));
         let response = egui::Area::new(egui::Id::new("assistant_panel"))
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(egui::pos2(area.left() + 12.0, area.bottom() - 12.0))

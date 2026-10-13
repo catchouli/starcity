@@ -163,19 +163,19 @@ impl Sim {
             let (x, z) = self.regrowing.swap_remove(i);
             self.is_regrowing[z as usize * self.size_x + x as usize] = false;
             let (x, z) = (x as i32, z as i32);
-            if let Some((y, block)) = world.top_block(x, z) {
-                if block.material == Material::Dirt {
-                    world.set(
-                        x as usize,
-                        y,
-                        z as usize,
-                        Block {
-                            material: Material::Grass,
-                            ..block
-                        },
-                    );
-                    changed.push((x, z));
-                }
+            if let Some((y, block)) = world.top_block(x, z)
+                && block.material == Material::Dirt
+            {
+                world.set(
+                    x as usize,
+                    y,
+                    z as usize,
+                    Block {
+                        material: Material::Grass,
+                        ..block
+                    },
+                );
+                changed.push((x, z));
             }
         }
     }

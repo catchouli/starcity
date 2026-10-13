@@ -134,7 +134,11 @@ mod tests {
 
     #[test]
     fn cars_stay_over_their_town_and_keep_flying() {
-        let areas = [Area { centre: Vec2::new(50.0, 50.0), radius: 10.0, cars: 5 }];
+        let areas = [Area {
+            centre: Vec2::new(50.0, 50.0),
+            radius: 10.0,
+            cars: 5,
+        }];
         let mut s = SkyCars::default();
         s.populate(&areas, |_| 2.0);
         assert_eq!(s.list.len(), 5);

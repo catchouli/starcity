@@ -35,7 +35,10 @@ pub struct ChunkMesh {
 
 /// Side faces: neighbour offset and the two top corners of that side, ordered
 /// so that [A bottom, B bottom, B top, A top] winds anticlockwise from outside.
-const SIDES: [((i32, i32), (u16, u16), (u16, u16)); 4] = [
+/// A side face: the neighbour it faces, and its two bottom corners.
+type Side = ((i32, i32), (u16, u16), (u16, u16));
+
+const SIDES: [Side; 4] = [
     ((-1, 0), (0, 0), (0, 1)),
     ((1, 0), (1, 1), (1, 0)),
     ((0, 1), (0, 1), (1, 1)),

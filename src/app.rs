@@ -140,7 +140,7 @@ pub struct StarcityApp {
     /// Bumped whenever track changes, so trains re-plan their routes.
     track_version: u64,
     /// The rail route last planned for the preview, so dragging doesn't search every frame.
-    route_cache: Option<(((i32, i32), (i32, i32)), u64, Plan)>,
+    route_cache: Option<RouteCache>,
     /// Bumped when anything the route planner looks at changes.
     plan_epoch: u64,
     selected_train: Option<u32>,
@@ -983,7 +983,10 @@ impl StarcityApp {
             }
         }
         let mut sea_terrain = Vec::new();
-        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck) {
+        if matches!(
+            tool,
+            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck
+        ) {
             if let (Some(t), true) = (self.hover_tile, response.clicked_by(primary)) {
                 let now = ctx.input(|i| i.time);
                 sea_terrain = self.sea_tool_click(tool, t, now);
@@ -1009,10 +1012,10 @@ impl StarcityApp {
             if let (Some(a), Some(b)) = (self.drag_start.take(), self.last_hover_tile) {
                 changes = self.apply_tool(a, b);
             }
-        } else if response.clicked_by(primary) {
-            if let Some(t) = self.hover_tile {
-                changes = self.apply_tool(t, t);
-            }
+        } else if response.clicked_by(primary)
+            && let Some(t) = self.hover_tile
+        {
+            changes = self.apply_tool(t, t);
         }
 
         changes.terrain.extend(sea_terrain);
@@ -1063,7 +1066,10 @@ impl StarcityApp {
         if !self.plan.is_empty() && self.plan.blocked.is_none() && self.drag_start.is_some() {
             let plan = self.plan.clone();
             let cost = self.plan_cost(&plan);
-            self.show_cost(self.company.build_price(cost), self.company.build_price(company::terraform_cost(&plan)));
+            self.show_cost(
+                self.company.build_price(cost),
+                self.company.build_price(company::terraform_cost(&plan)),
+            );
         } else if let Some(t) = self.hover_tile {
             match tool {
                 Tool::Train if self.rails.get(t.0, t.1) != 0 => self.show_cost(self.buy.price(), 0),
@@ -1088,8 +1094,12 @@ impl StarcityApp {
                 })
             }
             // While dragging a road or track, the preview shows where it goes.
-            Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway | Tool::SeaWall if self.drag_start.is_some() => None,
-            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck => self.sea_tool_hover(tool),
+            Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway | Tool::SeaWall if self.drag_start.is_some() => {
+                None
+            }
+            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck => {
+                self.sea_tool_hover(tool)
+            }
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -1127,18 +1137,19 @@ impl StarcityApp {
         if best.is_none() {
             self.selected_craft = self.pick_craft(view_proj, rect, pos);
         }
-        if best.is_none() && self.selected_craft.is_none() {
-            if let Some(t) = self.hover_tile {
-                self.selected_terminal = self.terminals.at(t);
-                self.selected_industry = self.industries.at(t);
-                if self.hq.is_some_and(|h| h.contains(t)) {
-                    self.ui.show_hq = true;
-                } else if self.selected_industry.is_some() {
-                } else if self.selected_terminal.is_none() {
-                    self.selected_station = self.stations.at(t);
-                    if self.selected_station.is_none() {
-                        self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
-                    }
+        if best.is_none()
+            && self.selected_craft.is_none()
+            && let Some(t) = self.hover_tile
+        {
+            self.selected_terminal = self.terminals.at(t);
+            self.selected_industry = self.industries.at(t);
+            if self.hq.is_some_and(|h| h.contains(t)) {
+                self.ui.show_hq = true;
+            } else if self.selected_industry.is_some() {
+            } else if self.selected_terminal.is_none() {
+                self.selected_station = self.stations.at(t);
+                if self.selected_station.is_none() {
+                    self.selected_town = self.towns.buildings.get(&t).map(|b| b.town);
                 }
             }
         }
@@ -1289,23 +1300,23 @@ impl StarcityApp {
         let Some(station) = self.stations.get(id) else { return };
         let (x, z) = station.centre();
         // Out in the country, a station is named after the industry it serves.
-        if let Some(&ind) = self.industries.near(&station.tiles).first() {
-            if self.towns.nearest((x as i32, z as i32), 12).is_none() {
-                let kind = self.industries.list[ind].kind.name();
-                let place = self
-                    .towns
-                    .nearest((x as i32, z as i32), 120)
-                    .map(|t| format!("{} ", self.towns.list[t as usize].name))
-                    .unwrap_or_default();
-                let base = format!("{place}{kind}");
-                let taken = |name: &str| self.stations.list.values().any(|s| s.id != id && s.name == name);
-                let name = [base.clone(), format!("{base} 2"), format!("{base} 3")]
-                    .into_iter()
-                    .find(|n| !taken(n))
-                    .unwrap_or(base);
-                self.stations.list.get_mut(&id).unwrap().name = name;
-                return;
-            }
+        if let Some(&ind) = self.industries.near(&station.tiles).first()
+            && self.towns.nearest((x as i32, z as i32), 12).is_none()
+        {
+            let kind = self.industries.list[ind].kind.name();
+            let place = self
+                .towns
+                .nearest((x as i32, z as i32), 120)
+                .map(|t| format!("{} ", self.towns.list[t as usize].name))
+                .unwrap_or_default();
+            let base = format!("{place}{kind}");
+            let taken = |name: &str| self.stations.list.values().any(|s| s.id != id && s.name == name);
+            let name = [base.clone(), format!("{base} 2"), format!("{base} 3")]
+                .into_iter()
+                .find(|n| !taken(n))
+                .unwrap_or(base);
+            self.stations.list.get_mut(&id).unwrap().name = name;
+            return;
         }
         let Some(town) = self.towns.nearest((x as i32, z as i32), 30) else {
             return;
@@ -1387,10 +1398,11 @@ impl StarcityApp {
             let (cargo, delivered, (x, z)) = (d.cargo, d.units, d.at);
             let tiles = st.tiles.clone();
             let left = self.deliver_to_industries(&tiles, cargo, delivered);
-            if left > 0 && industry_ui::is_for_towns(cargo) {
-                if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
-                    self.towns.list[town as usize].receive(cargo, left);
-                }
+            if left > 0
+                && industry_ui::is_for_towns(cargo)
+                && let Some(town) = self.towns.nearest((x as i32, z as i32), 30)
+            {
+                self.towns.list[town as usize].receive(cargo, left);
             }
             let income = self.pay_fare(cargo, delivered, d.boarded, (x, z));
             let t = self.trains.train(train);
@@ -1399,12 +1411,12 @@ impl StarcityApp {
                 loaded: t.load,
                 income,
             };
-            if cargo == Cargo::Passengers {
-                if let Some(town) = self.towns.nearest((x as i32, z as i32), 30) {
-                    let town = &mut self.towns.list[town as usize];
-                    town.served += delivered as f32;
-                    town.delivered += delivered;
-                }
+            if cargo == Cargo::Passengers
+                && let Some(town) = self.towns.nearest((x as i32, z as i32), 30)
+            {
+                let town = &mut self.towns.list[town as usize];
+                town.served += delivered as f32;
+                town.delivered += delivered;
             }
         }
     }
@@ -1444,10 +1456,16 @@ impl StarcityApp {
         if self.light_dirty && self.last_time - self.light_built > 2.0 {
             self.light_dirty = false;
             self.light_built = self.last_time;
-            let people = self.towns.buildings.iter().filter(|(_, b)| b.part_of.is_none()).map(|(&t, b)| (t, b.population()));
+            let people = self
+                .towns
+                .buildings
+                .iter()
+                .filter(|(_, b)| b.part_of.is_none())
+                .map(|(&t, b)| (t, b.population()));
             let map = crate::nightlight::build(self.world.size_x, self.world.size_z, people, &self.roads);
             let (w, h) = crate::nightlight::dims(self.world.size_x, self.world.size_z);
-            self.renderer.set_light_map(&rs.device, &rs.queue, w as u32, h as u32, &map);
+            self.renderer
+                .set_light_map(&rs.device, &rs.queue, w as u32, h as u32, &map);
             self.scene_dirty = true;
         }
         if std::mem::take(&mut self.static_changed) {
@@ -1854,7 +1872,10 @@ impl StarcityApp {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut town.name);
             });
-            ui.label(format!("{}: population {population} in {buildings} buildings", crate::towns::size_name(population)));
+            ui.label(format!(
+                "{}: population {population} in {buildings} buildings",
+                crate::towns::size_name(population)
+            ));
             ui.label(format!("Prosperity {:.1} (growth up to x5 from stations, service, food and goods, industry and compute nearby)", town.prosperity));
             ui.label(format!("{} passengers delivered by rail", town.delivered));
             if town.pop > crate::towns::WANTS_FOOD {
@@ -2077,7 +2098,12 @@ impl StarcityApp {
     /// Where a followed vehicle is now, if it still exists.
     fn followed_position(&self, f: Followed) -> Option<glam::Vec2> {
         match f {
-            Followed::Train(id) => self.trains.list.iter().find(|t| t.id == id).map(|t| t.point_behind(0.0)),
+            Followed::Train(id) => self
+                .trains
+                .list
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| t.point_behind(0.0)),
             Followed::Craft(craft::Craft::Boat(id)) => self.boats.get(id).map(|b| b.pos),
             Followed::Craft(craft::Craft::Plane(id)) => self.planes.get(id).map(|p| glam::Vec2::new(p.pos.x, p.pos.z)),
             Followed::Craft(craft::Craft::Bus(id)) => self.buses.get(id).map(|b| b.placement().0),
@@ -2140,7 +2166,9 @@ impl StarcityApp {
         let mut tab = self.debug_tab;
         let frame_tab = |ui: &mut egui::Ui, app: &Self| {
             let budget = 1000.0 / 60.0;
-            ui.label(format!("Budget for 60 fps: {budget:.1} ms. Bars: average, with the recent worst faint."));
+            ui.label(format!(
+                "Budget for 60 fps: {budget:.1} ms. Bars: average, with the recent worst faint."
+            ));
             egui::Grid::new("frame times").num_columns(3).show(ui, |ui| {
                 for (i, name) in FrameTimes::PARTS.iter().enumerate() {
                     let (avg, peak) = (app.times.avg[i], app.times.peak[i]);
@@ -2150,9 +2178,21 @@ impl StarcityApp {
                     let p = ui.painter();
                     let w = |ms: f32| rect.width() * (ms / budget).min(1.0);
                     p.rect_filled(rect, 0.0, egui::Color32::from_gray(0x50).gamma_multiply(0.3));
-                    let colour = if avg > budget * 0.5 { egui::Color32::from_rgb(0xd0, 0x50, 0x30) } else { egui::Color32::from_rgb(0x30, 0x90, 0x50) };
-                    p.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(w(peak), rect.height())), 0.0, colour.gamma_multiply(0.35));
-                    p.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(w(avg), rect.height())), 0.0, colour);
+                    let colour = if avg > budget * 0.5 {
+                        egui::Color32::from_rgb(0xd0, 0x50, 0x30)
+                    } else {
+                        egui::Color32::from_rgb(0x30, 0x90, 0x50)
+                    };
+                    p.rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(w(peak), rect.height())),
+                        0.0,
+                        colour.gamma_multiply(0.35),
+                    );
+                    p.rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(w(avg), rect.height())),
+                        0.0,
+                        colour,
+                    );
                     ui.end_row();
                 }
             });
@@ -2160,7 +2200,10 @@ impl StarcityApp {
             let (st, dy, draws) = app.renderer.instances();
             let s = app.renderer.stats;
             ui.label(format!("Models: {st} still, {dy} moving, {draws} draw calls"));
-            ui.label(format!("Terrain: {}/{} chunks, {}/{} quads", s.chunks_drawn, s.chunks_total, s.quads_drawn, s.quads_total));
+            ui.label(format!(
+                "Terrain: {}/{} chunks, {}/{} quads",
+                s.chunks_drawn, s.chunks_total, s.quads_drawn, s.quads_total
+            ));
             ui.label(format!(
                 "Moving things: {} trains, {} road vehicles, {} buses and trucks, {} boats, {} planes, {} flying cars, {} pods",
                 app.trains.list.len(),
@@ -2171,9 +2214,13 @@ impl StarcityApp {
                 app.skycars.list.len(),
                 app.express.pods.len()
             ));
-            ui.label(format!("Scene redrawn {} times (it only redraws when something changes)", app.scene_renders));
+            ui.label(format!(
+                "Scene redrawn {} times (it only redraws when something changes)",
+                app.scene_renders
+            ));
             ui.label(
-                egui::RichText::new("CPU time only: the GPU's share isn't measured, and in a browser it adds to this.").small(),
+                egui::RichText::new("CPU time only: the GPU's share isn't measured, and in a browser it adds to this.")
+                    .small(),
             );
         };
         ui::win95::window(ctx, "Debug", &mut open, egui::pos2(8.0, 90.0), |ui| {
@@ -2359,18 +2406,26 @@ impl StarcityApp {
     /// Menu bar, toolbar and status bar around the 3D view.
     fn game_ui(&mut self, ui: &mut egui::Ui, rs: &RenderState) {
         self.ui.year = self.year;
-        if self.ui.look_override.is_some_and(|l| l.from_year() > self.year) && std::env::var("STARCITY_LOOK").is_err() {
+        if self.ui.look_override.is_some_and(|l| l.first_year() > self.year) && std::env::var("STARCITY_LOOK").is_err()
+        {
             // The date went back past it: it isn't unlocked any more.
             self.ui.look_override = None;
         }
-        let want = self.ui.look_override.unwrap_or_else(|| win95::Look::for_year(self.year));
+        let want = self
+            .ui
+            .look_override
+            .unwrap_or_else(|| win95::Look::for_year(self.year));
         // Following the years, a new look's colours ease in over its first six months.
         let t = if self.ui.look_override.is_none() && want != win95::Look::Classic {
-            ((self.clock.year_f64() as f32 - want.from_year() as f32) / 0.5).clamp(0.0, 1.0)
+            ((self.clock.year_f64() as f32 - want.first_year() as f32) / 0.5).clamp(0.0, 1.0)
         } else {
             1.0
         };
-        let from = win95::Look::ALL[win95::Look::ALL.iter().position(|&l| l == want).unwrap_or(0).saturating_sub(1)];
+        let from = win95::Look::ALL[win95::Look::ALL
+            .iter()
+            .position(|&l| l == want)
+            .unwrap_or(0)
+            .saturating_sub(1)];
         if want != win95::look() || (t - win95::blend()).abs() > 0.02 || (t >= 1.0) != (win95::blend() >= 1.0) {
             win95::set_look(want);
             win95::set_blend(from, t);
@@ -2467,11 +2522,12 @@ impl StarcityApp {
             text.clone()
         } else if self.ui.speed == Speed::Paused {
             "Paused (Space to resume)".to_string()
-        } else if let Some(hint) = self
-            .site_hint
-            .as_ref()
-            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck))
-        {
+        } else if let Some(hint) = self.site_hint.as_ref().filter(|_| {
+            matches!(
+                self.ui.tool,
+                Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck
+            )
+        }) {
             hint.clone()
         } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {
             "Click plain track to place a train".to_string()
@@ -2583,7 +2639,9 @@ impl eframe::App for StarcityApp {
             craft_moved |= self.express.update(step);
             if !self.skycars.list.is_empty() {
                 let world = &self.world;
-                craft_moved |= self.skycars.update(step, &self.sky_areas, |p| world.height_at(p.x, p.y));
+                craft_moved |= self
+                    .skycars
+                    .update(step, &self.sky_areas, |p| world.height_at(p.x, p.y));
             }
             changed.extend(self.sim.advance(&mut self.world, step));
         }
@@ -2780,13 +2838,16 @@ impl FrameTimes {
     ];
 
     fn add(&mut self, ms: &[f32; 6]) {
-        for i in 0..6 {
-            self.avg[i] = self.avg[i] * 0.9 + ms[i] * 0.1;
+        for (i, &t) in ms.iter().enumerate() {
+            self.avg[i] = self.avg[i] * 0.9 + t * 0.1;
             // Peaks decay over a few seconds, so a spike shows for a moment.
-            self.peak[i] = (self.peak[i] * 0.995).max(ms[i]);
+            self.peak[i] = (self.peak[i] * 0.995).max(t);
         }
     }
 }
+
+/// The last rail route previewed: its two ends, the plan epoch it was found in, and the plan.
+type RouteCache = (((i32, i32), (i32, i32)), u64, Plan);
 
 /// Something the camera can follow.
 #[derive(Clone, Copy, Debug, PartialEq)]

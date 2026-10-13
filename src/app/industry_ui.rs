@@ -88,7 +88,10 @@ impl StarcityApp {
                     );
                     self.levelled_pending.extend(moved);
                     self.static_changed = true;
-                    self.show_message(&format!("A {} has shut. A new one opens elsewhere.", kind.name().to_lowercase()), now + 5.0);
+                    self.show_message(
+                        &format!("A {} has shut. A new one opens elsewhere.", kind.name().to_lowercase()),
+                        now + 5.0,
+                    );
                 }
             }
         }
@@ -96,7 +99,8 @@ impl StarcityApp {
 
     /// Each town's Prosperity (§5.10): the reasons it has to grow.
     fn prosperity_month(&mut self) {
-        let near = |a: (f32, f32), b: (i32, i32), r: f32| ((a.0 - b.0 as f32).powi(2) + (a.1 - b.1 as f32).powi(2)) <= r * r;
+        let near =
+            |a: (f32, f32), b: (i32, i32), r: f32| ((a.0 - b.0 as f32).powi(2) + (a.1 - b.1 as f32).powi(2)) <= r * r;
         for i in 0..self.towns.list.len() {
             let t = &self.towns.list[i];
             let centre = t.centre;
@@ -104,7 +108,11 @@ impl StarcityApp {
                 .stations
                 .list
                 .values()
-                .filter(|s| s.tiles.iter().any(|&(x, z)| (x - centre.0).abs() <= 14 && (z - centre.1).abs() <= 14))
+                .filter(|s| {
+                    s.tiles
+                        .iter()
+                        .any(|&(x, z)| (x - centre.0).abs() <= 14 && (z - centre.1).abs() <= 14)
+                })
                 .count() as u32;
             let mut kinds: Vec<crate::industry::Kind> = self
                 .industries
@@ -173,7 +181,10 @@ impl StarcityApp {
         }
         let cost = kind.fund_cost();
         if !self.company.can_afford(self.company.build_price(cost)) {
-            self.show_message(&format!("Not enough money: {} needed", super::company_ui::money(cost as i64)), now);
+            self.show_message(
+                &format!("Not enough money: {} needed", super::company_ui::money(cost as i64)),
+                now,
+            );
             return;
         }
         let before = self.industries.list.len();
@@ -196,7 +207,10 @@ impl StarcityApp {
         let (x, z) = self.industries.list[before].centre();
         self.camera.focus = glam::Vec3::new(x, self.world.height_at(x, z), z);
         self.scene_dirty = true;
-        self.show_message(&format!("The council has founded a {}", kind.name().to_lowercase()), now + 4.0);
+        self.show_message(
+            &format!("The council has founded a {}", kind.name().to_lowercase()),
+            now + 4.0,
+        );
     }
 
     /// The Fund an industry window: what can be founded this year, and for how much.
@@ -286,8 +300,13 @@ impl StarcityApp {
                 self.launch_rng ^= self.launch_rng << 17;
                 let roll = (self.launch_rng >> 11) as f32 / (1u64 << 53) as f32;
                 let l = crate::space::launch(date, roll, to);
-                let reach = if self.charter_active() { self.charter.launch_factor() } else { 1.0 };
-                self.company.earn(crate::company::Item::Launches, (l.revenue as f32 * reach) as u32);
+                let reach = if self.charter_active() {
+                    self.charter.launch_factor()
+                } else {
+                    1.0
+                };
+                self.company
+                    .earn(crate::company::Item::Launches, (l.revenue as f32 * reach) as u32);
                 self.company.charge(crate::company::Item::Running, l.cost);
                 self.space_launches += 1;
                 let (cx, cz) = self.industries.list[i].centre();
@@ -307,7 +326,11 @@ impl StarcityApp {
                         }
                     }
                     let net = l.revenue as i64 - l.cost as i64;
-                    let back = if back.is_empty() { String::new() } else { format!(", back came {}", back.join(" and ")) };
+                    let back = if back.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", back came {}", back.join(" and "))
+                    };
                     messages.push(format!(
                         "Launch to {}{back}: {} earned, {} to run: net {}",
                         to.name(),
@@ -342,14 +365,22 @@ impl StarcityApp {
                 batches += ind.made_last_month as f64 * scale;
             }
         }
-        self.company
-            .earn(crate::company::Item::Hosting, crate::compute::hosting_income(batches * self.compute_alloc.hosting() as f64, self.year));
+        self.company.earn(
+            crate::company::Item::Hosting,
+            crate::compute::hosting_income(batches * self.compute_alloc.hosting() as f64, self.year),
+        );
         let tier_reached = self.compute.month(cu, crate::company::MONTH_SECONDS as f64);
         self.refresh_effects();
         if let Some(tier) = tier_reached {
             let name = crate::compute::TIERS[tier - 1].0;
             let now = self.clock.days();
-            self.show_message(&format!("Compute milestone: {name} ({})", crate::compute::show(self.compute.total)), now);
+            self.show_message(
+                &format!(
+                    "Compute milestone: {name} ({})",
+                    crate::compute::show(self.compute.total)
+                ),
+                now,
+            );
         }
     }
 
@@ -384,30 +415,24 @@ impl StarcityApp {
             .map(|t| self.towns.list[t as usize].name.clone());
         let date = self.clock.year_f64() as f32;
         let mut open = true;
-        win95::window(
-            ctx,
-            &ind.kind.name().to_string(),
-            &mut open,
-            egui::pos2(420.0, 110.0),
-            |ui| {
-                ui.set_width(260.0);
-                if let Some(town) = &town {
-                    ui.label(format!("Near {town}"));
-                }
-                describe(ui, &ind, date);
-                ui.separator();
-                if serving.is_empty() {
-                    ui.label(
-                        egui::RichText::new(
-                            "No station serves it yet: build one within three tiles to collect or deliver cargo.",
-                        )
-                        .color(win95::warn()),
-                    );
-                } else {
-                    ui.label(format!("Served by {}", serving.join(", ")));
-                }
-            },
-        );
+        win95::window(ctx, ind.kind.name(), &mut open, egui::pos2(420.0, 110.0), |ui| {
+            ui.set_width(260.0);
+            if let Some(town) = &town {
+                ui.label(format!("Near {town}"));
+            }
+            describe(ui, &ind, date);
+            ui.separator();
+            if serving.is_empty() {
+                ui.label(
+                    egui::RichText::new(
+                        "No station serves it yet: build one within three tiles to collect or deliver cargo.",
+                    )
+                    .color(win95::warn()),
+                );
+            } else {
+                ui.label(format!("Served by {}", serving.join(", ")));
+            }
+        });
         if !open {
             self.selected_industry = None;
         }
@@ -457,7 +482,10 @@ pub(super) fn room_for(
 
 /// What towns buy.
 pub(super) fn is_for_towns(cargo: Cargo) -> bool {
-    matches!(cargo, Cargo::Food | Cargo::Goods | Cargo::Fuel | Cargo::NanoGoods | Cargo::LunarGlass)
+    matches!(
+        cargo,
+        Cargo::Food | Cargo::Goods | Cargo::Fuel | Cargo::NanoGoods | Cargo::LunarGlass
+    )
 }
 
 fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
@@ -468,10 +496,19 @@ fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
             win95::check_row(
                 ui,
                 ind.stock[cargo.index()] >= need,
-                &format!("{}: {} / {need} {}", cargo.name(), ind.stock[cargo.index()].min(need), cargo.unit()),
+                &format!(
+                    "{}: {} / {need} {}",
+                    cargo.name(),
+                    ind.stock[cargo.index()].min(need),
+                    cargo.unit()
+                ),
             );
         }
-        win95::check_row(ui, ind.power >= 0.9, &format!("Power: {:.0}% of {} MW", ind.power * 100.0, kind.power_mw()));
+        win95::check_row(
+            ui,
+            ind.power >= 0.9,
+            &format!("Power: {:.0}% of {} MW", ind.power * 100.0, kind.power_mw()),
+        );
         ui.label(format!(
             "Compute needed: {} made in all",
             crate::compute::show(super::charter_ui::CONVERGENCE_COMPUTE)
@@ -495,8 +532,11 @@ fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
         if ind.pad_closed > 0 {
             ui.label(egui::RichText::new("The pad is shut after a failed launch.").color(win95::warn()));
         }
-    } else     if kind.compute_scale() > 0.0 {
-        ui.label(format!("Turns {} into compute: the score. It also sells spare compute as hosting.", inputs_text(ind)));
+    } else if kind.compute_scale() > 0.0 {
+        ui.label(format!(
+            "Turns {} into compute: the score. It also sells spare compute as hosting.",
+            inputs_text(ind)
+        ));
         ui.label(format!(
             "Last month: {} batches, {}",
             ind.made_last_month,

@@ -107,9 +107,13 @@ impl Cargo {
     pub fn class(self) -> Class {
         match self {
             Cargo::Passengers | Cargo::Mail => Class::People,
-            Cargo::Coal | Cargo::IronOre | Cargo::Grain | Cargo::Oil | Cargo::Fuel | Cargo::Silicon | Cargo::Regolith => {
-                Class::Bulk
-            }
+            Cargo::Coal
+            | Cargo::IronOre
+            | Cargo::Grain
+            | Cargo::Oil
+            | Cargo::Fuel
+            | Cargo::Silicon
+            | Cargo::Regolith => Class::Bulk,
             Cargo::Food => Class::Fresh,
             _ => Class::General,
         }

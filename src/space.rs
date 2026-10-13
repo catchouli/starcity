@@ -61,7 +61,7 @@ impl Destination {
         }
     }
 
-    pub fn from_year(self) -> f32 {
+    pub fn first_year(self) -> f32 {
         match self {
             Destination::Orbit => 2027.0,
             Destination::Moon => 2031.0,
@@ -100,7 +100,11 @@ impl Destination {
 
     /// The farthest one open in `year` (what a spaceport flies to).
     pub fn for_year(year: f32) -> Destination {
-        *Destination::ALL.iter().rev().find(|d| year >= d.from_year()).unwrap_or(&Destination::Orbit)
+        *Destination::ALL
+            .iter()
+            .rev()
+            .find(|d| year >= d.first_year())
+            .unwrap_or(&Destination::Orbit)
     }
 }
 

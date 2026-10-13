@@ -16,7 +16,11 @@ pub fn efficiency(year: f64) -> f64 {
 /// Compute designing better compute (§5.9): nothing until the Models era, then ten times more every
 /// four years. The super-exponential term, kept out of the way until the AI boom has happened.
 pub fn self_improvement(year: f64) -> f64 {
-    if year < 2028.0 { 1.0 } else { 10f64.powf((year - 2028.0) / 4.0) }
+    if year < 2028.0 {
+        1.0
+    } else {
+        10f64.powf((year - 2028.0) / 4.0)
+    }
 }
 
 /// CU a month from `batches` of work at a site of this scale in `year`.
@@ -130,7 +134,9 @@ impl Program {
     pub fn blurb(self) -> &'static str {
         match self {
             Program::Analytics => "Better timetables and loading: every fare pays more.",
-            Program::Forecast => "Sees what the coming years will bring (Finances window): the headlines before they happen.",
+            Program::Forecast => {
+                "Sees what the coming years will bring (Finances window): the headlines before they happen."
+            }
             Program::Optimiser => "Smoother running and fewer queues: lower running costs.",
             Program::Design => "Plans cheaper cuts and routes: lower construction costs.",
             Program::Research => "Brings new machines and industries forward: the Tech Pace, in years.",
@@ -138,7 +144,7 @@ impl Program {
         }
     }
 
-    pub fn from_year(self) -> i32 {
+    pub fn first_year(self) -> i32 {
         match self {
             Program::Analytics => 2003,
             Program::Forecast => 2008,
@@ -160,7 +166,7 @@ impl Program {
             Program::Research => (0.5, 4.0, 20.0),
             Program::Agents => (1.0, 8.0, 17.0),
         };
-        let t = ((year - self.from_year()) as f32 / span).clamp(0.0, 1.0);
+        let t = ((year - self.first_year()) as f32 / span).clamp(0.0, 1.0);
         lo + (hi - lo) * t
     }
 
@@ -180,7 +186,7 @@ impl Program {
     /// How much of its strongest effect `assigned` CU a month buys: diminishing returns, so a
     /// whole month's compute on one program gives about 60% more than a third of it.
     pub fn effect(self, year: i32, assigned: f64, fleet: u32) -> f32 {
-        if year < self.from_year() {
+        if year < self.first_year() {
             return 0.0;
         }
         let used = (assigned / self.need(year, fleet)).max(0.0);

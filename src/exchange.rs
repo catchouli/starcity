@@ -285,7 +285,11 @@ mod tests {
         station.service[Cargo::Coal.index()].rating = 0.75;
         let stop = terminals.list.get_mut(&id).unwrap();
         stop.service[Cargo::Coal.index()].rating = 0.25;
-        let got = collect(&mut [&mut station as &mut dyn Holder, stop as &mut dyn Holder], Cargo::Coal, 100);
+        let got = collect(
+            &mut [&mut station as &mut dyn Holder, stop as &mut dyn Holder],
+            Cargo::Coal,
+            100,
+        );
         assert_eq!(got, 100, "the best rating (75%) takes it all");
         let stop = &terminals.list[&id];
         assert_eq!(station.stock.get(Cargo::Coal), 75);

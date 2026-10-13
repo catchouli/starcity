@@ -176,9 +176,10 @@ mod tests {
         let flood0 = Flood::new(world.sea_level);
         let risk = flood0.at_risk(&world, &walls);
         // Wall in one at-risk tile with a ring around it (on dry land only).
-        let &(x, z) = risk.iter().find(|&&(x, z)| {
-            (-2..=2).all(|dz| (-2..=2).all(|dx| !world.underwater(x + dx, z + dz)))
-        }).expect("an inland at-risk tile");
+        let &(x, z) = risk
+            .iter()
+            .find(|&&(x, z)| (-2..=2).all(|dz| (-2..=2).all(|dx| !world.underwater(x + dx, z + dz))))
+            .expect("an inland at-risk tile");
         for dz in -2i32..=2 {
             for dx in -2i32..=2 {
                 if dx.abs() == 2 || dz.abs() == 2 {

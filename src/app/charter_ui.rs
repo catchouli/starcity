@@ -88,8 +88,16 @@ impl StarcityApp {
             .sum();
         charter::People {
             served: if total == 0 { 0.0 } else { served as f32 / total as f32 },
-            supplied: if wanting.is_empty() { 1.0 } else { supplied as f32 / wanting.len() as f32 },
-            power: if consumers.is_empty() { 1.0 } else { consumers.iter().sum::<f32>() / consumers.len() as f32 },
+            supplied: if wanting.is_empty() {
+                1.0
+            } else {
+                supplied as f32 / wanting.len() as f32
+            },
+            power: if consumers.is_empty() {
+                1.0
+            } else {
+                consumers.iter().sum::<f32>() / consumers.len() as f32
+            },
             clean: 1.0 / (1.0 + coal as f32 / 200.0),
         }
     }
@@ -108,7 +116,9 @@ impl StarcityApp {
             ui.set_width(360.0);
             ui.label(egui::RichText::new("The two ledgers").strong());
             ui.label(format!("Money: company value {}", super::company_ui::money(value)));
-            ui.label(format!("Wellbeing: {wellbeing:.0} / 100 (towns served, shops stocked, power, clean air)"));
+            ui.label(format!(
+                "Wellbeing: {wellbeing:.0} / 100 (towns served, shops stocked, power, clean air)"
+            ));
             ui.separator();
             if !active {
                 ui.label(
@@ -124,7 +134,10 @@ impl StarcityApp {
                     let mut pct = c.weights[i] * 100.0;
                     ui.horizontal(|ui| {
                         ui.add_sized([56.0, 18.0], egui::Label::new(egui::RichText::new(*name).strong()));
-                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%").integer()).changed() {
+                        if ui
+                            .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%").integer())
+                            .changed()
+                        {
                             c.set(i, pct / 100.0);
                         }
                     });

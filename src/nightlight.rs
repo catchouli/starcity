@@ -42,7 +42,10 @@ pub fn build(size_x: usize, size_z: usize, people: impl Iterator<Item = ((i32, i
         light = blur(&light, w, h, 2);
     }
     // Soft limit, so city centres saturate instead of burning white.
-    light.iter().map(|&v| ((1.0 - (-v * 1.6).exp()) * 255.0) as u8).collect()
+    light
+        .iter()
+        .map(|&v| ((1.0 - (-v * 1.6).exp()) * 255.0) as u8)
+        .collect()
 }
 
 fn blur(src: &[f32], w: usize, h: usize, r: i32) -> Vec<f32> {

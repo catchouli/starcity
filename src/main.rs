@@ -8,8 +8,8 @@ mod catalog;
 mod charter;
 mod clock;
 mod clouds;
-mod compute;
 mod company;
+mod compute;
 mod daylight;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;

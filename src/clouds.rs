@@ -102,7 +102,7 @@ pub fn generate(size: usize, seed: u32) -> World {
             for y in bottom..full_to {
                 world.set(x as usize, y as usize, z as usize, Block::full(material));
             }
-            if mask != 0 && mask != 0b1111 && t - 1 >= bottom {
+            if mask != 0 && mask != 0b1111 && t > bottom {
                 world.set(
                     x as usize,
                     (t - 1) as usize,

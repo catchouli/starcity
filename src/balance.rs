@@ -83,7 +83,8 @@ mod tests {
 
             // Build lines while the money allows.
             while let Some(&(d, a, b)) = pairs.first() {
-                let cost = (d * 1.4) as u32 * company::RAIL_PIECE + LINE_STATION_TILES * company::STATION_TILE + LINE_TRAIN;
+                let cost =
+                    (d * 1.4) as u32 * company::RAIL_PIECE + LINE_STATION_TILES * company::STATION_TILE + LINE_TRAIN;
                 if c.cash < cost as i64 + 5_000 || assets.trains >= c.vehicle_limit() {
                     break;
                 }
@@ -113,7 +114,13 @@ mod tests {
                 rail_pieces: assets.rail_pieces,
                 stations: assets.station_tiles / 4,
                 trains: assets.trains,
-                town_served: served.iter().zip(&pop).filter(|(s, _)| **s).map(|(_, p)| *p as u32).max().unwrap_or(0),
+                town_served: served
+                    .iter()
+                    .zip(&pop)
+                    .filter(|(s, _)| **s)
+                    .map(|(_, p)| *p as u32)
+                    .max()
+                    .unwrap_or(0),
                 vehicles: assets.trains,
                 compute_sites: farm as u32 + dc as u32 + campuses,
                 compute_total: comp.total,
@@ -130,7 +137,14 @@ mod tests {
                 dc = true;
             }
             if year >= 2020 && c.hq_level >= 2 && (campuses == 0 && c.cash > 100_000 || c.cash > 1_000_000) {
-                c.spend(Item::Construction, if campuses == 0 { FREIGHT_LINE * 2 } else { 250_000 + FREIGHT_LINE });
+                c.spend(
+                    Item::Construction,
+                    if campuses == 0 {
+                        FREIGHT_LINE * 2
+                    } else {
+                        250_000 + FREIGHT_LINE
+                    },
+                );
                 campuses += 1;
             }
             let ymid = year as f64 + 0.5;
@@ -181,7 +195,11 @@ mod tests {
 
             // Towns grow, faster where served and connected.
             for (i, p) in pop.iter_mut().enumerate() {
-                let prosperity = if served[i] { 2.0 + if year >= 2035 { 0.8 } else { 0.0 } } else { 1.0 };
+                let prosperity = if served[i] {
+                    2.0 + if year >= 2035 { 0.8 } else { 0.0 }
+                } else {
+                    1.0
+                };
                 *p *= 1.0 + 0.05 * prosperity / 12.0 * world_mods.growth;
             }
 

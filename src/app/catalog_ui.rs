@@ -34,7 +34,10 @@ impl StarcityApp {
                     egui::ComboBox::from_id_salt("truck cargo")
                         .selected_text(cargo.name())
                         .show_ui(ui, |ui| {
-                            for c in crate::cargo::Cargo::ALL.into_iter().filter(|c| *c != crate::cargo::Cargo::Passengers) {
+                            for c in crate::cargo::Cargo::ALL
+                                .into_iter()
+                                .filter(|c| *c != crate::cargo::Cargo::Passengers)
+                            {
                                 ui.selectable_value(&mut cargo, c, c.name());
                             }
                         });
@@ -62,7 +65,8 @@ impl StarcityApp {
                 }
             }
             ui.label(
-                egui::RichText::new("Then click water (boats), an airport (planes) or a bus stop (buses) to place it.").small(),
+                egui::RichText::new("Then click water (boats), an airport (planes) or a bus stop (buses) to place it.")
+                    .small(),
             );
         });
         self.truck_cargo = cargo;

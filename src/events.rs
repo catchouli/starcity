@@ -244,7 +244,7 @@ pub fn storm(date: f32, seed: u32) -> bool {
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B_3C6D);
     h ^= h >> 13;
-    h % 20 == 0
+    h.is_multiple_of(20)
 }
 
 /// The events whose effects are in force at `date`, for the Finances window.
@@ -296,7 +296,9 @@ mod tests {
     #[test]
     fn nothing_is_in_force_before_the_first_event_and_the_crisis_bites_then_passes() {
         assert_eq!(active(2000.5, 1), Mods::default());
-        let crisis = (0..EVENTS.len()).find(|&i| EVENTS[i].title == "Financial crisis").unwrap();
+        let crisis = (0..EVENTS.len())
+            .find(|&i| EVENTS[i].title == "Financial crisis")
+            .unwrap();
         let s = start(crisis, 5);
         let during = active(s + 0.5, 5);
         assert!(during.passengers < 0.9 && during.interest > 1.2);
@@ -318,7 +320,10 @@ mod tests {
         }
         let fuel = EVENTS.iter().position(|e| e.title == "Fuel price spike").unwrap();
         let years: std::collections::BTreeSet<i32> = (0..40).map(|s| start(fuel, s) as i32).collect();
-        assert!(years.len() >= 2 && years.iter().all(|y| (2004..=2006).contains(y)), "{years:?}");
+        assert!(
+            years.len() >= 2 && years.iter().all(|y| (2004..=2006).contains(y)),
+            "{years:?}"
+        );
     }
 
     #[test]

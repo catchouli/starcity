@@ -61,6 +61,7 @@ impl Stations {
     /// Plans platforms dragged from `a` to `b` along whichever axis the drag
     /// is mostly along. Platforms need flat ground, nothing but matching
     /// straight track, and no signals.
+    #[allow(clippy::too_many_arguments)]
     pub fn plan(
         &self,
         world: &World,

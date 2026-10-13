@@ -69,7 +69,10 @@ impl Expressway {
             }
             top + CLEARANCE
         };
-        let mut h: Vec<f32> = tiles.iter().map(|&t| self.height.get(&t).copied().unwrap_or_else(|| clear(t))).collect();
+        let mut h: Vec<f32> = tiles
+            .iter()
+            .map(|&t| self.height.get(&t).copied().unwrap_or_else(|| clear(t)))
+            .collect();
         for i in 1..h.len() {
             h[i] = h[i].max(h[i - 1] - GRADE);
         }
@@ -96,18 +99,24 @@ impl Expressway {
         }
         if gone {
             let layer = &self.layer;
-            self.pods.retain(|p| layer.get(p.seg.tile.0, p.seg.tile.1) & p.seg.piece != 0);
+            self.pods
+                .retain(|p| layer.get(p.seg.tile.0, p.seg.tile.1) & p.seg.piece != 0);
         }
         gone
     }
 
     pub fn pieces(&self) -> usize {
-        self.height.keys().map(|&(x, z)| self.layer.get(x, z).count_ones() as usize).sum()
+        self.height
+            .keys()
+            .map(|&(x, z)| self.layer.get(x, z).count_ones() as usize)
+            .sum()
     }
 
     /// Whether the deck comes within `r` tiles (square) of a point.
     pub fn near(&self, at: (i32, i32), r: i32) -> bool {
-        self.height.keys().any(|&(x, z)| (x - at.0).abs() <= r && (z - at.1).abs() <= r)
+        self.height
+            .keys()
+            .any(|&(x, z)| (x - at.0).abs() <= r && (z - at.1).abs() <= r)
     }
 
     /// Where a pod is drawn, and which way it faces.
@@ -143,7 +152,11 @@ impl Expressway {
                     let piece = pieces[self.roll(pieces.len())];
                     let forward = self.roll(2) == 0;
                     self.pods.push(Pod {
-                        seg: RoadSeg { tile: t, piece, forward },
+                        seg: RoadSeg {
+                            tile: t,
+                            piece,
+                            forward,
+                        },
                         pos: 0.0,
                     });
                 }
@@ -187,7 +200,10 @@ mod tests {
         assert_eq!(built.len(), 61);
         for x in 100..=160 {
             let deck = ex.height[&(x, 200)];
-            assert!(deck >= world.height_at(x as f32 + 0.5, 200.5) + 1.9, "clear of the ground at {x}");
+            assert!(
+                deck >= world.height_at(x as f32 + 0.5, 200.5) + 1.9,
+                "clear of the ground at {x}"
+            );
             if x > 100 {
                 assert!((deck - ex.height[&(x - 1, 200)]).abs() <= 0.36, "a gentle grade at {x}");
             }
@@ -197,7 +213,10 @@ mod tests {
         }
         assert!(ex.pods.len() >= 10);
         for p in &ex.pods {
-            assert!(ex.layer.get(p.seg.tile.0, p.seg.tile.1) & p.seg.piece != 0, "pods stay on the deck");
+            assert!(
+                ex.layer.get(p.seg.tile.0, p.seg.tile.1) & p.seg.piece != 0,
+                "pods stay on the deck"
+            );
         }
         assert!(ex.near((130, 205), 6) && !ex.near((130, 230), 6));
         assert!(ex.clear((90, 190), (170, 210)));
