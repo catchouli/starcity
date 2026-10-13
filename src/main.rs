@@ -1,4 +1,5 @@
 mod app;
+mod balance;
 mod boats;
 mod buses;
 mod camera;

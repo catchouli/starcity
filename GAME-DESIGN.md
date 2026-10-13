@@ -903,6 +903,27 @@ struct Program { kind: ProgramKind, share: f32 }       // a slider; effect = f(s
 struct Level { world, roads, rails, towns, vehicles, industries, power, .. }  // phase 11
 ```
 
+### Balance report
+
+`cargo test balance -- --nocapture` (`src/balance.rs`) plays the fifty years headless with a model player: it joins the nearest town pairs by rail with the fares measured on a real line, upgrades the headquarters the moment it can, feeds a server farm, a data centre and AI campuses, runs a spaceport from 2030 and builds the Convergence Array when it can. Towns it serves grow 10% a year. Results on the default map (2026-10-13, after making hosting saturate and lowering the middle HQ levels' town sizes):
+
+```
+2000  cash         £3,221  value        £38,171  lines   3  biggest served      528  HQ 1  compute        0 CU  tier 0
+2005  cash       £167,259  value       £391,834  lines  18  biggest served      851  HQ 1  compute        0 CU  tier 0
+2010  cash     £1,796,409  value     £2,020,984  lines  18  biggest served     1380  HQ 2  compute    2.56 MCU  tier 2
+2015  cash     £4,733,254  value     £4,957,829  lines  18  biggest served     2271  HQ 3  compute    15.3 MCU  tier 2
+2020  cash     £9,110,180  value     £9,334,755  lines  18  biggest served     3737  HQ 4  compute    72.2 MCU  tier 2
+2025  cash     £3,755,808  value     £3,980,383  lines  18  biggest served     6148  HQ 4  compute    26.2 GCU  tier 3
+2030  cash     £6,858,683  value     £7,083,258  lines  18  biggest served    10116  HQ 5  compute     488 GCU  tier 3
+2035  cash     £8,225,228  value     £8,449,803  lines  18  biggest served    16644  HQ 5  compute    46.9 TCU  tier 4
+2040  cash    £31,346,546  value    £31,571,121  lines  18  biggest served    33383  HQ 6  compute    4.53 PCU  tier 5
+2045  cash    £91,761,041  value    £91,985,616  lines  18  biggest served    66953  HQ 6  compute     407 PCU  tier 5
+2050  cash   £156,025,414  value   £156,249,989  lines  18  biggest served   134282  HQ 6  compute    35.0 ECU  tier 6
+2050  cash   £168,870,169  value   £169,094,744  lines  18  biggest served   152556  HQ 6  compute    76.0 ECU  tier 6
+```
+
+Headquarters: Depot office 2000, Regional office 2006.7, Corporate tower 2013.8, Data campus HQ 2017.8, Glass spire 2026.5, AI Citadel 2036.9. Compute: Index 2006.8, Forecast 2008.3, Assist 2021.2, Agent 2030.9, Manager 2038.3, Architect 2046.1. Convergence 2048.0. The model is crude (it stops at the 18 nearest pairs, sells all compute as hosting and never uses the programs), so this is a sanity check for pacing, not a forecast of a real game.
+
 ### Web performance budget
 
 The web build is a hard constraint (ENGINE.md §9.1), so the economy is designed around it:

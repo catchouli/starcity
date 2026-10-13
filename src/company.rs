@@ -231,7 +231,7 @@ pub const LEVELS: [Level; 7] = [
         cost: 150_000,
         income: 150_000,
         value: 1_000_000,
-        town: 5_000,
+        town: 2_000,
         loan: 1_000_000,
         vehicles: 400,
         unlocks: "A loan of up to £1,000,000, up to 400 vehicles and yearly goals",
@@ -244,7 +244,7 @@ pub const LEVELS: [Level; 7] = [
         cost: 400_000,
         income: 500_000,
         value: 2_000_000,
-        town: 5_000,
+        town: 3_000,
         loan: 2_000_000,
         vehicles: 600,
         unlocks: "A loan of up to £2,000,000 and up to 600 vehicles; the Compute meter is the headline now",
@@ -257,7 +257,7 @@ pub const LEVELS: [Level; 7] = [
         cost: 1_000_000,
         income: 1_500_000,
         value: 5_000_000,
-        town: 8_000,
+        town: 5_000,
         loan: 5_000_000,
         vehicles: 900,
         unlocks: "A loan of up to £5,000,000 and up to 900 vehicles",
@@ -270,7 +270,7 @@ pub const LEVELS: [Level; 7] = [
         cost: 3_000_000,
         income: 5_000_000,
         value: 15_000_000,
-        town: 15_000,
+        town: 10_000,
         loan: 20_000_000,
         vehicles: 2_000,
         unlocks: "The company runs itself: a loan of up to £20,000,000, up to 2,000 vehicles, and the charter whatever the year",
@@ -1320,7 +1320,7 @@ mod tests {
         let mut c = Company::new(2010);
         c.hq_level = 2;
         let reqs = c.requirements(&Assets::default(), &Facts::default());
-        assert!(reqs.len() >= 4 && reqs.iter().any(|r| r.text.contains("5000")));
+        assert!(reqs.len() >= 4 && reqs.iter().any(|r| r.text.contains("2000")));
         assert_eq!(level(3).vehicles, 400);
         c.hq_level = 3;
         let next = c.requirements(&Assets::default(), &Facts::default());

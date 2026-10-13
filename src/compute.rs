@@ -2,6 +2,9 @@
 //! compute-units (CU); the company's running total is the number on the toolbar, and its
 //! units change name as it grows. Pure arithmetic, tested without a window.
 
+/// Compute the company must have made before the Convergence Array can wake (the Manager milestone).
+pub const CONVERGENCE: f64 = 1e15;
+
 /// CU one batch of work makes at the year-2000 chip efficiency.
 pub const BATCH_CU: f64 = 25.0;
 
@@ -31,6 +34,14 @@ pub fn hosting_per_batch(year: i32) -> u32 {
         _ => 1.8,
     };
     (base * boom).round() as u32
+}
+
+/// What a month's hosting earns for `units` of work (batches times site scale): the market for
+/// spare compute is only so big, so the more you sell the less each unit fetches. A server farm
+/// sells nearly everything at the going rate; a fleet of AI campuses tops out at about 1,000 units'
+/// worth.
+pub fn hosting_income(units: f64, year: i32) -> u32 {
+    (hosting_per_batch(year) as f64 * units / (1.0 + units / 1_000.0)) as u32
 }
 
 /// Unit names, three orders of magnitude apart. The last three are the game's own.
@@ -285,6 +296,15 @@ mod tests {
         assert!((efficiency(2000.0) - 1.0).abs() < 1e-9);
         assert!((efficiency(2002.5) - 2.0).abs() < 1e-9);
         assert!(efficiency(2026.0) > 1000.0);
+    }
+
+    #[test]
+    fn hosting_saturates_so_it_never_dominates() {
+        let one = hosting_income(800.0, 2026) as f64;
+        let four = hosting_income(3_200.0, 2026) as f64;
+        assert!(four < 2.0 * one, "four campuses earn less than twice one");
+        assert!(hosting_income(1e9, 2026) as f64 <= hosting_per_batch(2026) as f64 * 1_000.0);
+        assert!(hosting_income(40.0, 2000) > 1_500);
     }
 
     #[test]

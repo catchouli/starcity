@@ -7,7 +7,7 @@ use crate::ui::win95;
 use eframe::egui;
 
 /// Compute the company must have made before the Convergence Array can wake (the Manager milestone).
-pub const CONVERGENCE_COMPUTE: f64 = 1e15;
+pub const CONVERGENCE_COMPUTE: f64 = crate::compute::CONVERGENCE;
 
 /// The year the charter opens: when agents arrive (§5.8).
 pub const CHARTER_FROM: i32 = 2028;

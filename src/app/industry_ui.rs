@@ -357,7 +357,7 @@ impl StarcityApp {
             }
         }
         self.company
-            .earn(crate::company::Item::Hosting, (batches * self.compute_alloc.hosting() as f64 * crate::compute::hosting_per_batch(self.year) as f64) as u32);
+            .earn(crate::company::Item::Hosting, crate::compute::hosting_income(batches * self.compute_alloc.hosting() as f64, self.year));
         let tier_reached = self.compute.month(cu, crate::company::MONTH_SECONDS as f64);
         self.refresh_effects();
         if let Some(tier) = tier_reached {
