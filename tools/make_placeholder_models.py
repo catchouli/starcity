@@ -763,6 +763,19 @@ industry("ai_campus", "ai_campus", 5, [pad(5, CONCRETE),
     box("StripA", mat("AiStrip", "#9a7cff", emissive=0.9), (-0.9, 0.7, -0.13), (2.2, 0.1, 0.03)), box("StripB", mat("AiStrip", "#9a7cff", emissive=0.9), (0.0, 0.7, 1.66), (3.6, 0.1, 0.03)),
     box("Cool1", STEEL, (1.4, 1.0, -1.0), (0.9, 0.5, 0.9)), box("Cool2", STEEL, (1.4, 1.0, 0.0), (0.9, 0.5, 0.9)), box("Sub", DARK_CONCRETE, (-1.8, 0.3, 1.2), (0.6, 0.6, 0.8))])
 
+industry("oil_well", "oil_well", 3, [pad(3, SOIL),
+    box("Base", DARK_CONCRETE, (-0.2, 0.1, 0.0), (1.0, 0.2, 1.0)), box("Beam", BLACK, (0.0, 0.85, 0.0), (1.5, 0.12, 0.14)), box("Post", STEEL, (-0.2, 0.5, 0.0), (0.12, 0.8, 0.5)),
+    cyl("Head", STEEL, (0.65, 0.65, 0.0), 0.16, 0.3, axis="z", seg=10), box("Tank", PLATE, (0.8, 0.25, -0.9), (0.7, 0.5, 0.5)), box("Pipe", BLACK, (0.3, 0.1, -0.5), (1.2, 0.08, 0.08))])
+industry("refinery", "refinery", 4, [pad(4, DARK_CONCRETE),
+    cyl("Tank1", STEEL, (-1.0, 0.45, -0.9), 0.5, 0.9, seg=16), cyl("Tank2", STEEL, (0.2, 0.45, -0.9), 0.5, 0.9, seg=16), cyl("Tank3", WHITE, (1.2, 0.4, -0.9), 0.4, 0.8, seg=16),
+    box("Column", PLATE, (-0.4, 1.0, 0.8), (0.4, 2.0, 0.4)), box("Column2", PLATE, (0.5, 0.8, 0.8), (0.35, 1.6, 0.35)), cyl("Flare", STEEL, (1.4, 1.2, 1.2), 0.05, 2.4, seg=6),
+    box("Flame", mat("Flame", "#ff9a2a", emissive=0.9), (1.4, 2.45, 1.2), (0.12, 0.25, 0.12)), box("Pipes", BLACK, (0.0, 0.2, 0.2), (2.8, 0.08, 0.1))])
+industry("spaceport", "spaceport", 5, [pad(5, CONCRETE),
+    cyl("Pad", DARK_CONCRETE, (0.0, 0.05, 0.0), 1.3, 0.1, seg=24), cyl("Rocket", WHITE, (0.0, 1.3, 0.0), 0.28, 2.6, seg=14, rtop=0.2), cyl("Nose", mat("Nose", "#c9d0da", metallic=0.6), (0.0, 2.75, 0.0), 0.2, 0.4, seg=14, rtop=0.02),
+    box("Fin1", mat("Fin", "#2a3a5a"), (0.3, 0.25, 0.0), (0.2, 0.5, 0.05)), box("Fin2", mat("Fin", "#2a3a5a"), (-0.3, 0.25, 0.0), (0.2, 0.5, 0.05)),
+    box("Gantry", STEEL, (-0.9, 1.5, 0.0), (0.15, 3.0, 0.15)), box("Arm", STEEL, (-0.55, 2.2, 0.0), (0.7, 0.08, 0.08)),
+    box("Control", mat("Control", "#9aa3b0"), (1.6, 0.35, 1.6), (1.0, 0.7, 0.8)), cyl("Tank", STEEL, (-1.6, 0.4, 1.6), 0.35, 0.8, seg=12)])
+
 
 def main():
     for path, parts, extras in MODELS:

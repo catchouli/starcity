@@ -149,6 +149,9 @@ pub struct StarcityApp {
     compute_alloc: crate::compute::Allocation,
     /// Headlines waiting to be read (indices into `events::EVENTS`), and the date they were last checked to.
     news: Vec<usize>,
+    /// Launches flown, and the rolls that decide whether they fail.
+    space_launches: u32,
+    launch_rng: u64,
     last_event_date: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
@@ -298,6 +301,8 @@ impl StarcityApp {
             compute: Default::default(),
             compute_alloc: Default::default(),
             news: Vec::new(),
+            space_launches: 0,
+            launch_rng: 0x2545_F491_4F6C_DD1D,
             last_event_date: 2000.0,
             proj_morph: 0.0,
             assistant_attention: false,

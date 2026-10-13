@@ -33,6 +33,7 @@ impl StarcityApp {
         self.power_towns();
         let made = self.industries.month();
         self.compute_month();
+        self.space_month();
         let mut moved = vec![0u32; self.industries.list.len()];
         for (id, cargo, units) in made {
             let ind = &self.industries.list[id];
@@ -205,6 +206,48 @@ impl StarcityApp {
         }
     }
 
+    /// The spaceports' month: each launch earns what the orbital station pays and costs what the
+    /// year's technology makes it cost; a failure loses the cargo and shuts the pad for a month
+    /// (GAME-DESIGN.md §10.4).
+    fn space_month(&mut self) {
+        let date = self.clock.year_f64() as f32;
+        let now = self.clock.days();
+        let mut messages = Vec::new();
+        for i in 0..self.industries.list.len() {
+            let ind = &self.industries.list[i];
+            if ind.closed || ind.kind != crate::industry::Kind::Spaceport {
+                continue;
+            }
+            let launches = ind.made_last_month;
+            self.company.charge(crate::company::Item::Upkeep, crate::space::UPKEEP);
+            for _ in 0..launches {
+                self.launch_rng ^= self.launch_rng << 13;
+                self.launch_rng ^= self.launch_rng >> 7;
+                self.launch_rng ^= self.launch_rng << 17;
+                let roll = (self.launch_rng >> 11) as f32 / (1u64 << 53) as f32;
+                let l = crate::space::launch(date, roll);
+                self.company.earn(crate::company::Item::Launches, l.revenue);
+                self.company.charge(crate::company::Item::Running, l.cost);
+                self.space_launches += 1;
+                if l.failed {
+                    self.industries.list[i].pad_closed = 1;
+                    messages.push("A launch failed. The cargo is lost and the pad is shut for a month.".to_string());
+                } else {
+                    let net = l.revenue as i64 - l.cost as i64;
+                    messages.push(format!(
+                        "Launch: {} earned, {} to run: net {}",
+                        super::company_ui::money(l.revenue as i64),
+                        super::company_ui::money(l.cost as i64),
+                        super::company_ui::money(net)
+                    ));
+                }
+            }
+        }
+        if let Some(m) = messages.last() {
+            self.show_message(m, now + 5.0);
+        }
+    }
+
     /// The server farms' month: batches of work become compute, which is also sold as hosting.
     fn compute_month(&mut self) {
         let efficiency = crate::compute::efficiency(self.year as f64 + 0.5);
@@ -256,6 +299,7 @@ impl StarcityApp {
             .towns
             .nearest((ind.centre().0 as i32, ind.centre().1 as i32), 60)
             .map(|t| self.towns.list[t as usize].name.clone());
+        let date = self.clock.year_f64() as f32;
         let mut open = true;
         win95::window(
             ctx,
@@ -267,7 +311,7 @@ impl StarcityApp {
                 if let Some(town) = &town {
                     ui.label(format!("Near {town}"));
                 }
-                describe(ui, &ind);
+                describe(ui, &ind, date);
                 ui.separator();
                 if serving.is_empty() {
                     ui.label(
@@ -313,9 +357,26 @@ pub(super) fn is_for_towns(cargo: Cargo) -> bool {
     matches!(cargo, Cargo::Food | Cargo::Goods | Cargo::Fuel)
 }
 
-fn describe(ui: &mut egui::Ui, ind: &Industry) {
+fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
     let kind = ind.kind;
-    if kind.compute_scale() > 0.0 {
+    if kind == crate::industry::Kind::Spaceport {
+        let cost = crate::space::operating_cost(date).round() as i64;
+        ui.label(format!(
+            "Launches rockets: each takes {} kl of fuel and {} crates of goods, earns {} and costs about {} to run this year.",
+            crate::space::FUEL,
+            crate::space::PAYLOAD,
+            super::company_ui::money(crate::space::REVENUE as i64),
+            super::company_ui::money(cost)
+        ));
+        ui.label(if (crate::space::REVENUE as i64) < cost {
+            "Launches lose money for now. They get cheaper every few years."
+        } else {
+            "Launches pay."
+        });
+        if ind.pad_closed > 0 {
+            ui.label(egui::RichText::new("The pad is shut after a failed launch.").color(win95::warn()));
+        }
+    } else     if kind.compute_scale() > 0.0 {
         ui.label(format!("Turns {} into compute: the score. It also sells spare compute as hosting.", inputs_text(ind)));
         ui.label(format!(
             "Last month: {} batches, {}",

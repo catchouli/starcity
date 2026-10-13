@@ -56,14 +56,17 @@ pub enum Item {
     Contracts,
     /// Selling spare compute from the server farms.
     Hosting,
+    /// What the spaceports' launches earn.
+    Launches,
 }
 
 impl Item {
-    pub const ALL: [Item; 10] = [
+    pub const ALL: [Item; 11] = [
         Item::Passengers,
         Item::Freight,
         Item::Contracts,
         Item::Hosting,
+        Item::Launches,
         Item::Construction,
         Item::Vehicles,
         Item::Headquarters,
@@ -84,6 +87,7 @@ impl Item {
             Item::Headquarters => "Headquarters",
             Item::Contracts => "Contracts",
             Item::Hosting => "Compute hosting",
+            Item::Launches => "Space launches",
         }
     }
 
@@ -96,7 +100,7 @@ impl Item {
 /// expense are kept apart by sign of the category: passengers are income).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ledger {
-    amounts: [i64; 10],
+    amounts: [i64; 11],
 }
 
 impl Ledger {
@@ -109,13 +113,13 @@ impl Ledger {
     }
 
     pub fn income(&self) -> i64 {
-        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts) + self.get(Item::Hosting)
+        self.get(Item::Passengers) + self.get(Item::Freight) + self.get(Item::Contracts) + self.get(Item::Hosting) + self.get(Item::Launches)
     }
 
     pub fn expenses(&self) -> i64 {
         Item::ALL
             .iter()
-            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts | Item::Hosting))
+            .filter(|&&i| !matches!(i, Item::Passengers | Item::Freight | Item::Contracts | Item::Hosting | Item::Launches))
             .map(|&i| self.get(i))
             .sum()
     }
@@ -548,6 +552,15 @@ impl Company {
             self.ledger.add(item, cost as i64);
         }
         true
+    }
+
+    /// Takes money that is owed whether or not it is there (a launch's running cost, upkeep): the
+    /// balance may go negative. Free in the sandbox.
+    pub fn charge(&mut self, item: Item, amount: u32) {
+        if !self.sandbox {
+            self.cash -= amount as i64;
+            self.ledger.add(item, amount as i64);
+        }
     }
 
     pub fn earn(&mut self, item: Item, amount: u32) {

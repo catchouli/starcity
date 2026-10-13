@@ -37,10 +37,13 @@ pub enum Kind {
     ChipFab,
     DataCentre,
     AiCampus,
+    OilWell,
+    Refinery,
+    Spaceport,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 14] = [
+    pub const ALL: [Kind; 17] = [
         Kind::CoalMine,
         Kind::IronOreMine,
         Kind::Forest,
@@ -55,6 +58,9 @@ impl Kind {
         Kind::ChipFab,
         Kind::DataCentre,
         Kind::AiCampus,
+        Kind::OilWell,
+        Kind::Refinery,
+        Kind::Spaceport,
     ];
 
     /// The model kind in `assets/models/industries/`.
@@ -74,6 +80,9 @@ impl Kind {
             Kind::ChipFab => "chip_fab",
             Kind::DataCentre => "data_centre",
             Kind::AiCampus => "ai_campus",
+            Kind::OilWell => "oil_well",
+            Kind::Refinery => "refinery",
+            Kind::Spaceport => "spaceport",
         }
     }
 
@@ -93,15 +102,18 @@ impl Kind {
             Kind::ChipFab => "Chip fab",
             Kind::DataCentre => "Data centre",
             Kind::AiCampus => "AI campus",
+            Kind::OilWell => "Oil well",
+            Kind::Refinery => "Refinery",
+            Kind::Spaceport => "Spaceport",
         }
     }
 
     /// Footprint in tiles (square).
     pub fn size(self) -> i32 {
         match self {
-            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry => 3,
-            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre => 4,
-            Kind::AiCampus => 5,
+            Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry | Kind::OilWell => 3,
+            Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre | Kind::Refinery => 4,
+            Kind::AiCampus | Kind::Spaceport => 5,
         }
     }
 
@@ -113,6 +125,8 @@ impl Kind {
             Kind::ChipFab => 80_000,
             Kind::DataCentre => 100_000,
             Kind::AiCampus => 250_000,
+            Kind::Spaceport => 250_000,
+            Kind::Refinery => 60_000,
             k if k.is_primary() => 20_000,
             _ => 40_000,
         }
@@ -122,6 +136,7 @@ impl Kind {
     pub fn from_year(self) -> i32 {
         match self {
             Kind::DataCentre => 2005,
+            Kind::Spaceport => 2027,
             Kind::AiCampus => 2020,
             _ => 2000,
         }
@@ -142,7 +157,8 @@ impl Kind {
             Kind::PowerStation => 3.0,
             Kind::SteelMill | Kind::Factory | Kind::ServerFarm | Kind::SilicaQuarry | Kind::DataCentre => 2.0,
             Kind::Sawmill | Kind::FoodPlant => 3.0,
-            Kind::ChipFab | Kind::AiCampus => 1.0,
+            Kind::ChipFab | Kind::AiCampus | Kind::Refinery | Kind::Spaceport => 1.0,
+            Kind::OilWell => 3.0,
         }
     }
 
@@ -157,6 +173,8 @@ impl Kind {
             Kind::ServerFarm => &[(Cargo::Goods, 1)],
             Kind::ChipFab => &[(Cargo::Silicon, 1)],
             Kind::DataCentre | Kind::AiCampus => &[(Cargo::Chips, 1)],
+            Kind::Refinery => &[(Cargo::Oil, 1)],
+            Kind::Spaceport => &[(Cargo::Fuel, crate::space::FUEL), (Cargo::Goods, crate::space::PAYLOAD)],
             _ => &[],
         }
     }
@@ -174,7 +192,9 @@ impl Kind {
             Kind::Factory => &[(Cargo::Goods, 2)],
             Kind::SilicaQuarry => &[(Cargo::Silicon, 1)],
             Kind::ChipFab => &[(Cargo::Chips, 1)],
-            Kind::PowerStation | Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus => &[],
+            Kind::OilWell => &[(Cargo::Oil, 1)],
+            Kind::Refinery => &[(Cargo::Fuel, 1)],
+            Kind::PowerStation | Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus | Kind::Spaceport => &[],
         }
     }
 
@@ -207,6 +227,9 @@ impl Kind {
             Kind::ServerFarm | Kind::DataCentre | Kind::AiCampus => 40,
             Kind::SilicaQuarry => 80,
             Kind::ChipFab => 50,
+            Kind::OilWell => 70,
+            Kind::Refinery => 70,
+            Kind::Spaceport => 3,
         }
     }
 
@@ -220,6 +243,8 @@ impl Kind {
             Kind::ChipFab => 30.0,
             Kind::DataCentre => 20.0,
             Kind::AiCampus => 60.0,
+            Kind::Refinery => 20.0,
+            Kind::Spaceport => 50.0,
             _ => 0.0,
         }
     }
@@ -244,6 +269,8 @@ pub struct Industry {
     /// Months left before it shuts, once it has announced it will.
     pub closing: Option<u32>,
     pub closed: bool,
+    /// Months a spaceport's pad stays shut after a failed launch.
+    pub pad_closed: u32,
 }
 
 /// Something that happened to an industry this month.
@@ -333,6 +360,7 @@ impl Industries {
             neglected: 0,
             closing: None,
             closed: false,
+            pad_closed: 0,
         };
         for t in ind.tiles() {
             self.by_tile.insert(t, id);
@@ -470,6 +498,10 @@ impl Industries {
                 ind.made_last_month = burn;
                 continue;
             }
+            if kind == Kind::Spaceport && ind.pad_closed > 0 {
+                ind.pad_closed -= 1;
+                continue;
+            }
             let batches = if kind.is_primary() {
                 (kind.batches() as f32 * ind.production).round() as u32
             } else {
@@ -486,7 +518,7 @@ impl Industries {
                 }
                 by_stock.min(cap)
             };
-            if kind.compute_scale() > 0.0 {
+            if kind.compute_scale() > 0.0 || kind == Kind::Spaceport {
                 ind.made_last_month = batches;
             }
             for &(c, per) in kind.outputs() {
@@ -634,6 +666,10 @@ impl Ctx<'_> {
             Kind::ChipFab => (town >= 8.0 && self.near_water(ci, 20)).then(|| 1.0 / (1.0 + town / 40.0)),
             Kind::DataCentre => (6.0..35.0).contains(&town).then(|| 1.0 - town / 35.0),
             Kind::AiCampus => (15.0..60.0).contains(&town).then(|| 1.0 / (1.0 + town / 60.0)),
+            Kind::OilWell => self.near_water(ci, 14).then(|| field(self.seed ^ 55, ci.0, ci.1, 40) + 0.2),
+            Kind::Refinery => (town >= 12.0)
+                .then(|| 1.0 / (1.0 + nearest_of(Kind::OilWell).min(200.0) / 60.0)),
+            Kind::Spaceport => (town >= 30.0 && self.near_water(ci, 10)).then(|| 1.0 / (1.0 + town / 80.0)),
         }?;
         Some(rule)
     }
@@ -1034,5 +1070,48 @@ mod tests {
             ind.drift(&[0.0, 0.9, 0.0, 0.0][..c.min(3) + 1]);
         }
         assert!(ind.list[c].closing.is_some() || ind.list[c].closed);
+    }
+
+    #[test]
+    fn oil_becomes_fuel_and_fuel_with_goods_becomes_launches() {
+        let mut ind = Industries::default();
+        let plant = ind.add(Kind::PowerStation, (0, 0));
+        ind.deliver(plant, Cargo::Coal, 400);
+        let well = ind.add(Kind::OilWell, (10, 0));
+        let refinery = ind.add(Kind::Refinery, (14, 0));
+        let port = ind.add(Kind::Spaceport, (20, 0));
+        let made = ind.month();
+        assert!(made.iter().any(|&(i, c, n)| i == well && c == Cargo::Oil && n == 70));
+        ind.deliver(refinery, Cargo::Oil, 100);
+        let made = ind.month();
+        assert!(made.iter().any(|&(i, c, n)| i == refinery && c == Cargo::Fuel && n == 70), "{made:?}");
+        ind.deliver(port, Cargo::Fuel, 400);
+        ind.deliver(port, Cargo::Goods, 400);
+        ind.month();
+        assert_eq!(ind.list[port].made_last_month, 2, "goods for two launches");
+        assert_eq!(ind.list[port].stock[Cargo::Goods.index()], 100);
+        // A shut pad launches nothing for the month.
+        ind.deliver(port, Cargo::Goods, 300);
+        ind.list[port].pad_closed = 1;
+        ind.month();
+        assert_eq!(ind.list[port].made_last_month, 0);
+        ind.month();
+        assert!(ind.list[port].made_last_month > 0);
+    }
+
+    #[test]
+    fn spaceports_and_oil_are_founded_in_their_years() {
+        let mut found = 0;
+        let mut oil = 0;
+        for seed in [1u32, 7, 42, 2024, 99] {
+            let (mut world, mut towns, roads, rails) = map(seed);
+            let (mut ind, _) = Industries::generate(&mut world, &mut towns, &roads, &rails, seed, 2000);
+            oil += ind.list.iter().any(|i| i.kind == Kind::OilWell) as i32;
+            assert!(!ind.list.iter().any(|i| i.kind == Kind::Spaceport));
+            ind.found(&mut world, &mut towns, &roads, &rails, seed, 2027);
+            found += ind.list.iter().any(|i| i.kind == Kind::Spaceport) as i32;
+        }
+        assert!(oil >= 4, "oil wells on {oil}/5 maps");
+        assert!(found >= 3, "spaceports on {found}/5 maps");
     }
 }

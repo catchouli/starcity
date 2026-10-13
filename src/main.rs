@@ -30,6 +30,7 @@ mod sea;
 #[cfg(test)]
 mod shader_test;
 mod sim;
+mod space;
 mod stations;
 mod terminals;
 mod terrain;
