@@ -450,6 +450,7 @@ impl StarcityApp {
         let unit = match (self.plan_network, self.ui.tool) {
             (_, crate::ui::Tool::Station) => company::STATION_TILE,
             (_, crate::ui::Tool::Expressway) => crate::expressway::PIECE,
+            (_, crate::ui::Tool::SeaWall) => crate::flood::WALL,
             (super::Network::Road, _) => company::ROAD_PIECE,
             (super::Network::Rail, _) => company::RAIL_PIECE,
         };
@@ -788,6 +789,7 @@ impl StarcityApp {
             .stuck_hint(&self.facts)
             .map(str::to_string)
             .or_else(|| self.idle_vehicle_hint())
+            .or_else(|| self.flood_warning.clone())
             .or_else(|| self.power_hint())
             .or_else(|| self.hungry_town_hint());
         let goals: Vec<(String, bool)> = self

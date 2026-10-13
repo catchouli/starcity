@@ -25,7 +25,7 @@ const DIAGONAL: u32 = 14;
 const SHORE_COST: u32 = 6;
 
 pub fn tile_is_water(world: &World, x: i32, z: i32) -> bool {
-    world.in_bounds(x, z) && world.surface(x, z).is_none_or(|(base, _)| base < world.sea_level)
+    world.in_bounds(x, z) && world.underwater(x, z)
 }
 
 pub struct Sea {

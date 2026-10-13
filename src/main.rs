@@ -17,6 +17,7 @@ mod era;
 mod events;
 mod exchange;
 mod expressway;
+mod flood;
 mod hq;
 mod industry;
 mod input;

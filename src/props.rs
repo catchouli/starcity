@@ -304,6 +304,23 @@ pub fn pods(models: &Models, ex: &crate::expressway::Expressway) -> Placed {
         .collect()
 }
 
+/// Sea walls, one block per tile.
+pub fn sea_walls(models: &Models, world: &World, walls: &crate::network::Layer) -> Placed {
+    let Some(m) = models.pick(Role::Prop, "sea_wall", 2040, 0) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for z in 0..walls.size_z as i32 {
+        for x in 0..walls.size_x as i32 {
+            if walls.get(x, z) != 0 {
+                let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+                out.push((m, ModelInstance::at([cx, world.height_at(cx, cz) - 0.3, cz], 0.0)));
+            }
+        }
+    }
+    out
+}
+
 /// Flying cars over the cities.
 pub fn skycars(models: &Models, cars: &crate::skycars::SkyCars) -> Placed {
     let Some(m) = models.pick(Role::Prop, "flying_car", 2040, 0) else {

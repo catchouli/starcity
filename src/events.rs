@@ -50,7 +50,7 @@ const fn mods(passengers: f32, freight: f32, running: f32, interest: f32, growth
 
 const NONE: Mods = mods(1.0, 1.0, 1.0, 1.0, 1.0);
 
-pub const EVENTS: [Event; 14] = [
+pub const EVENTS: [Event; 15] = [
     Event {
         year: 2001.0,
         title: "Dot-com bust",
@@ -136,6 +136,15 @@ pub const EVENTS: [Event; 14] = [
         year: 2029.0,
         title: "The AI correction",
         text: "Hosting rates fall by 40% and some campuses close. The compute stays.",
+        months: None,
+        during: NONE,
+        after: None,
+        shifts: false,
+    },
+    Event {
+        year: 2031.0,
+        title: "The seas are rising",
+        text: "Scientists warn: the sea will rise a block in 2036, another in 2042 and another in 2048. Low coasts will flood. Sea walls (Land toolbar) keep it out.",
         months: None,
         during: NONE,
         after: None,

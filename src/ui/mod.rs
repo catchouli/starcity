@@ -25,6 +25,7 @@ pub enum Tool {
     Bus,
     Truck,
     Expressway,
+    SeaWall,
 }
 
 impl Tool {
@@ -39,6 +40,7 @@ impl Tool {
             Tool::Station => "Build station",
             Tool::RemoveRail => "Remove railway",
             Tool::Bulldoze => "Bulldoze",
+            Tool::SeaWall => "Build sea wall",
             Tool::Port => "Build port",
             Tool::Boat => "Place ferry",
             Tool::Airport => "Build airport",
@@ -67,6 +69,7 @@ impl Tool {
             }
             Tool::RemoveRail => "Click or drag a rectangle to remove track",
             Tool::Bulldoze => "Click or drag a rectangle to clear it to bare ground",
+            Tool::SeaWall => "Drag along a coast to build a sea wall. As the sea rises it floods low ground it can reach; land behind a wall stays dry.",
             Tool::Port => "Click flat coastal land to build a port. Ferries tie up in the water beside it.",
             Tool::Boat => "Click water to place a ferry, then click it to give it ports to visit.",
             Tool::Airport => "Click to build an airport (O turns the runway). It levels the ground for a price.",
@@ -99,6 +102,7 @@ impl Tool {
                 icon_cross(p, r);
             }
             Tool::Bulldoze => icon_bulldozer(p, r),
+            Tool::SeaWall => icon_sea_wall(p, r),
             Tool::Port => icon_port(p, r),
             Tool::Boat => icon_boat(p, r),
             Tool::Airport => icon_airport(p, r),
@@ -261,7 +265,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     const SIZE: f32 = 30.0;
     let groups: [(&str, &[Tool]); 6] = [
         ("", &[Tool::Pointer]),
-        ("Land", &[Tool::Bulldoze]),
+        ("Land", &[Tool::Bulldoze, Tool::SeaWall]),
         ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus, Tool::Truck]),
         (
             "Rail",
@@ -487,6 +491,14 @@ fn icon_truck(p: &Painter, r: Rect) {
     for x in [0.22, 0.5, 0.8] {
         p.circle_filled(at(x, 0.8), r.width() * 0.08, Color32::from_gray(0x20));
     }
+}
+
+fn icon_sea_wall(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(Rect::from_min_max(at(0.0, 0.55), at(0.45, 1.0)), 0.0, Color32::from_rgb(0x2a, 0x6a, 0x9c));
+    p.rect_filled(Rect::from_min_max(at(0.45, 0.2), at(0.65, 1.0)), 0.0, Color32::from_gray(0x9a));
+    p.rect_filled(Rect::from_min_max(at(0.65, 0.7), at(1.0, 1.0)), 0.0, Color32::from_rgb(0x5d, 0x8f, 0x3a));
+    p.line_segment([at(0.45, 0.2), at(0.65, 0.2)], Stroke::new(1.0, Color32::from_gray(0xd0)));
 }
 
 fn icon_bus(p: &Painter, r: Rect) {

@@ -865,6 +865,12 @@ industry("convergence_array", "convergence_array", 5, [pad(5, mat("ArrayPad", "#
     cyl("Dish4", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (-1.6, 0.4, 1.6), 0.4, 0.8, seg=14)])
 
 
+model("props/sea_wall", "prop", "sea_wall", [
+    box("Wall", mat("WallConcrete", "#a9adb4", roughness=0.9), (0.0, 0.5, 0.0), (1.0, 1.0, 1.0)),
+    box("Cap", mat("WallCap", "#c9ccd2"), (0.0, 1.02, 0.0), (1.02, 0.05, 1.02))],
+    **{"from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

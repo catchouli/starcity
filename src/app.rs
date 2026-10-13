@@ -4,6 +4,7 @@ mod charter_ui;
 mod company_ui;
 mod compute_ui;
 mod craft;
+mod flood_ui;
 mod industry_ui;
 mod news_ui;
 
@@ -101,6 +102,11 @@ pub struct StarcityApp {
     buses: crate::buses::Buses,
     /// The hyper expressway (§7.6).
     express: crate::expressway::Expressway,
+    /// Rising seas and the walls that hold them back (§10.9).
+    flood: crate::flood::Flood,
+    walls: Layer,
+    /// The latest warning of the next rise, for the Assistant.
+    flood_warning: Option<String>,
     planes: Planes,
     selected_craft: Option<Craft>,
     selected_terminal: Option<TerminalId>,
@@ -297,6 +303,9 @@ impl StarcityApp {
             boats: Boats::default(),
             buses: Default::default(),
             express: crate::expressway::Expressway::new(1, 1),
+            flood: Default::default(),
+            walls: Layer::new(1, 1),
+            flood_warning: None,
             planes: Planes::default(),
             selected_craft: None,
             selected_terminal: None,
@@ -753,6 +762,9 @@ impl StarcityApp {
         self.boats = Boats::default();
         self.buses = Default::default();
         self.express = crate::expressway::Expressway::new(self.world.size_x, self.world.size_z);
+        self.flood = crate::flood::Flood::new(self.world.sea_level);
+        self.walls = Layer::new(self.world.size_x, self.world.size_z);
+        self.flood_warning = None;
         self.planes = Planes::default();
         self.selected_craft = None;
         self.selected_terminal = None;
@@ -915,7 +927,14 @@ impl StarcityApp {
         }
         if !matches!(
             tool,
-            Tool::Bulldoze | Tool::RemoveRoad | Tool::Road | Tool::Rail | Tool::RemoveRail | Tool::Station | Tool::Expressway
+            Tool::Bulldoze
+                | Tool::RemoveRoad
+                | Tool::Road
+                | Tool::Rail
+                | Tool::RemoveRail
+                | Tool::Station
+                | Tool::Expressway
+                | Tool::SeaWall
         ) {
             self.drag_start = None;
         } else if response.drag_started_by(primary) {
@@ -939,6 +958,7 @@ impl StarcityApp {
             ),
             (Tool::Rail, Some(a), Some(b)) => (self.rail_plan_cached(a, b), Network::Rail),
             (Tool::Expressway, Some(a), Some(b)) => (self.express.plan(a, b), Network::Road),
+            (Tool::SeaWall, Some(a), Some(b)) => (self.wall_plan(a, b), Network::Road),
             (Tool::Station, Some(a), Some(b)) => {
                 let sp = self.stations.plan(
                     &self.world,
@@ -1002,7 +1022,7 @@ impl StarcityApp {
                 })
             }
             // While dragging a road or track, the preview shows where it goes.
-            Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway if self.drag_start.is_some() => None,
+            Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway | Tool::SeaWall if self.drag_start.is_some() => None,
             Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck => self.sea_tool_hover(tool),
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
@@ -1068,6 +1088,10 @@ impl StarcityApp {
     fn apply_tool(&mut self, a: (i32, i32), b: (i32, i32)) -> Changes {
         match self.ui.tool {
             Tool::Bulldoze => self.clear(a, b, Clear::Everything),
+            Tool::SeaWall => {
+                self.build_wall(a, b);
+                Changes::default()
+            }
             Tool::Expressway => {
                 let plan = self.express.plan(a, b);
                 if !plan.is_empty() {
@@ -1178,6 +1202,9 @@ impl StarcityApp {
             self.props_changed = true;
         }
         if what == Clear::Everything {
+            if self.clear_walls(a, b) {
+                self.static_changed = true;
+            }
             if self.express.clear(a, b) {
                 self.static_changed = true;
                 self.props_changed = true;
@@ -1334,6 +1361,7 @@ impl StarcityApp {
             placed.extend(props::terminals(&self.models, &self.world, &self.terminals, self.year));
             placed.extend(props::industries(&self.models, &self.world, &self.industries));
             placed.extend(props::expressway(&self.models, &self.world, &self.express));
+            placed.extend(props::sea_walls(&self.models, &self.world, &self.walls));
             if let Some(hq) = &self.hq {
                 placed.extend(props::hq(&self.models, &self.world, hq, self.company.hq_level));
             }

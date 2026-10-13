@@ -176,7 +176,7 @@ pub fn mesh_chunk(world: &World, cx: usize, cz: usize) -> ChunkMesh {
             // Water surface over anything below sea level. (No side faces at the
             // map edge: the endless ocean continues beyond it.)
             let base = world.surface(xi, zi).map_or(0, |(base, _)| base);
-            if base < sea {
+            if base < sea && !world.dry.contains(&(xi, zi)) {
                 water[(z - z0) * CHUNK_SIZE + (x - x0)] = Some((sea, WATER));
             }
         }

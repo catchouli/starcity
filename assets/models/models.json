@@ -64,6 +64,7 @@
   "props/pier_1995": {"role": "prop", "kind": "pier", "from": 1900, "to": 2029, "weight": 1},
   "props/pier_2030": {"role": "prop", "kind": "pier", "from": 2030, "to": 2100, "weight": 1},
   "props/plane_shadow": {"role": "prop", "kind": "shadow", "from": 1900, "to": 2200, "weight": 1},
+  "props/sea_wall": {"role": "prop", "kind": "sea_wall", "from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1},
   "props/signal_green": {"role": "prop", "kind": "signal_green", "from": 1900, "to": 2100, "weight": 1},
   "props/signal_red": {"role": "prop", "kind": "signal_red", "from": 1900, "to": 2100, "weight": 1},
   "props/station_building_1995": {"role": "prop", "kind": "station_building", "from": 1900, "to": 2029, "weight": 1},

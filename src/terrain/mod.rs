@@ -118,6 +118,9 @@ pub struct World {
     pub height: usize,
     /// Water surface level in blocks. Anything below it is underwater.
     pub sea_level: u16,
+    /// Tiles below the sea level that stay dry: behind sea walls, or not flooded yet as the sea
+    /// rises (`flood.rs`).
+    pub dry: std::collections::HashSet<(i32, i32)>,
     blocks: Vec<Block>,
 }
 
@@ -128,8 +131,14 @@ impl World {
             size_z,
             height,
             sea_level,
+            dry: Default::default(),
             blocks: vec![Block::AIR; size_x * size_z * height],
         }
+    }
+
+    /// Whether a tile is under the sea: below its level and not kept dry.
+    pub fn underwater(&self, x: i32, z: i32) -> bool {
+        self.surface(x, z).is_none_or(|(base, _)| base < self.sea_level) && !self.dry.contains(&(x, z))
     }
 
     pub fn chunks_x(&self) -> usize {
