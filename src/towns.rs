@@ -110,6 +110,8 @@ pub struct Towns {
     /// Progress towards the next redevelopment.
     renewal: f32,
     pop_clock: f32,
+    /// How fast towns grow right now, from the world's events.
+    pub growth_mult: f32,
     rng: u64,
 }
 
@@ -131,6 +133,7 @@ impl Towns {
             year: 2000,
             renewal: 0.0,
             pop_clock: 0.0,
+            growth_mult: 1.0,
             rng: 1,
         }
     }
@@ -305,7 +308,7 @@ impl Towns {
             town.food = (town.food - dt).max(0.0);
             town.goods = (town.goods - dt).max(0.0);
             // Steady growth, faster with good passenger service and with the shops stocked.
-            town.growth += dt * (0.05 + town.served * 0.01) * town.growth_factor();
+            town.growth += dt * (0.05 + town.served * 0.01) * town.growth_factor() * self.growth_mult;
             while self.list[i].growth >= 1.0 {
                 self.list[i].growth -= 1.0;
                 let (roads_built, b) = self.grow(i, world, roads_layer, rails);

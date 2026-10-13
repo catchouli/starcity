@@ -147,6 +147,9 @@ pub struct StarcityApp {
     /// The score: compute made by the server farms (GAME-DESIGN.md §5.9).
     pub(crate) compute: crate::compute::Compute,
     compute_alloc: crate::compute::Allocation,
+    /// Headlines waiting to be read (indices into `events::EVENTS`), and the date they were last checked to.
+    news: Vec<usize>,
+    last_event_date: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
     /// The Assistant's suggestion changed since the player last looked: its button glows.
@@ -294,6 +297,8 @@ impl StarcityApp {
             levelled_pending: Vec::new(),
             compute: Default::default(),
             compute_alloc: Default::default(),
+            news: Vec::new(),
+            last_event_date: 2000.0,
             proj_morph: 0.0,
             assistant_attention: false,
             last_step_title: String::new(),
@@ -322,6 +327,10 @@ impl StarcityApp {
             app.ui.show_next_step = false;
         }
         app.regenerate(rs);
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::devtools::DevTools::window("news") {
+            app.news.push(6);
+        }
         if demo {
             app.start_demo();
             let tiles = std::mem::take(&mut app.demo_levelled);
@@ -666,6 +675,8 @@ impl StarcityApp {
         self.industry_clock = 0.0;
         self.compute = Default::default();
         self.compute_alloc = Default::default();
+        self.news.clear();
+        self.last_event_date = self.clock.year_f64() as f32;
         self.remesh_tiles(rs, &levelled);
         self.vehicles = Vehicles::new(self.params.seed as u64);
         self.sea = None;
@@ -2241,6 +2252,7 @@ impl eframe::App for StarcityApp {
         self.finance_window(&ctx);
         self.compute_window(&ctx);
         self.fund_window(&ctx);
+        self.news_window(&ctx);
         self.train_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {

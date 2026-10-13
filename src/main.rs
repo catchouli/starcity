@@ -11,6 +11,7 @@ mod daylight;
 #[cfg(not(target_arch = "wasm32"))]
 mod devtools;
 mod era;
+mod events;
 mod exchange;
 mod hq;
 mod industry;

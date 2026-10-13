@@ -488,13 +488,31 @@ impl StarcityApp {
             Item::Freight
         };
         let fare = crate::cargo::fare(cargo, units, tiles, seconds);
-        let fare = (fare as f32 * (1.0 + self.company.effects.fare_bonus)).round() as u32;
+        let world = if cargo == crate::cargo::Cargo::Passengers {
+            self.company.world.passengers
+        } else {
+            self.company.world.freight
+        };
+        let fare = (fare as f32 * (1.0 + self.company.effects.fare_bonus) * world).round() as u32;
         self.company.earn(item, fare);
         fare
     }
 
     /// Once per sim step: the monthly books.
     pub(super) fn tick_company(&mut self, dt: f32) {
+        let date = self.clock.year_f64() as f32;
+        let seed = self.params.seed;
+        if date < self.last_event_date {
+            // The date was moved back.
+            self.last_event_date = date;
+        }
+        for i in crate::events::started_between(self.last_event_date, date, seed) {
+            self.news.push(i);
+        }
+        self.last_event_date = date;
+        let world = crate::events::active(date, seed);
+        self.company.world = world;
+        self.towns.growth_mult = world.growth;
         let messages = self.company.tick(dt, self.year, &self.assets);
         let now = self.last_time;
         for m in messages {
@@ -502,9 +520,27 @@ impl StarcityApp {
         }
     }
 
+    /// The headline of the day, with what it does, until it is dismissed.
+    pub(super) fn news_window(&mut self, ctx: &egui::Context) {
+        let Some(&i) = self.news.first() else { return };
+        let e = &crate::events::EVENTS[i];
+        let (mut open, mut ok) = (true, false);
+        win95::window(ctx, "Extra! Extra!", &mut open, egui::pos2(380.0, 160.0), |ui| {
+            ui.set_width(300.0);
+            ui.label(egui::RichText::new(e.title).heading());
+            ui.label(e.text);
+            ui.add_space(4.0);
+            ok = ui.button("OK").clicked();
+        });
+        if !open || ok {
+            self.news.remove(0);
+        }
+    }
+
     pub(super) fn finance_window(&mut self, ctx: &egui::Context) {
         let mut open = self.ui.show_finance;
         let value = self.company.value(&self.assets);
+        let world_now = crate::events::active_titles(self.clock.year_f64() as f32, self.params.seed);
         let (mut borrow, mut repay) = (false, false);
         let c = &self.company;
         win95::window(ctx, "Finances", &mut open, egui::pos2(200.0, 110.0), |ui| {
@@ -520,6 +556,9 @@ impl StarcityApp {
                 ui.label(money(value));
                 ui.end_row();
             });
+            for title in &world_now {
+                ui.label(egui::RichText::new(format!("In the news: {title}")).color(win95::warn()));
+            }
             ui.horizontal(|ui| {
                 let limit = c.loan_limit();
                 borrow = ui

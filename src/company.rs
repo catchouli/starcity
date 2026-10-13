@@ -367,6 +367,8 @@ pub struct Company {
     pub effects: crate::compute::Effects,
     /// This year's goals (GAME-DESIGN.md §9), and what had been delivered when the year began.
     pub goals: Vec<Goal>,
+    /// What the world's events are doing to income and costs (§10.9).
+    pub world: crate::events::Mods,
     goals_year: i32,
     goal_base: [u32; cargo::COUNT],
 }
@@ -389,6 +391,7 @@ impl Company {
             bankrupt: false,
             effects: Default::default(),
             goals: Vec::new(),
+            world: Default::default(),
             goals_year: 0,
             goal_base: [0; cargo::COUNT],
             contracts: Vec::new(),
@@ -652,12 +655,13 @@ impl Company {
         if !self.sandbox {
             let running =
                 (assets.train_running + assets.ferries * FERRY_RUNNING + assets.planes * PLANE_RUNNING) as f32 / 12.0
-                    * (1.0 - self.effects.running_discount);
+                    * (1.0 - self.effects.running_discount)
+                    * self.world.running;
             let upkeep = ((assets.road_pieces + assets.rail_pieces) as f32 * PIECE_UPKEEP
                 + (assets.station_tiles * STATION_UPKEEP) as f32 / 3.0
                 + (assets.ports * PORT_UPKEEP + assets.airports * AIRPORT_UPKEEP) as f32)
                 / 12.0;
-            let interest = self.loan as f32 * INTEREST / 12.0;
+            let interest = self.loan as f32 * INTEREST / 12.0 * self.world.interest;
             for (item, amount) in [
                 (Item::Running, running),
                 (Item::Upkeep, upkeep),
