@@ -41,6 +41,11 @@ impl<'a> Corners<'a> {
         }
     }
 
+    /// Records a corner height without limits, to price a finished plan with `steps`.
+    pub fn set_for_pricing(&mut self, c: (i32, i32), h: i32) {
+        self.changed.insert(c, h);
+    }
+
     /// Forbids moving this corner.
     pub fn freeze(&mut self, c: (i32, i32)) {
         self.frozen.insert(c);

@@ -139,6 +139,11 @@ pub struct StarcityApp {
     industry_clock: f32,
     /// 0 while the projection icon shows a globe, 1 once it's unwrapped to a map.
     proj_morph: f32,
+    /// The Assistant's suggestion changed since the player last looked: its button glows.
+    assistant_attention: bool,
+    last_step_title: String,
+    /// The price of what the tool would do, drawn beside the cursor, and whether it can be afforded.
+    cursor_label: Option<(String, bool)>,
     /// Picking a new site for the headquarters.
     relocating: bool,
     /// Road pieces the player has built (towns' own roads don't cost upkeep).
@@ -206,6 +211,8 @@ impl StarcityApp {
                 show_finance: false,
                 show_hq: false,
                 show_next_step: true,
+                assistant_expanded: true,
+                go_hq: false,
                 go_home: false,
             },
             physical_keys: PhysicalKeys::default(),
@@ -260,6 +267,9 @@ impl StarcityApp {
             selected_industry: None,
             industry_clock: 0.0,
             proj_morph: 0.0,
+            assistant_attention: false,
+            last_step_title: String::new(),
+            cursor_label: None,
             relocating: false,
             assets_version: u64::MAX,
             resume_speed: Speed::X1,
@@ -697,9 +707,9 @@ impl StarcityApp {
             self.last_hover_tile = self.hover_tile;
         }
 
+        self.cursor_label = None;
         if self.relocating {
-            self.relocation_tool(response, ctx.input(|i| i.time));
-            return Changes::default();
+            return self.relocation_tool(response, ctx.input(|i| i.time));
         }
         // Every building tool works by dragging from a start tile to the cursor.
         let mut changes = Changes::default();
@@ -816,6 +826,20 @@ impl StarcityApp {
             self.mark_infra(&touched);
         }
 
+        // The price of what's being dragged out or would be placed, beside the cursor.
+        if !self.plan.is_empty() && self.plan.blocked.is_none() && self.drag_start.is_some() {
+            let plan = self.plan.clone();
+            let cost = self.plan_cost(&plan);
+            self.show_cost(cost, company::terraform_cost(&plan));
+        } else if let Some(t) = self.hover_tile {
+            match tool {
+                Tool::Train if self.rails.get(t.0, t.1) != 0 => self.show_cost(company::TRAIN, 0),
+                Tool::Signal if matches!(self.signals.click_effect(&self.rails, t), rails::SignalClick::Place) => {
+                    self.show_cost(company::SIGNAL, 0)
+                }
+                _ => {}
+            }
+        }
         let highlight = match tool {
             Tool::Pointer => None,
             Tool::Bulldoze | Tool::RemoveRoad | Tool::RemoveRail => {
@@ -1684,7 +1708,7 @@ impl StarcityApp {
             let changed = ui
                 .horizontal(|ui| {
                     ui.label("Date");
-                    ui.spacing_mut().slider_width = 280.0;
+                    ui.spacing_mut().slider_width = 150.0;
                     let slider = egui::Slider::new(&mut when, 2000.0..=2050.0)
                         .custom_formatter(|v, _| {
                             let mut c = Clock::default();
@@ -1692,14 +1716,7 @@ impl StarcityApp {
                             c.date().date_string()
                         })
                         .custom_parser(|s| s.trim().parse::<f64>().ok());
-                    let mut changed = ui.add_sized([300.0, 18.0], slider).changed();
-                    for y in [2000.0, 2012.0, 2025.0, 2038.0, 2050.0] {
-                        if ui.small_button(format!("{y:.0}")).clicked() {
-                            when = y;
-                            changed = true;
-                        }
-                    }
-                    changed
+                    ui.add(slider).changed()
                 })
                 .inner;
             if changed {
@@ -1826,9 +1843,13 @@ impl StarcityApp {
             .fixed_pos(pos)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                let response = win95::tool_button_ex(ui, size, false, true, false, |p, r| {
-                    ui::icon_projection(p, r.expand(3.0), flat)
-                });
+                // Just the globe: no button frame, a soft halo when hovered.
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+                let p = ui.painter();
+                if response.hovered() {
+                    p.circle_filled(rect.center(), size * 0.55, egui::Color32::from_white_alpha(40));
+                }
+                ui::icon_projection(p, rect, flat);
                 if response.clicked() {
                     self.ui.ortho = !self.ui.ortho;
                 }
@@ -1861,6 +1882,7 @@ impl StarcityApp {
             in_the_red: company.cash < 0,
             unlocked: &unlocked,
             suggested: step.tool.filter(|_| self.ui.show_next_step),
+            assistant_attention: self.assistant_attention,
         };
         egui::Panel::top("toolbar")
             .frame(panel.inner_margin(egui::Margin::symmetric(4, 3)))
@@ -1967,6 +1989,9 @@ impl StarcityApp {
         if std::mem::take(&mut self.ui.go_home) {
             self.centre_on_island();
         }
+        if std::mem::take(&mut self.ui.go_hq) {
+            self.look_at_hq();
+        }
         if actions.new_map {
             self.params.seed = (ui.input(|i| i.time) * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
             self.regenerate(rs);
@@ -2045,9 +2070,6 @@ impl eframe::App for StarcityApp {
         self.train_window(&ctx);
         self.finance_window(&ctx);
         self.hq_window(&ctx);
-        if self.ui.show_next_step {
-            self.next_step_window(&ctx);
-        }
         if self.bankrupt_window(&ctx) {
             self.params.seed = (now * 1e6) as u32 ^ self.params.seed.wrapping_mul(2654435761);
             self.regenerate(&rs);
@@ -2062,6 +2084,8 @@ impl eframe::App for StarcityApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
             self.projection_button(&ctx, rect, dt);
+            self.draw_cursor_label(&ctx);
+            self.assistant_panel(&ctx, rect);
             let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
             let scale = ctx.pixels_per_point() * self.settings.render_scale;
             let size = [

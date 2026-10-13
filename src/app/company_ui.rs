@@ -8,6 +8,14 @@ use crate::company::{self, Assets, Company, Facts, Item};
 use crate::hq;
 use crate::towns::TownId;
 
+/// A place the headquarters could move to.
+struct RelocationSite {
+    anchor: (i32, i32),
+    town: TownId,
+    terraform: Vec<((i32, i32), u16)>,
+    steps: u32,
+}
+
 /// What a contract joins: a town or an industry.
 #[derive(Clone, Copy, Debug)]
 pub enum Endpoint {
@@ -175,24 +183,42 @@ impl StarcityApp {
         }
     }
 
-    /// Where the headquarters could go if the cursor tile is the middle of its plot.
-    fn relocation_site(&self, centre: (i32, i32)) -> Result<((i32, i32), TownId), &'static str> {
+    /// Where the headquarters could go if the cursor tile is the middle of its plot, with the ground work it needs.
+    fn relocation_site(&self, centre: (i32, i32)) -> Result<RelocationSite, &'static str> {
         let anchor = (centre.0 - hq::PLOT / 2, centre.1 - hq::PLOT / 2);
-        if !hq::plot_fits(&self.world, &self.towns, &self.roads, &self.rails, anchor.0, anchor.1) {
-            return Err("The headquarters needs flat, clear ground (no roads or track)");
-        }
+        let Some(terraform) = hq::plot_levelling(&self.world, &self.towns, &self.roads, &self.rails, anchor) else {
+            return Err("No room for it here: roads, track, water or steep ground are in the way");
+        };
         let (cx, cz) = (anchor.0 + hq::PLOT / 2, anchor.1 + hq::PLOT / 2);
-        match self.towns.nearest((cx, cz), 20) {
-            Some(town) => Ok((anchor, town)),
-            None => Err("Put it in a town: there's none near here"),
-        }
+        let Some(town) = self.towns.nearest((cx, cz), 20) else {
+            return Err("Put it in a town: there's none near here");
+        };
+        let steps = {
+            // Block-steps moved, for the price.
+            let mut overlay = crate::terrain::edit::Corners::with_limits(&self.world, 3, 120);
+            for &(c, h) in &terraform {
+                overlay.set_for_pricing(c, h as i32);
+            }
+            overlay.steps()
+        };
+        Ok(RelocationSite {
+            anchor,
+            town,
+            terraform,
+            steps,
+        })
     }
 
-    /// Choosing a new place for the headquarters: a plot follows the cursor, green if it fits,
-    /// and a click pays for the move.
-    pub(super) fn relocation_tool(&mut self, response: &egui::Response, now: f64) {
-        let cost = company::relocation_cost(self.company.hq_level);
+    /// Choosing a new place for the headquarters: a plot follows the cursor, green if it fits (the
+    /// ground is levelled for a fee), and a click pays for the move. The price, levelling included,
+    /// follows the cursor.
+    pub(super) fn relocation_tool(&mut self, response: &egui::Response, now: f64) -> crate::sim::Changes {
+        let base = company::relocation_cost(self.company.hq_level);
         let site = self.hover_tile.map(|t| self.relocation_site(t));
+        let cost = match &site {
+            Some(Ok(s)) => base + s.steps * company::TERRAFORM_STEP,
+            _ => base,
+        };
         let highlight = self.hover_tile.map(|t| {
             let a = (t.0 - hq::PLOT / 2, t.1 - hq::PLOT / 2);
             crate::render::Highlight {
@@ -209,8 +235,21 @@ impl StarcityApp {
             self.highlight = highlight;
             self.scene_dirty = true;
         }
+        let affordable = self.company.can_afford(cost);
+        self.cursor_label = match &site {
+            Some(Ok(s)) if s.steps > 0 => Some((
+                format!(
+                    "{} ({} levelling)",
+                    money(cost as i64),
+                    money((s.steps * company::TERRAFORM_STEP) as i64)
+                ),
+                affordable,
+            )),
+            Some(Ok(_)) => Some((money(cost as i64), affordable)),
+            _ => None,
+        };
         self.site_hint = Some(match &site {
-            Some(Ok(_)) if self.company.can_afford(cost) => {
+            Some(Ok(_)) if affordable => {
                 format!(
                     "Move the headquarters here: {} (click, Esc to cancel)",
                     money(cost as i64)
@@ -220,24 +259,29 @@ impl StarcityApp {
             Some(Err(why)) => why.to_string(),
             None => "Click a spot in a town for the headquarters (Esc to cancel)".to_string(),
         });
+        let mut changes = crate::sim::Changes::default();
         if !response.clicked_by(egui::PointerButton::Primary) {
-            return;
+            return changes;
         }
-        let (Some(Ok((anchor, town))), Some(old)) = (site, self.hq) else {
-            return;
+        let (Some(Ok(site)), Some(old)) = (site, self.hq) else {
+            return changes;
         };
         if !self.pay(Item::Headquarters, cost) {
-            return;
+            return changes;
         }
-        self.hq = Some(hq::relocate(&mut self.towns, &old, anchor, town));
+        // Level the ground, then move the building onto it.
+        changes.terrain = crate::terrain::edit::apply(&mut self.world, &site.terraform);
+        self.hq = Some(hq::relocate(&mut self.towns, &old, site.anchor, site.town));
         self.relocating = false;
         self.highlight = None;
         self.site_hint = None;
         self.static_changed = true;
+        self.props_changed = true;
         self.plan_epoch += 1;
         self.scene_dirty = true;
-        let name = self.towns.list[town as usize].name.clone();
+        let name = self.towns.list[site.town as usize].name.clone();
         self.show_message(&format!("Your headquarters has moved to {name}"), now);
+        changes
     }
 
     /// Points the camera at the headquarters.
@@ -317,6 +361,58 @@ impl StarcityApp {
         );
         self.route_cache = Some(((a, b), self.plan_epoch, plan.clone()));
         plan
+    }
+
+    /// What the dragged-out plan would cost: pieces at the network's price plus any levelling.
+    pub(super) fn plan_cost(&self, plan: &crate::network::Plan) -> u32 {
+        let unit = match (self.plan_network, self.ui.tool) {
+            (_, crate::ui::Tool::Station) => company::STATION_TILE,
+            (super::Network::Road, _) => company::ROAD_PIECE,
+            (super::Network::Rail, _) => company::RAIL_PIECE,
+        };
+        plan.pieces.len() as u32 * unit + company::terraform_cost(plan)
+    }
+
+    /// Sets the price shown beside the cursor.
+    pub(super) fn show_cost(&mut self, cost: u32, levelling: u32) {
+        let text = if levelling > 0 {
+            format!("{} ({} levelling)", money(cost as i64), money(levelling as i64))
+        } else {
+            money(cost as i64)
+        };
+        self.cursor_label = Some((text, self.company.can_afford(cost)));
+    }
+
+    /// The price of the current action, drawn next to the mouse: green-ish paper if you can
+    /// afford it, red text if you can't.
+    pub(super) fn draw_cursor_label(&self, ctx: &egui::Context) {
+        let Some((text, ok)) = &self.cursor_label else { return };
+        let Some(pos) = ctx.pointer_latest_pos() else { return };
+        let frame = egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(0xff, 0xff, 0xe1))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::BLACK))
+            .inner_margin(egui::Margin::symmetric(5, 2));
+        egui::Area::new(egui::Id::new("cursor_cost"))
+            .fixed_pos(pos + egui::vec2(18.0, 20.0))
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .show(ctx, |ui| {
+                frame.show(ui, |ui| {
+                    let colour = if *ok {
+                        egui::Color32::BLACK
+                    } else {
+                        egui::Color32::from_rgb(0xc0, 0x10, 0x10)
+                    };
+                    ui.label(
+                        egui::RichText::new(if *ok {
+                            text.clone()
+                        } else {
+                            format!("{text}: can't afford")
+                        })
+                        .color(colour),
+                    );
+                });
+            });
     }
 
     /// Charges for something; says so if the money isn't there.
@@ -528,46 +624,101 @@ impl StarcityApp {
         }
     }
 
-    /// The panel that always has one thing for the player to do.
-    pub(super) fn next_step_window(&mut self, ctx: &egui::Context) {
+    /// The Assistant: always has one thing for the player to do. Docked at the bottom left of the view
+    /// so it never covers the toolbar or the middle of the map; a one-line pill when collapsed, the
+    /// whole checklist when open. It starts as a tutorial and grows into the main way the game talks to
+    /// the player (GAME-DESIGN.md §9.2).
+    pub(super) fn assistant_panel(&mut self, ctx: &egui::Context, area: egui::Rect) {
         let step = self.company.next_step(&self.assets, &self.facts, &self.link);
+        if step.title != self.last_step_title {
+            self.last_step_title = step.title.clone();
+            self.assistant_attention = true;
+        }
+        if !self.ui.show_next_step {
+            return;
+        }
+        if self.ui.assistant_expanded {
+            self.assistant_attention = false;
+        }
         let hint = self.company.stuck_hint(&self.facts);
         let contract = self
             .company
             .contract()
             .map(|c| (c.from.clone(), c.to.clone(), c.seed, c.reward));
         let reqs = self.company.contract_requirements(&self.link, &self.facts);
-        let mut look = false;
-        win95::window(
-            ctx,
-            "Next step",
-            &mut self.ui.show_next_step,
-            egui::pos2(12.0, 98.0),
-            |ui| {
-                ui.set_width(250.0);
-                ui.label(egui::RichText::new(&step.title).strong());
-                ui.label(&step.detail);
-                if let Some((from, to, seed, reward)) = &contract {
-                    ui.add_space(2.0);
-                    ui.label(egui::RichText::new(format!("Council contract: {from} - {to}")).strong());
-                    ui.label(format!(
-                        "{} paid up front, {} on completion",
-                        money(*seed as i64),
-                        money(*reward as i64)
-                    ));
-                    for r in &reqs {
-                        ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+        let expanded = self.ui.assistant_expanded;
+        let (mut toggle, mut hide, mut look) = (false, false, false);
+        let frame = egui::Frame::NONE.fill(win95::FACE).inner_margin(egui::Margin::same(6));
+        let response = egui::Area::new(egui::Id::new("assistant_panel"))
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(egui::pos2(area.left() + 12.0, area.bottom() - 12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                frame.show(ui, |ui| {
+                    ui.set_width(if expanded { 290.0 } else { 330.0 });
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+                        crate::ui::icon_assistant(ui.painter(), rect);
+                        ui.label(egui::RichText::new("Assistant").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .small_button("x")
+                                .on_hover_text("Hide (the toolbar button brings it back)")
+                                .clicked()
+                            {
+                                hide = true;
+                            }
+                            if ui
+                                .small_button(if expanded { "-" } else { "+" })
+                                .on_hover_text(if expanded {
+                                    "Shrink to one line"
+                                } else {
+                                    "Show everything"
+                                })
+                                .clicked()
+                            {
+                                toggle = true;
+                            }
+                        });
+                    });
+                    if !expanded {
+                        ui.add(egui::Label::new(egui::RichText::new(&step.title).strong()).truncate());
+                        return;
                     }
-                }
-                if let Some(h) = hint {
-                    ui.add_space(2.0);
-                    ui.label(egui::RichText::new(h).color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));
-                }
-                if step.hq {
-                    look = ui.button("Show my headquarters").clicked();
-                }
-            },
+                    ui.label(egui::RichText::new(&step.title).strong());
+                    ui.label(&step.detail);
+                    if let Some((from, to, seed, reward)) = &contract {
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new(format!("Council contract: {from} - {to}")).strong());
+                        ui.label(format!(
+                            "{} paid up front, {} on completion",
+                            money(*seed as i64),
+                            money(*reward as i64)
+                        ));
+                        for r in &reqs {
+                            ui.label(format!("{} {}", if r.met { "[x]" } else { "[ ]" }, r.text));
+                        }
+                    }
+                    if let Some(h) = hint {
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new(h).color(egui::Color32::from_rgb(0x90, 0x30, 0x10)));
+                    }
+                    if step.hq {
+                        look = ui.button("Show my headquarters").clicked();
+                    }
+                })
+            });
+        win95::bevel(
+            &ctx.layer_painter(response.response.layer_id),
+            response.response.rect,
+            true,
         );
+        if toggle {
+            self.ui.assistant_expanded = !self.ui.assistant_expanded;
+        }
+        if hide {
+            self.ui.show_next_step = false;
+        }
         if look {
             self.look_at_hq();
             self.ui.show_hq = true;

@@ -79,6 +79,9 @@ impl StarcityApp {
                 for &(x, z) in &plan.tiles {
                     (lo, hi) = ((lo.0.min(x), lo.1.min(z)), (hi.0.max(x), hi.1.max(z)));
                 }
+                if plan.blocked.is_none() {
+                    self.show_cost(plan.cost(), plan.terraform_steps * crate::network::TERRAFORM_COST);
+                }
                 self.site_hint = Some(match plan.blocked {
                     Some(why) => why.message(kind).to_string(),
                     None if plan.terraform_steps > 0 => format!(
@@ -105,6 +108,9 @@ impl StarcityApp {
             }
             Tool::Boat => {
                 let water = self.sea().is_water(tile.0, tile.1);
+                if water {
+                    self.show_cost(company::FERRY, 0);
+                }
                 self.site_hint = Some(if water {
                     "Click to put a ferry here".to_string()
                 } else {
@@ -126,6 +132,9 @@ impl StarcityApp {
                     .at(tile)
                     .and_then(|id| self.terminals.get(id))
                     .is_some_and(|t| t.kind() == Kind::Airport);
+                if airport {
+                    self.show_cost(company::PLANE, 0);
+                }
                 self.site_hint = Some(if airport {
                     "Click to park a plane here".to_string()
                 } else {

@@ -107,6 +107,10 @@ pub struct UiState {
     pub show_hq: bool,
     /// The Next Step panel (GAME-DESIGN.md §9.2); on by default.
     pub show_next_step: bool,
+    /// The Assistant shows its whole checklist, not just a one-line pill.
+    pub assistant_expanded: bool,
+    /// Set for one frame when the player asks to look at the headquarters.
+    pub go_hq: bool,
     /// Set for one frame when the player asks to centre the view on the island.
     pub go_home: bool,
 }
@@ -175,6 +179,8 @@ pub struct ToolbarInfo<'a> {
     pub unlocked: &'a dyn Fn(Tool) -> bool,
     /// The tool the next step points at.
     pub suggested: Option<Tool>,
+    /// The Assistant has something new to say: its button glows.
+    pub assistant_attention: bool,
 }
 
 pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
@@ -196,6 +202,28 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
             s.go_home = true;
         }
         home.on_hover_text("Centre on island (Home)");
+        let hq = win95::tool_button(ui, SIZE, false, icon_hq);
+        if hq.clicked() {
+            s.go_hq = true;
+        }
+        hq.on_hover_text("Centre on your headquarters");
+        let assistant = win95::tool_button_ex(
+            ui,
+            SIZE,
+            s.show_next_step && s.assistant_expanded,
+            true,
+            info.assistant_attention && !(s.show_next_step && s.assistant_expanded),
+            icon_assistant,
+        );
+        if assistant.clicked() {
+            if s.show_next_step {
+                s.assistant_expanded = !s.assistant_expanded;
+            } else {
+                s.show_next_step = true;
+                s.assistant_expanded = true;
+            }
+        }
+        assistant.on_hover_text("Your Assistant: shows what to do next");
         win95::separator(ui, SIZE);
         for (i, (label, tools)) in groups.iter().enumerate() {
             if i > 0 {
@@ -580,6 +608,69 @@ pub fn icon_projection(p: &Painter, r: Rect, flat: f32) {
         let w = lerp((1.0 - k * k).sqrt(), 1.0) * 0.95;
         p.line_segment([at(-w, k * 0.95), at(w, k * 0.95)], line);
     }
+}
+
+/// The headquarters: a little office with a flag.
+fn icon_hq(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(
+        Rect::from_two_pos(at(0.15, 0.95), at(0.85, 0.35)),
+        0.0,
+        Color32::from_rgb(0xc8, 0xc0, 0xa8),
+    );
+    p.rect_filled(
+        Rect::from_two_pos(at(0.1, 0.35), at(0.9, 0.25)),
+        0.0,
+        Color32::from_rgb(0x50, 0x54, 0x60),
+    );
+    for (x, y) in [(0.28, 0.5), (0.5, 0.5), (0.72, 0.5), (0.28, 0.72), (0.72, 0.72)] {
+        p.rect_filled(
+            Rect::from_center_size(at(x, y), vec2(r.width() * 0.13, r.height() * 0.13)),
+            0.0,
+            Color32::from_rgb(0x30, 0x58, 0x90),
+        );
+    }
+    p.rect_filled(
+        Rect::from_two_pos(at(0.44, 0.95), at(0.56, 0.78)),
+        0.0,
+        Color32::from_rgb(0x6b, 0x45, 0x23),
+    );
+    p.line_segment([at(0.5, 0.25), at(0.5, 0.02)], Stroke::new(1.5, Color32::BLACK));
+    p.rect_filled(
+        Rect::from_two_pos(at(0.5, 0.02), at(0.78, 0.14)),
+        0.0,
+        Color32::from_rgb(0xd0, 0x20, 0x20),
+    );
+}
+
+/// The Assistant: a friendly face in a speech bubble.
+pub fn icon_assistant(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    let bubble = Rect::from_two_pos(at(0.02, 0.05), at(0.98, 0.78));
+    p.rect_filled(bubble, r.width() * 0.2, Color32::from_rgb(0xff, 0xf4, 0xb0));
+    p.rect_stroke(
+        bubble,
+        r.width() * 0.2,
+        Stroke::new(1.0, Color32::BLACK),
+        egui::StrokeKind::Inside,
+    );
+    p.add(egui::Shape::convex_polygon(
+        vec![at(0.25, 0.76), at(0.2, 0.98), at(0.48, 0.76)],
+        Color32::from_rgb(0xff, 0xf4, 0xb0),
+        Stroke::new(1.0, Color32::BLACK),
+    ));
+    let eye = Color32::BLACK;
+    p.circle_filled(at(0.36, 0.34), r.width() * 0.07, eye);
+    p.circle_filled(at(0.64, 0.34), r.width() * 0.07, eye);
+    p.add(egui::Shape::line(
+        (0..=8)
+            .map(|i| {
+                let t = i as f32 / 8.0;
+                at(0.32 + 0.36 * t, 0.5 + 0.1 * (std::f32::consts::PI * t).sin())
+            })
+            .collect(),
+        Stroke::new(1.5, eye),
+    ));
 }
 
 fn icon_island(p: &Painter, r: Rect) {

@@ -18,7 +18,7 @@ pub const SIGNAL: u32 = 30;
 pub const TRAIN: u32 = 5_000;
 /// Moving one terrain corner by one block. Gentler than building the track itself
 /// would suggest, so that crossing hills is a cost and not a wall.
-pub const TERRAFORM_STEP: u32 = 25;
+pub const TERRAFORM_STEP: u32 = crate::network::TERRAFORM_COST;
 
 pub fn terraform_cost(plan: &crate::network::Plan) -> u32 {
     plan.terraform_steps * TERRAFORM_STEP

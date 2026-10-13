@@ -161,7 +161,7 @@ pub struct Plan {
 pub const PIECE_COST: u32 = 100;
 /// Price of moving one terrain corner by one block. Levelling a tile costs
 /// several times more than the track laid on it.
-pub const TERRAFORM_COST: u32 = 150;
+pub const TERRAFORM_COST: u32 = 25;
 
 impl Plan {
     pub fn from_pieces(pieces: Vec<Piece>) -> Plan {

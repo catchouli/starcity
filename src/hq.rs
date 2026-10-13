@@ -63,6 +63,53 @@ pub fn choose_town(towns: &Towns) -> Option<TownId> {
         .map(|(_, id)| id)
 }
 
+/// The ground work for a plot with this north-west tile: levels all 16 tiles to one height (the
+/// lowest corner under the middle), moving corners by at most 3 blocks and never disturbing anything
+/// built nearby. `None` if the plot hits a road, track, water or another building site, or the ground
+/// is too steep. Houses on the plot are fine: they are cleared.
+pub fn plot_levelling(
+    world: &World,
+    towns: &Towns,
+    roads: &Layer,
+    rails: &Layer,
+    anchor: (i32, i32),
+) -> Option<Vec<((i32, i32), u16)>> {
+    use crate::terrain::edit::Corners;
+    let mut corners = Corners::with_limits(world, 3, 120);
+    let h = corners
+        .tile(anchor.0 + PLOT / 2, anchor.1 + PLOT / 2)?
+        .iter()
+        .copied()
+        .min()?;
+    for dz in 0..PLOT {
+        for dx in 0..PLOT {
+            let t = (anchor.0 + dx, anchor.1 + dz);
+            if !world.in_bounds(t.0, t.1)
+                || roads.get(t.0, t.1) != 0
+                || rails.get(t.0, t.1) != 0
+                || towns.occupied.get(t.0, t.1) > 1
+                || world.surface(t.0, t.1).is_none_or(|(b, _)| b <= world.sea_level)
+            {
+                return None;
+            }
+            if !corners.level(t.0, t.1, h) {
+                return None;
+            }
+        }
+    }
+    // Moving ground must not disturb anything built beside the plot.
+    for (x, z) in corners.affected_tiles() {
+        let inside = (anchor.0..anchor.0 + PLOT).contains(&x) && (anchor.1..anchor.1 + PLOT).contains(&z);
+        let built = roads.get(x, z) != 0 || rails.get(x, z) != 0 || towns.occupied.get(x, z) > 1;
+        let house = towns.occupied.get(x, z) == 1;
+        // A house outside the plot can't sit on moved ground either.
+        if !inside && (built || house) && corners.surface(x, z) != world.surface(x, z) {
+            return None;
+        }
+    }
+    Some(corners.changes())
+}
+
 /// Finds flat, clear ground for the plot close to the town centre, clears any
 /// houses on it, and reserves it. `None` if the town has no room.
 /// Whether a plot with this north-west tile is flat, dry and clear (houses are fine: they get
