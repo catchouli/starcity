@@ -376,6 +376,8 @@ pub struct Company {
     pub goals: Vec<Goal>,
     /// What the world's events are doing to income and costs (§10.9).
     pub world: crate::events::Mods,
+    /// The charter's Planet priority makes building dearer (§1.2).
+    pub build_factor: f32,
     goals_year: i32,
     goal_base: [u32; cargo::COUNT],
 }
@@ -399,6 +401,7 @@ impl Company {
             effects: Default::default(),
             goals: Vec::new(),
             world: Default::default(),
+            build_factor: 1.0,
             goals_year: 0,
             goal_base: [0; cargo::COUNT],
             contracts: Vec::new(),
@@ -536,7 +539,7 @@ impl Company {
     /// Pays for something. Returns false (and charges nothing) if there isn't the money.
     /// What a construction job costs after generative design has had a look at it.
     pub fn build_price(&self, cost: u32) -> u32 {
-        (cost as f32 * (1.0 - self.effects.build_discount)).round() as u32
+        (cost as f32 * (1.0 - self.effects.build_discount) * self.build_factor).round() as u32
     }
 
     pub fn spend(&mut self, item: Item, cost: u32) -> bool {

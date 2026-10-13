@@ -53,6 +53,17 @@ const INDUSTRY: Reach = Reach {
     across: &[0, 1, -1, 2, -2, 3, -3],
 };
 
+/// One line between two towns (their centres), or nothing, with everything rolled back if it can't
+/// be built. What the People agents use to reach a town nobody serves.
+pub fn build_line_between(rw: &mut Railway, a: (i32, i32), b: (i32, i32)) -> Option<Line> {
+    let saved = (rw.rails.clone(), rw.stations.clone());
+    let line = try_line(rw, a, b, &TOWN, &TOWN);
+    if line.is_none() {
+        (*rw.rails, *rw.stations) = saved;
+    }
+    line
+}
+
 /// Builds up to `max` lines between the nearest pairs of towns.
 pub fn build_lines(rw: &mut Railway, towns: &Towns, max: usize) -> Vec<Line> {
     let mut pairs = Vec::new();

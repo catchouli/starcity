@@ -1,5 +1,6 @@
 mod agents;
 mod catalog_ui;
+mod charter_ui;
 mod company_ui;
 mod compute_ui;
 mod craft;
@@ -155,6 +156,11 @@ pub struct StarcityApp {
     space_launches: u32,
     /// Fractions of an agent action carried to the next month.
     agent_budget: f32,
+    /// The governor's charter, the Wellbeing ledger (0–100) and the ending once 2050 closes.
+    charter: crate::charter::Charter,
+    wellbeing: f32,
+    ending_shown: bool,
+    ending: Option<crate::charter::Ending>,
     /// Rockets in flight: (x, z, seconds since lift-off).
     rockets: Vec<(f32, f32, f32)>,
     launch_rng: u64,
@@ -240,6 +246,7 @@ impl StarcityApp {
                 show_fund: crate::devtools::DevTools::window("fund"),
                 #[cfg(target_arch = "wasm32")]
                 show_fund: false,
+                show_charter: false,
                 year: 2000,
                 look_override: std::env::var("STARCITY_LOOK").ok().and_then(|v| {
                     win95::Look::ALL
@@ -310,6 +317,10 @@ impl StarcityApp {
             news: Vec::new(),
             space_launches: 0,
             agent_budget: 0.0,
+            charter: Default::default(),
+            wellbeing: 0.0,
+            ending_shown: false,
+            ending: None,
             rockets: Vec::new(),
             launch_rng: 0x2545_F491_4F6C_DD1D,
             last_event_date: 2000.0,
@@ -344,6 +355,10 @@ impl StarcityApp {
         #[cfg(not(target_arch = "wasm32"))]
         if crate::devtools::DevTools::window("news") {
             app.news.push(6);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if crate::devtools::DevTools::window("charter") {
+            app.ui.show_charter = true;
         }
         if demo {
             app.start_demo();
@@ -689,6 +704,9 @@ impl StarcityApp {
         self.industry_clock = 0.0;
         self.compute = Default::default();
         self.compute_alloc = Default::default();
+        self.charter = Default::default();
+        self.ending_shown = false;
+        self.ending = None;
         self.news.clear();
         self.last_event_date = self.clock.year_f64() as f32;
         self.remesh_tiles(rs, &levelled);
@@ -2274,6 +2292,8 @@ impl eframe::App for StarcityApp {
         self.compute_window(&ctx);
         self.fund_window(&ctx);
         self.news_window(&ctx);
+        self.charter_window(&ctx);
+        self.ending_window(&ctx);
         self.train_buy_window(&ctx);
         self.hq_window(&ctx);
         if self.bankrupt_window(&ctx) {

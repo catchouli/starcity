@@ -35,6 +35,7 @@ impl StarcityApp {
         self.compute_month();
         self.space_month();
         self.agents_month();
+        self.governor_month();
         let mut moved = vec![0u32; self.industries.list.len()];
         for (id, cargo, units) in made {
             let ind = &self.industries.list[id];
@@ -227,7 +228,8 @@ impl StarcityApp {
                 self.launch_rng ^= self.launch_rng << 17;
                 let roll = (self.launch_rng >> 11) as f32 / (1u64 << 53) as f32;
                 let l = crate::space::launch(date, roll);
-                self.company.earn(crate::company::Item::Launches, l.revenue);
+                let reach = if self.charter_active() { self.charter.launch_factor() } else { 1.0 };
+                self.company.earn(crate::company::Item::Launches, (l.revenue as f32 * reach) as u32);
                 self.company.charge(crate::company::Item::Running, l.cost);
                 self.space_launches += 1;
                 let (cx, cz) = self.industries.list[i].centre();

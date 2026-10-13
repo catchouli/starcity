@@ -3,6 +3,7 @@ mod boats;
 mod camera;
 mod cargo;
 mod catalog;
+mod charter;
 mod clock;
 mod clouds;
 mod compute;

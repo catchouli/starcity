@@ -107,6 +107,7 @@ pub struct UiState {
     pub show_hq: bool,
     pub show_compute: bool,
     pub show_fund: bool,
+    pub show_charter: bool,
     /// Force a look instead of the one the year brings.
     pub look_override: Option<win95::Look>,
     /// The year, so looks from later decades stay locked.
@@ -197,6 +198,10 @@ pub fn menu_bar(ui: &mut Ui, s: &mut UiState, meter: &Meter) -> UiActions {
             }
             if ui.button("Fund an industry").clicked() {
                 s.show_fund = true;
+                ui.close();
+            }
+            if ui.button("Charter and ledgers").clicked() {
+                s.show_charter = true;
                 ui.close();
             }
         });

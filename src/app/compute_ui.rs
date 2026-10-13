@@ -13,7 +13,8 @@ impl StarcityApp {
 
     /// The year the world's technology has reached for this company: the calendar year plus the Tech Pace.
     pub(super) fn tech_year(&self) -> i32 {
-        self.year + self.company.effects.tech_pace.floor() as i32
+        let reach = if self.year >= super::charter_ui::CHARTER_FROM { self.charter.tech_bonus() } else { 0.0 };
+        self.year + (self.company.effects.tech_pace + reach).floor() as i32
     }
 
     /// Re-works what the programs are doing from the allocation and last month's compute.

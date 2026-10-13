@@ -530,6 +530,7 @@ impl StarcityApp {
     pub(super) fn finance_window(&mut self, ctx: &egui::Context) {
         let mut open = self.ui.show_finance;
         let value = self.company.value(&self.assets);
+        let wellbeing = self.wellbeing;
         let world_now = crate::events::active_titles(self.clock.year_f64() as f32, self.params.seed);
         let (mut borrow, mut repay) = (false, false);
         let c = &self.company;
@@ -546,6 +547,7 @@ impl StarcityApp {
                 ui.label(money(value));
                 ui.end_row();
             });
+            ui.label(format!("Wellbeing {:.0} / 100 (Company → Charter and ledgers)", wellbeing));
             for title in &world_now {
                 ui.label(egui::RichText::new(format!("In the news: {title}")).color(win95::warn()));
             }
