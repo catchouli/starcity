@@ -230,11 +230,13 @@ pub fn buses(models: &Models, world: &World, buses: &crate::buses::Buses) -> Pla
         .list
         .iter()
         .filter_map(|b| {
-            let model = models.pick(Role::RoadVehicle, "bus", b.born, 0)?;
+            let truck = b.cargo != crate::cargo::Cargo::Passengers;
+            let model = models.pick(Role::RoadVehicle, if truck { "truck" } else { "bus" }, b.born, 0)?;
             let (p, dir) = b.placement();
+            let colour = if truck { [200, 120, 40] } else { [40, 110, 200] };
             Some((
                 model,
-                ModelInstance::at([p.x, world.height_at(p.x, p.y), p.y], yaw_of(dir)).tinted([40, 110, 200]),
+                ModelInstance::at([p.x, world.height_at(p.x, p.y), p.y], yaw_of(dir)).tinted(colour),
             ))
         })
         .collect()

@@ -123,6 +123,9 @@ pub struct Terminal {
     pub site: Site,
     /// Passengers waiting (fractional while they trickle in).
     pub waiting: f32,
+    /// Freight waiting at a road stop, and how well each cargo is served there.
+    pub stock: crate::cargo::Stock,
+    pub service: [crate::cargo::Service; crate::cargo::COUNT],
 }
 
 impl Terminal {
@@ -194,6 +197,8 @@ impl Terminals {
             name,
             site,
             waiting: 0.0,
+            stock: Default::default(),
+            service: [Default::default(); crate::cargo::COUNT],
         };
         for t in terminal.tiles() {
             self.by_tile.insert(t, id);

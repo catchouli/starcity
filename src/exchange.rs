@@ -22,22 +22,43 @@ pub fn accrue(station: &mut Station, people: f32, now: f64) {
     }
 }
 
+/// Somewhere cargo waits: a station, or a road stop.
+pub trait Holder {
+    fn rating(&self, cargo: Cargo) -> f32;
+    fn add(&mut self, cargo: Cargo, units: f32);
+}
+
+impl Holder for Station {
+    fn rating(&self, cargo: Cargo) -> f32 {
+        self.service[cargo.index()].rating
+    }
+    fn add(&mut self, cargo: Cargo, units: f32) {
+        self.stock.add(cargo, units);
+    }
+}
+
+impl Holder for crate::terminals::Terminal {
+    fn rating(&self, cargo: Cargo) -> f32 {
+        self.service[cargo.index()].rating
+    }
+    fn add(&mut self, cargo: Cargo, units: f32) {
+        self.stock.add(cargo, units);
+    }
+}
+
 /// An industry's output reaching the stations that serve it: the best rating decides how much of it
 /// is collected at all (66% or better takes everything), and the stations share that in proportion
 /// to their ratings. Returns the whole units that were handed over.
-pub fn collect(stations: &mut [&mut Station], cargo: Cargo, units: u32) -> u32 {
-    let best = stations
-        .iter()
-        .map(|s| s.service[cargo.index()].rating)
-        .fold(0.0f32, f32::max);
-    let total: f32 = stations.iter().map(|s| s.service[cargo.index()].rating).sum();
+pub fn collect(stations: &mut [&mut dyn Holder], cargo: Cargo, units: u32) -> u32 {
+    let best = stations.iter().map(|s| s.rating(cargo)).fold(0.0f32, f32::max);
+    let total: f32 = stations.iter().map(|s| s.rating(cargo)).sum();
     if best <= 0.0 || total <= 0.0 {
         return 0;
     }
     let taken = (units as f32 * cargo::share(best).min(1.0)).floor();
     for s in stations.iter_mut() {
-        let part = taken * s.service[cargo.index()].rating / total;
-        s.stock.add(cargo, part);
+        let part = taken * s.rating(cargo) / total;
+        s.add(cargo, part);
     }
     taken as u32
 }
@@ -242,6 +263,30 @@ mod tests {
     }
 
     fn exchange_collect(station: &mut Station, cargo: Cargo, units: u32) {
-        collect(&mut [station], cargo, units);
+        collect(&mut [station as &mut dyn Holder], cargo, units);
+    }
+
+    #[test]
+    fn road_stops_collect_from_industries_beside_stations() {
+        use crate::cargo::{Service, Stock};
+        use crate::terminals::{Site, Terminals};
+        let mut terminals = Terminals::default();
+        let id = terminals.build(Site::BusStop { tile: (5, 5) }, "Pit Lane".into());
+        let mut station = Station {
+            id: 0,
+            name: String::new(),
+            tiles: vec![(9, 9)],
+            stock: Stock::default(),
+            service: [Service::default(); crate::cargo::COUNT],
+            people: None,
+        };
+        station.service[Cargo::Coal.index()].rating = 0.75;
+        let stop = terminals.list.get_mut(&id).unwrap();
+        stop.service[Cargo::Coal.index()].rating = 0.25;
+        let got = collect(&mut [&mut station as &mut dyn Holder, stop as &mut dyn Holder], Cargo::Coal, 100);
+        assert_eq!(got, 100, "the best rating (75%) takes it all");
+        let stop = &terminals.list[&id];
+        assert_eq!(station.stock.get(Cargo::Coal), 75);
+        assert_eq!(stop.stock.get(Cargo::Coal), 25, "shared by rating");
     }
 }

@@ -93,6 +93,13 @@ pub const BUSES: [Craft; 4] = [
     Craft { name: "Autonomous pod bus", price: 12_000, speed: 2.2, capacity: 60, running: 200, from: 2032, to: 2200 },
 ];
 
+pub const TRUCKS: [Craft; 4] = [
+    Craft { name: "Small truck", price: 1_500, speed: 1.3, capacity: 10, running: 220, from: 1950, to: 2010 },
+    Craft { name: "Truck", price: 3_000, speed: 1.6, capacity: 20, running: 380, from: 1985, to: 2200 },
+    Craft { name: "Heavy truck", price: 5_000, speed: 1.9, capacity: 32, running: 600, from: 2005, to: 2200 },
+    Craft { name: "Autonomous hauler", price: 9_000, speed: 2.6, capacity: 40, running: 250, from: 2030, to: 2200 },
+];
+
 pub const PLANES: [Craft; 4] = [
     Craft { name: "Sparrow", price: 9_000, speed: 7.0, capacity: 16, running: 900, from: 1950, to: 2030 },
     Craft { name: "Kite", price: 24_000, speed: 9.0, capacity: 40, running: 2_200, from: 1990, to: 2200 },

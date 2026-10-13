@@ -2,7 +2,7 @@
 //! windows, the props that draw them, passenger loading, and the demo.
 
 use super::*;
-use crate::catalog::{BOATS, BUSES, PLANES};
+use crate::catalog::{BOATS, BUSES, PLANES, TRUCKS};
 use crate::sea::Sea;
 use crate::terminals::{Blockers, Kind, OrderEdit, Orders, SitePlan, TerminalId, plan_airport, plan_port};
 use crate::terrain::{BLOCK_HEIGHT, edit};
@@ -145,19 +145,24 @@ impl StarcityApp {
                     kind: if road { HighlightKind::Cursor } else { HighlightKind::Bulldoze },
                 })
             }
-            Tool::Bus => {
+            Tool::Bus | Tool::Truck => {
                 let stop = self
                     .terminals
                     .at(tile)
                     .and_then(|id| self.terminals.get(id))
                     .is_some_and(|t| t.kind() == Kind::BusStop);
+                let (price, what) = if tool == Tool::Bus {
+                    (BUSES[self.buy_bus].price, "bus")
+                } else {
+                    (TRUCKS[self.buy_truck].price, "truck")
+                };
                 if stop {
-                    self.show_cost(BUSES[self.buy_bus].price, 0);
+                    self.show_cost(price, 0);
                 }
                 self.site_hint = Some(if stop {
-                    "Click to put a bus here".to_string()
+                    format!("Click to put a {what} here")
                 } else {
-                    "Click a bus stop to put a bus there".to_string()
+                    format!("Click a road stop to put a {what} there")
                 });
                 Some(Highlight {
                     a: tile,
@@ -256,10 +261,11 @@ impl StarcityApp {
                 self.show_message(&format!("Built {name}"), now);
                 Vec::new()
             }
-            Tool::Bus => {
+            Tool::Bus | Tool::Truck => {
                 match self.terminals.at(tile) {
                     Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::BusStop) => {
-                        let model = BUSES[self.buy_bus];
+                        let model = if tool == Tool::Bus { BUSES[self.buy_bus] } else { TRUCKS[self.buy_truck] };
+                        let cargo = if tool == Tool::Bus { Cargo::Passengers } else { self.truck_cargo };
                         if !self.can_add_vehicle(model.price) {
                             return Vec::new();
                         }
@@ -267,12 +273,13 @@ impl StarcityApp {
                             self.company.spend(Item::Vehicles, model.price);
                             if let Some(b) = self.buses.get_mut(id) {
                                 (b.speed, b.capacity, b.price, b.running) = (model.speed, model.capacity, model.price, model.running);
+                                b.cargo = cargo;
                             }
                             self.selected_craft = Some(Craft::Bus(id));
                             self.props_changed = true;
                         }
                     }
-                    _ => self.show_message("Buses start at a bus stop", now),
+                    _ => self.show_message("Buses and trucks start at a road stop", now),
                 }
                 Vec::new()
             }
@@ -373,9 +380,17 @@ impl StarcityApp {
 
     /// Once a second: people near each terminal turn up to wait.
     pub(super) fn tick_terminals(&mut self) {
+        let now = self.clock.days();
         for t in self.terminals.list.values_mut() {
             let people = self.towns.population_near(&t.tiles()) as f32;
             t.waiting = (t.waiting + people * 0.01).min(500.0);
+            if t.kind() == Kind::BusStop {
+                for c in Cargo::ALL {
+                    if c != Cargo::Passengers {
+                        t.service[c.index()].update(now, t.stock.get(c), 1.0);
+                    }
+                }
+            }
         }
     }
 
@@ -391,6 +406,12 @@ impl StarcityApp {
             .chain(plane_calls.into_iter().map(|(id, t)| (Craft::Plane(id), t)))
             .chain(bus_calls.into_iter().map(|(id, t)| (Craft::Bus(id), t)));
         for (craft, at) in calls {
+            if let Craft::Bus(id) = craft {
+                if self.buses.get(id).is_some_and(|b| b.cargo != Cargo::Passengers) {
+                    self.truck_arrives(id, at);
+                    continue;
+                }
+            }
             let Some(terminal) = self.terminals.list.get_mut(&at) else {
                 continue;
             };
@@ -424,6 +445,46 @@ impl StarcityApp {
                 town.delivered += delivered;
             }
         }
+    }
+
+    /// A truck at a road stop: what the industries and towns nearby take comes off and is paid for,
+    /// then it loads what's waiting of its cargo.
+    fn truck_arrives(&mut self, id: u32, at: TerminalId) {
+        let Some(t) = self.terminals.get(at) else { return };
+        let (tiles, c) = (t.tiles(), t.centre());
+        let Some(truck) = self.buses.get(id) else { return };
+        let (cargo, load) = (truck.cargo, truck.passengers);
+        let room = super::industry_ui::room_for(&self.industries, &self.towns, &tiles, cargo);
+        let units = load.min(room);
+        let came_from = if units > 0 {
+            let truck = self.buses.get_mut(id).unwrap();
+            truck.passengers -= units;
+            truck.boarded.take()
+        } else {
+            None
+        };
+        if units > 0 {
+            let left = self.deliver_to_industries(&tiles, cargo, units);
+            if left > 0 && super::industry_ui::is_for_towns(cargo) {
+                if let Some(town) = self.towns.nearest((c.x as i32, c.y as i32), 30) {
+                    self.towns.list[town as usize].receive(cargo, left);
+                }
+            }
+            self.pay_fare(cargo, units, came_from, (c.x, c.y));
+        }
+        let now = self.clock.days();
+        let year = self.year;
+        let (Some(truck), Some(stop)) = (self.buses.get_mut(id), self.terminals.list.get_mut(&at)) else {
+            return;
+        };
+        let boarding = stop.stock.take(cargo, truck.capacity - truck.passengers);
+        if boarding > 0 {
+            if truck.passengers == 0 {
+                truck.boarded = Some((c.x, c.y, now));
+            }
+            truck.passengers += boarding;
+        }
+        stop.service[cargo.index()].loaded(now, truck.speed, year - truck.born);
     }
 
     /// Pointer clicks: the boat or plane under the cursor, if any.
@@ -504,7 +565,11 @@ impl StarcityApp {
         ui::win95::window(ctx, &title, &mut open, egui::pos2(420.0, 110.0), |ui| {
             ui.set_width(240.0);
             ui.label(status);
-            ui.label(format!("Carrying {} / {} passengers", load.0, load.1));
+            let unit = match craft {
+                Craft::Bus(id) => self.buses.get(id).map_or("passengers", |b| b.cargo.unit()),
+                _ => "passengers",
+            };
+            ui.label(format!("Carrying {} / {} {unit}", load.0, load.1));
             ui.separator();
             ui.label("Orders:");
             if orders.list.is_empty() {
@@ -677,7 +742,12 @@ impl StarcityApp {
                     b.stopped,
                     b.orders.clone(),
                 );
-                self.craft_window(ctx, craft, format!("Bus {}", id + 1), status, load, stopped, orders, Kind::BusStop);
+                let title = if b.cargo == Cargo::Passengers {
+                    format!("Bus {}", id + 1)
+                } else {
+                    format!("Truck {} ({})", id + 1, b.cargo.name().to_lowercase())
+                };
+                self.craft_window(ctx, craft, title, status, load, stopped, orders, Kind::BusStop);
             }
         }
     }

@@ -42,12 +42,7 @@ impl StarcityApp {
         let mut moved = vec![0u32; self.industries.list.len()];
         for (id, cargo, units) in made {
             let ind = &self.industries.list[id];
-            let mut serving: Vec<&mut crate::stations::Station> = self
-                .stations
-                .list
-                .values_mut()
-                .filter(|s| ind.near(&s.tiles, CATCHMENT))
-                .collect();
+            let mut serving = holders_near(&mut self.stations, &mut self.terminals, ind);
             moved[id] += exchange::collect(&mut serving, cargo, units);
         }
         for (ind, m) in self.industries.list.iter_mut().zip(moved) {
@@ -319,12 +314,7 @@ impl StarcityApp {
                     let mut back = Vec::new();
                     for (cargo, units) in to.returns(date) {
                         let ind = &self.industries.list[i];
-                        let mut serving: Vec<&mut crate::stations::Station> = self
-                            .stations
-                            .list
-                            .values_mut()
-                            .filter(|s| ind.near(&s.tiles, CATCHMENT))
-                            .collect();
+                        let mut serving = holders_near(&mut self.stations, &mut self.terminals, ind);
                         let got = exchange::collect(&mut serving, cargo, units);
                         if got > 0 {
                             back.push(format!("{got} {}", cargo.name().to_lowercase()));
@@ -436,6 +426,26 @@ impl StarcityApp {
             self.selected_industry = None;
         }
     }
+}
+
+/// The stations and road stops that serve an industry: everywhere its output can wait.
+fn holders_near<'a>(
+    stations: &'a mut crate::stations::Stations,
+    terminals: &'a mut crate::terminals::Terminals,
+    ind: &Industry,
+) -> Vec<&'a mut dyn exchange::Holder> {
+    let mut out: Vec<&mut dyn exchange::Holder> = Vec::new();
+    for s in stations.list.values_mut().filter(|s| ind.near(&s.tiles, CATCHMENT)) {
+        out.push(s);
+    }
+    for t in terminals
+        .list
+        .values_mut()
+        .filter(|t| t.kind() == crate::terminals::Kind::BusStop && ind.near(&t.tiles(), CATCHMENT))
+    {
+        out.push(t);
+    }
+    out
 }
 
 /// How many units of `cargo` the industries by a station would take (people and mail: any number).

@@ -164,6 +164,9 @@ pub struct StarcityApp {
     buy_boat: usize,
     buy_plane: usize,
     buy_bus: usize,
+    buy_truck: usize,
+    /// The cargo a new truck is built for.
+    truck_cargo: Cargo,
     /// The governor's charter, the Wellbeing ledger (0–100) and the ending once 2050 closes.
     charter: crate::charter::Charter,
     wellbeing: f32,
@@ -335,6 +338,8 @@ impl StarcityApp {
             buy_boat: 0,
             buy_plane: 1,
             buy_bus: 0,
+            buy_truck: 1,
+            truck_cargo: Cargo::Coal,
             charter: Default::default(),
             wellbeing: 0.0,
             ending_shown: false,
@@ -900,7 +905,7 @@ impl StarcityApp {
             }
         }
         let mut sea_terrain = Vec::new();
-        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus) {
+        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck) {
             if let (Some(t), true) = (self.hover_tile, response.clicked_by(primary)) {
                 let now = ctx.input(|i| i.time);
                 sea_terrain = self.sea_tool_click(tool, t, now);
@@ -998,7 +1003,7 @@ impl StarcityApp {
             }
             // While dragging a road or track, the preview shows where it goes.
             Tool::Road | Tool::Rail | Tool::Station | Tool::Expressway if self.drag_start.is_some() => None,
-            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus => self.sea_tool_hover(tool),
+            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck => self.sea_tool_hover(tool),
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -2225,7 +2230,7 @@ impl StarcityApp {
         } else if let Some(hint) = self
             .site_hint
             .as_ref()
-            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus))
+            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus | Tool::Truck))
         {
             hint.clone()
         } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {

@@ -30,9 +30,12 @@ pub struct Bus {
     pub pos: f32,
     pub orders: Orders,
     pub stopped: bool,
+    /// Passengers on a bus; units of `cargo` on a truck.
     pub passengers: u32,
     /// Where and when (game seconds) the passengers on board got on, for the fare.
     pub boarded: Option<(f32, f32, f64)>,
+    /// What it carries: passengers for a bus, a freight cargo for a truck.
+    pub cargo: crate::cargo::Cargo,
     /// From the catalogue.
     pub speed: f32,
     pub capacity: u32,
@@ -130,6 +133,7 @@ impl Buses {
             stopped: false,
             passengers: 0,
             boarded: None,
+            cargo: crate::cargo::Cargo::Passengers,
             speed: 1.5,
             capacity: 40,
             price: 5_500,

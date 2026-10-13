@@ -15,6 +15,7 @@ impl StarcityApp {
             crate::ui::Tool::Boat => (&crate::catalog::BOATS, self.buy_boat, "Buy a boat"),
             crate::ui::Tool::Plane => (&crate::catalog::PLANES, self.buy_plane, "Buy a plane"),
             crate::ui::Tool::Bus => (&crate::catalog::BUSES, self.buy_bus, "Buy a bus"),
+            crate::ui::Tool::Truck => (&crate::catalog::TRUCKS, self.buy_truck, "Buy a truck"),
             _ => return,
         };
         let year = self.tech_year();
@@ -22,9 +23,23 @@ impl StarcityApp {
             chosen = crate::catalog::default_craft(list, year);
         }
         let money = super::company_ui::money;
+        let truck = self.ui.tool == crate::ui::Tool::Truck;
+        let mut cargo = self.truck_cargo;
         let mut open = true;
         win95::window(ctx, title, &mut open, egui::pos2(300.0, 130.0), |ui| {
             ui.set_width(330.0);
+            if truck {
+                ui.horizontal(|ui| {
+                    ui.label("Built for");
+                    egui::ComboBox::from_id_salt("truck cargo")
+                        .selected_text(cargo.name())
+                        .show_ui(ui, |ui| {
+                            for c in crate::cargo::Cargo::ALL.into_iter().filter(|c| *c != crate::cargo::Cargo::Passengers) {
+                                ui.selectable_value(&mut cargo, c, c.name());
+                            }
+                        });
+                });
+            }
             for (i, c) in list.iter().enumerate() {
                 if year < c.from {
                     ui.add_enabled(false, egui::Label::new(format!("{}: coming around {}", c.name, c.from)));
@@ -34,10 +49,11 @@ impl StarcityApp {
                     continue;
                 }
                 let text = format!(
-                    "{}  {}  {} seats  {:.1} tiles/s  {} a year",
+                    "{}  {}  {} {}  {:.1} tiles/s  {} a year",
                     c.name,
                     money(c.price as i64),
                     c.capacity,
+                    if truck { cargo.unit() } else { "seats" },
                     c.speed,
                     money(c.running as i64)
                 );
@@ -49,9 +65,11 @@ impl StarcityApp {
                 egui::RichText::new("Then click water (boats), an airport (planes) or a bus stop (buses) to place it.").small(),
             );
         });
+        self.truck_cargo = cargo;
         match self.ui.tool {
             crate::ui::Tool::Boat => self.buy_boat = chosen,
             crate::ui::Tool::Bus => self.buy_bus = chosen,
+            crate::ui::Tool::Truck => self.buy_truck = chosen,
             _ => self.buy_plane = chosen,
         }
         if !open {

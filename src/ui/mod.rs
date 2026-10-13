@@ -23,6 +23,7 @@ pub enum Tool {
     Plane,
     BusStop,
     Bus,
+    Truck,
     Expressway,
 }
 
@@ -44,6 +45,7 @@ impl Tool {
             Tool::Plane => "Place plane",
             Tool::BusStop => "Build bus stop",
             Tool::Bus => "Place bus",
+            Tool::Truck => "Place truck",
             Tool::Expressway => "Build hyper expressway",
         }
     }
@@ -71,6 +73,9 @@ impl Tool {
             Tool::Plane => "Click an airport to park a plane there, then click the plane to give it airports to visit.",
             Tool::BusStop => "Click a road to put a bus stop on it. People within four tiles wait there.",
             Tool::Bus => "Click a bus stop to put a bus there, then click the bus to give it stops to visit.",
+            Tool::Truck => {
+                "Click a road stop near an industry to put a truck there for one cargo, then give it stops: it loads where the cargo is made and unloads where it's wanted."
+            }
             Tool::Expressway => {
                 "Drag to lay an elevated autonomous expressway (from 2035): straight over hills, towns and lines. Cities it reaches grow much faster."
             }
@@ -100,6 +105,7 @@ impl Tool {
             Tool::Plane => icon_plane(p, r),
             Tool::BusStop => icon_bus_stop(p, r),
             Tool::Bus => icon_bus(p, r),
+            Tool::Truck => icon_truck(p, r),
             Tool::Expressway => icon_expressway(p, r),
         }
     }
@@ -256,7 +262,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     let groups: [(&str, &[Tool]); 6] = [
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
-        ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus]),
+        ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus, Tool::Truck]),
         (
             "Rail",
             &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
@@ -471,6 +477,16 @@ fn icon_expressway(p: &Painter, r: Rect) {
     p.rect_filled(Rect::from_min_max(at(0.0, 0.3), at(1.0, 0.48)), 0.0, Color32::from_rgb(0xc9, 0xce, 0xd8));
     p.rect_filled(Rect::from_min_max(at(0.0, 0.37), at(1.0, 0.41)), 0.0, Color32::from_rgb(0x2a, 0xc8, 0xf0));
     p.rect_filled(Rect::from_min_max(at(0.3, 0.2), at(0.5, 0.3)), 1.0, Color32::from_gray(0xf4));
+}
+
+fn icon_truck(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(Rect::from_min_max(at(0.05, 0.25), at(0.62, 0.75)), 1.0, Color32::from_rgb(0xb0, 0x4a, 0x30));
+    p.rect_filled(Rect::from_min_max(at(0.64, 0.4), at(0.95, 0.75)), 1.0, Color32::from_rgb(0x30, 0x50, 0x80));
+    p.rect_filled(Rect::from_min_max(at(0.72, 0.45), at(0.9, 0.58)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+    for x in [0.22, 0.5, 0.8] {
+        p.circle_filled(at(x, 0.8), r.width() * 0.08, Color32::from_gray(0x20));
+    }
 }
 
 fn icon_bus(p: &Painter, r: Rect) {
