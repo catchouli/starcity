@@ -168,6 +168,8 @@ pub struct StarcityApp {
     charter: crate::charter::Charter,
     wellbeing: f32,
     ending_shown: bool,
+    /// The Convergence Array has been finished: the singularity has come.
+    converged: bool,
     ending: Option<crate::charter::Ending>,
     /// Rockets in flight: (x, z, seconds since lift-off).
     rockets: Vec<(f32, f32, f32)>,
@@ -336,6 +338,7 @@ impl StarcityApp {
             charter: Default::default(),
             wellbeing: 0.0,
             ending_shown: false,
+            converged: false,
             ending: None,
             rockets: Vec::new(),
             skycars: Default::default(),
@@ -728,6 +731,7 @@ impl StarcityApp {
         self.skycars = Default::default();
         self.charter = Default::default();
         self.ending_shown = false;
+        self.converged = false;
         self.ending = None;
         self.news.clear();
         self.last_event_date = self.clock.year_f64() as f32;

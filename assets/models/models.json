@@ -29,6 +29,7 @@
   "industries/ai_campus": {"role": "industry", "kind": "ai_campus", "from": 1900, "to": 2200, "tiles_x": 5, "tiles_z": 5, "weight": 1},
   "industries/chip_fab": {"role": "industry", "kind": "chip_fab", "from": 1900, "to": 2200, "tiles_x": 4, "tiles_z": 4, "weight": 1},
   "industries/coal_mine": {"role": "industry", "kind": "coal_mine", "from": 1900, "to": 2200, "tiles_x": 3, "tiles_z": 3, "weight": 1},
+  "industries/convergence_array": {"role": "industry", "kind": "convergence_array", "from": 1900, "to": 2200, "tiles_x": 5, "tiles_z": 5, "weight": 1},
   "industries/data_centre": {"role": "industry", "kind": "data_centre", "from": 1900, "to": 2200, "tiles_x": 4, "tiles_z": 4, "weight": 1},
   "industries/factory": {"role": "industry", "kind": "factory", "from": 1900, "to": 2200, "tiles_x": 4, "tiles_z": 4, "weight": 1},
   "industries/farm": {"role": "industry", "kind": "farm", "from": 1900, "to": 2200, "tiles_x": 4, "tiles_z": 4, "weight": 1},

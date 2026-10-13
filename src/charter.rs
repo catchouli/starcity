@@ -117,9 +117,9 @@ impl Ending {
     }
 }
 
-/// Reads the ledgers: `tier` is the highest compute milestone reached (§5.9).
-pub fn ending(charter: &Charter, wellbeing: f32, tier: usize) -> Ending {
-    if tier < 4 {
+/// Reads the ledgers: `converged` is whether the Convergence Array was finished (§10.5).
+pub fn ending(charter: &Charter, wellbeing: f32, converged: bool) -> Ending {
+    if !converged {
         Ending::Stagnation
     } else if wellbeing < 50.0 && charter.weights[REACH] + charter.weights[PROFIT] >= 0.5 {
         Ending::Ascension
@@ -162,8 +162,8 @@ mod tests {
         assert!(wellbeing(&good) > 80.0 && wellbeing(&bad) < 30.0);
         let mut greedy = Charter::default();
         greedy.set(REACH, 0.6);
-        assert_eq!(ending(&greedy, wellbeing(&bad), 6), Ending::Ascension);
-        assert_eq!(ending(&Charter::default(), wellbeing(&good), 6), Ending::Commons);
-        assert_eq!(ending(&Charter::default(), wellbeing(&good), 2), Ending::Stagnation);
+        assert_eq!(ending(&greedy, wellbeing(&bad), true), Ending::Ascension);
+        assert_eq!(ending(&Charter::default(), wellbeing(&good), true), Ending::Commons);
+        assert_eq!(ending(&Charter::default(), wellbeing(&good), false), Ending::Stagnation);
     }
 }

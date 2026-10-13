@@ -6,6 +6,9 @@ use crate::charter::{self, Charter, PRIORITIES};
 use crate::ui::win95;
 use eframe::egui;
 
+/// Compute the company must have made before the Convergence Array can wake (the Manager milestone).
+pub const CONVERGENCE_COMPUTE: f64 = 1e15;
+
 /// The year the charter opens: when agents arrive (§5.8).
 pub const CHARTER_FROM: i32 = 2028;
 
@@ -21,9 +24,24 @@ impl StarcityApp {
         self.wellbeing = charter::wellbeing(&people);
         let active = self.charter_active();
         self.company.build_factor = if active { self.charter.build_cost_factor() } else { 1.0 };
+        // The Convergence Array: every delivery made, fully powered, and the compute committed.
+        if !self.converged {
+            let done = self.industries.list.iter().any(|i| {
+                !i.closed
+                    && i.kind == crate::industry::Kind::ConvergenceArray
+                    && crate::industry::Industries::convergence_progress(i) >= 1.0
+                    && i.power >= 0.9
+            }) && self.compute.total >= CONVERGENCE_COMPUTE;
+            if done {
+                self.converged = true;
+                self.ending_shown = true;
+                self.ending = Some(charter::ending(&self.charter, self.wellbeing, true));
+                self.ui.look_override = Some(crate::ui::win95::Look::Ambient);
+            }
+        }
         if !self.ending_shown && self.clock.year_f64() >= 2050.95 {
             self.ending_shown = true;
-            self.ending = Some(charter::ending(&self.charter, self.wellbeing, self.compute.tier));
+            self.ending = Some(charter::ending(&self.charter, self.wellbeing, self.converged));
         }
     }
 

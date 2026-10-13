@@ -129,6 +129,8 @@ pub fn build_freight(rw: &mut Railway, industries: &crate::industry::Industries,
         (Kind::Spaceport, Kind::RegolithWorks, Cargo::Regolith),
         (Kind::Spaceport, Kind::FusionPlant, Cargo::Helium3),
         (Kind::Spaceport, Kind::NanoFab, Cargo::RareMetals),
+        (Kind::NanoFab, Kind::ConvergenceArray, Cargo::NanoGoods),
+        (Kind::RegolithWorks, Kind::ConvergenceArray, Cargo::LunarGlass),
     ];
     let centre = |i: &crate::industry::Industry| (i.tile.0 + i.size() / 2, i.tile.1 + i.size() / 2);
     let mut lines = Vec::new();

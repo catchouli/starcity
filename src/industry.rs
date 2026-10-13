@@ -43,10 +43,11 @@ pub enum Kind {
     RegolithWorks,
     FusionPlant,
     NanoFab,
+    ConvergenceArray,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 20] = [
+    pub const ALL: [Kind; 21] = [
         Kind::CoalMine,
         Kind::IronOreMine,
         Kind::Forest,
@@ -67,6 +68,7 @@ impl Kind {
         Kind::RegolithWorks,
         Kind::FusionPlant,
         Kind::NanoFab,
+        Kind::ConvergenceArray,
     ];
 
     /// The model kind in `assets/models/industries/`.
@@ -92,6 +94,7 @@ impl Kind {
             Kind::RegolithWorks => "regolith_works",
             Kind::FusionPlant => "fusion_plant",
             Kind::NanoFab => "nano_fab",
+            Kind::ConvergenceArray => "convergence_array",
         }
     }
 
@@ -117,6 +120,7 @@ impl Kind {
             Kind::RegolithWorks => "Regolith works",
             Kind::FusionPlant => "Fusion plant",
             Kind::NanoFab => "Nano-fabricator",
+            Kind::ConvergenceArray => "Convergence Array",
         }
     }
 
@@ -125,7 +129,7 @@ impl Kind {
         match self {
             Kind::CoalMine | Kind::IronOreMine | Kind::Forest | Kind::Sawmill | Kind::FoodPlant | Kind::ServerFarm | Kind::SilicaQuarry | Kind::OilWell => 3,
             Kind::Farm | Kind::PowerStation | Kind::SteelMill | Kind::Factory | Kind::ChipFab | Kind::DataCentre | Kind::Refinery | Kind::RegolithWorks | Kind::FusionPlant | Kind::NanoFab => 4,
-            Kind::AiCampus | Kind::Spaceport => 5,
+            Kind::AiCampus | Kind::Spaceport | Kind::ConvergenceArray => 5,
         }
     }
 
@@ -142,6 +146,7 @@ impl Kind {
             Kind::RegolithWorks => 150_000,
             Kind::FusionPlant => 400_000,
             Kind::NanoFab => 300_000,
+            Kind::ConvergenceArray => 5_000_000,
             k if k.is_primary() => 20_000,
             _ => 40_000,
         }
@@ -155,6 +160,7 @@ impl Kind {
             Kind::RegolithWorks => 2032,
             Kind::FusionPlant => 2035,
             Kind::NanoFab => 2040,
+            Kind::ConvergenceArray => 2046,
             Kind::AiCampus => 2020,
             _ => 2000,
         }
@@ -181,7 +187,8 @@ impl Kind {
             | Kind::Spaceport
             | Kind::RegolithWorks
             | Kind::FusionPlant
-            | Kind::NanoFab => 1.0,
+            | Kind::NanoFab
+            | Kind::ConvergenceArray => 1.0,
             Kind::OilWell => 3.0,
         }
     }
@@ -201,6 +208,12 @@ impl Kind {
             Kind::RegolithWorks => &[(Cargo::Regolith, 1)],
             Kind::FusionPlant => &[(Cargo::Helium3, 1)],
             Kind::NanoFab => &[(Cargo::RareMetals, 1), (Cargo::Goods, 1)],
+            Kind::ConvergenceArray => &[
+                (Cargo::RareMetals, 600),
+                (Cargo::NanoGoods, 600),
+                (Cargo::Helium3, 300),
+                (Cargo::LunarGlass, 600),
+            ],
             Kind::Spaceport => &[(Cargo::Fuel, crate::space::FUEL), (Cargo::Goods, crate::space::PAYLOAD)],
             _ => &[],
         }
@@ -228,7 +241,8 @@ impl Kind {
             | Kind::DataCentre
             | Kind::AiCampus
             | Kind::Spaceport
-            | Kind::FusionPlant => &[],
+            | Kind::FusionPlant
+            | Kind::ConvergenceArray => &[],
         }
     }
 
@@ -267,6 +281,7 @@ impl Kind {
             Kind::RegolithWorks => 60,
             Kind::FusionPlant => 20,
             Kind::NanoFab => 40,
+            Kind::ConvergenceArray => 1,
         }
     }
 
@@ -285,6 +300,7 @@ impl Kind {
             Kind::RegolithWorks => 30.0,
             Kind::FusionPlant => -400.0,
             Kind::NanoFab => 40.0,
+            Kind::ConvergenceArray => 200.0,
             _ => 0.0,
         }
     }
@@ -355,7 +371,10 @@ impl Industry {
 
     /// How many units of `cargo` it would take now.
     pub fn room(&self, cargo: Cargo) -> u32 {
-        if self.kind.inputs().iter().any(|&(c, _)| c == cargo) {
+        if self.kind == Kind::ConvergenceArray {
+            let need = self.kind.inputs().iter().find(|&&(c, _)| c == cargo).map_or(0, |&(_, n)| n);
+            need.saturating_sub(self.stock[cargo.index()])
+        } else if self.kind.inputs().iter().any(|&(c, _)| c == cargo) {
             STOCK_CAP.saturating_sub(self.stock[cargo.index()])
         } else {
             0
@@ -380,6 +399,19 @@ pub const OCCUPIED: u8 = 3;
 impl Industries {
     pub fn at(&self, tile: (i32, i32)) -> Option<usize> {
         self.by_tile.get(&tile).copied()
+    }
+
+    /// The Convergence Array's progress: the share of each delivery it still needs that has arrived (0 to 1).
+    pub fn convergence_progress(ind: &Industry) -> f32 {
+        let inputs = ind.kind.inputs();
+        if inputs.is_empty() {
+            return 0.0;
+        }
+        inputs
+            .iter()
+            .map(|&(c, n)| (ind.stock[c.index()] as f32 / n as f32).min(1.0))
+            .sum::<f32>()
+            / inputs.len() as f32
     }
 
     pub fn get(&self, id: usize) -> Option<&Industry> {
@@ -538,6 +570,10 @@ impl Industries {
                 let burn = ind.stock[fuel].min(kind.batches());
                 ind.stock[fuel] -= burn;
                 ind.made_last_month = burn;
+                continue;
+            }
+            // The Array is a building site: what's delivered stays there.
+            if kind == Kind::ConvergenceArray {
                 continue;
             }
             if kind == Kind::Spaceport && ind.pad_closed > 0 {
@@ -714,6 +750,7 @@ impl Ctx<'_> {
             Kind::Spaceport => (town >= 30.0 && self.near_water(ci, 10)).then(|| 1.0 / (1.0 + town / 80.0)),
             Kind::RegolithWorks | Kind::NanoFab => (10.0..45.0).contains(&town).then(|| 1.0 - town / 45.0),
             Kind::FusionPlant => (12.0..40.0).contains(&town).then_some(1.0),
+            Kind::ConvergenceArray => (20.0..70.0).contains(&town).then(|| 1.0 / (1.0 + town / 70.0)),
         }?;
         Some(rule)
     }
@@ -1177,5 +1214,22 @@ mod tests {
         assert!(made.iter().any(|&(i, c, _)| i == fab && c == Cargo::NanoGoods));
         assert!(made.iter().any(|&(i, c, _)| i == works && c == Cargo::LunarGlass));
         assert!(ind.list[fusion].stock[Cargo::Helium3.index()] < 40, "it burns Helium-3");
+    }
+
+    #[test]
+    fn the_convergence_array_keeps_what_it_is_given_until_it_has_enough() {
+        let mut ind = Industries::default();
+        let array = ind.add(Kind::ConvergenceArray, (0, 0));
+        assert_eq!(ind.list[array].room(Cargo::Helium3), 300);
+        assert_eq!(ind.deliver(array, Cargo::Helium3, 500), 300, "only what it still needs");
+        ind.deliver(array, Cargo::RareMetals, 200);
+        ind.month();
+        assert_eq!(ind.list[array].stock[Cargo::Helium3.index()], 300, "a building site, not a factory");
+        let p = Industries::convergence_progress(&ind.list[array]);
+        assert!((p - (1.0 + 200.0 / 600.0) / 4.0).abs() < 1e-4, "{p}");
+        for (c, n) in [(Cargo::RareMetals, 400), (Cargo::NanoGoods, 600), (Cargo::LunarGlass, 600)] {
+            ind.deliver(array, c, n);
+        }
+        assert_eq!(Industries::convergence_progress(&ind.list[array]), 1.0);
     }
 }

@@ -467,6 +467,22 @@ pub(super) fn is_for_towns(cargo: Cargo) -> bool {
 
 fn describe(ui: &mut egui::Ui, ind: &Industry, date: f32) {
     let kind = ind.kind;
+    if kind == crate::industry::Kind::ConvergenceArray {
+        ui.label("The great project: when every delivery is made, it has full power and your company has made enough compute, the singularity comes.");
+        for &(cargo, need) in kind.inputs() {
+            win95::check_row(
+                ui,
+                ind.stock[cargo.index()] >= need,
+                &format!("{}: {} / {need} {}", cargo.name(), ind.stock[cargo.index()].min(need), cargo.unit()),
+            );
+        }
+        win95::check_row(ui, ind.power >= 0.9, &format!("Power: {:.0}% of {} MW", ind.power * 100.0, kind.power_mw()));
+        ui.label(format!(
+            "Compute needed: {} made in all",
+            crate::compute::show(super::charter_ui::CONVERGENCE_COMPUTE)
+        ));
+        return;
+    }
     if kind == crate::industry::Kind::Spaceport {
         let cost = crate::space::operating_cost(date).round() as i64;
         ui.label(format!(

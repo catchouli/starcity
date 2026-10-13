@@ -832,6 +832,15 @@ model("props/express_pod", "prop", "express_pod", [
     **{"from": 2030, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
 
 
+industry("convergence_array", "convergence_array", 5, [pad(5, mat("ArrayPad", "#dfe3ea")),
+    cyl("Spire", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (0.0, 1.6, 0.0), 0.35, 3.2, seg=20, rtop=0.05),
+    box("Ring1", mat("ArrayGlow", "#c9a6ff", emissive=1.0), (0.0, 1.0, 0.0), (3.6, 0.08, 0.08)), box("Ring2", mat("ArrayGlow", "#c9a6ff", emissive=1.0), (0.0, 1.0, 0.0), (0.08, 0.08, 3.6)),
+    cyl("Dish1", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (1.6, 0.4, 1.6), 0.4, 0.8, seg=14),
+    cyl("Dish2", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (-1.6, 0.4, -1.6), 0.4, 0.8, seg=14),
+    cyl("Dish3", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (1.6, 0.4, -1.6), 0.4, 0.8, seg=14),
+    cyl("Dish4", mat("ArrayChrome", "#e8eef6", metallic=0.9, roughness=0.08), (-1.6, 0.4, 1.6), 0.4, 0.8, seg=14)])
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)
