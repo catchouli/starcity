@@ -97,6 +97,8 @@ pub struct StarcityApp {
     sea_ms: f32,
     terminals: Terminals,
     boats: Boats,
+    /// The company's buses (§7.2).
+    buses: crate::buses::Buses,
     planes: Planes,
     selected_craft: Option<Craft>,
     selected_terminal: Option<TerminalId>,
@@ -159,6 +161,7 @@ pub struct StarcityApp {
     /// The boat and plane models picked in their buy windows (indices into `catalog::BOATS` / `PLANES`).
     buy_boat: usize,
     buy_plane: usize,
+    buy_bus: usize,
     /// The governor's charter, the Wellbeing ledger (0–100) and the ending once 2050 closes.
     charter: crate::charter::Charter,
     wellbeing: f32,
@@ -285,6 +288,7 @@ impl StarcityApp {
             sea_ms: 0.0,
             terminals: Terminals::default(),
             boats: Boats::default(),
+            buses: Default::default(),
             planes: Planes::default(),
             selected_craft: None,
             selected_terminal: None,
@@ -325,6 +329,7 @@ impl StarcityApp {
             agent_budget: 0.0,
             buy_boat: 0,
             buy_plane: 1,
+            buy_bus: 0,
             charter: Default::default(),
             wellbeing: 0.0,
             ending_shown: false,
@@ -554,6 +559,7 @@ impl StarcityApp {
         self.props_changed = true;
         self.track_version += 1;
         let (ports, boats, airports, planes) = self.demo_sea_and_air();
+        let bus_lines = self.demo_buses();
         log::info!(
             "demo: {ports} ports, {} boats, {airports} airports, {} planes",
             self.boats.list.len(),
@@ -561,7 +567,7 @@ impl StarcityApp {
         );
         self.message = Some((
             format!(
-                "Demo: {} rail, {freight_trains} freight trains, {boats} ferries, {planes} planes",
+                "Demo: {} rail, {freight_trains} freight trains, {boats} ferries, {planes} planes, {bus_lines} bus lines",
                 lines.len()
             ),
             10.0,
@@ -671,6 +677,7 @@ impl StarcityApp {
         self.trains.year = year;
         self.vehicles.year = year;
         self.boats.year = year;
+        self.buses.year = year;
         self.planes.year = year;
         self.towns.year = year;
         self.static_changed = true;
@@ -726,6 +733,7 @@ impl StarcityApp {
         self.sea = None;
         self.terminals = Terminals::default();
         self.boats = Boats::default();
+        self.buses = Default::default();
         self.planes = Planes::default();
         self.selected_craft = None;
         self.selected_terminal = None;
@@ -878,7 +886,7 @@ impl StarcityApp {
             }
         }
         let mut sea_terrain = Vec::new();
-        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane) {
+        if matches!(tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus) {
             if let (Some(t), true) = (self.hover_tile, response.clicked_by(primary)) {
                 let now = ctx.input(|i| i.time);
                 sea_terrain = self.sea_tool_click(tool, t, now);
@@ -975,7 +983,7 @@ impl StarcityApp {
             }
             // While dragging a road or track, the preview shows where it goes.
             Tool::Road | Tool::Rail | Tool::Station if self.drag_start.is_some() => None,
-            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane => self.sea_tool_hover(tool),
+            Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus => self.sea_tool_hover(tool),
             _ => self.hover_tile.map(|t| Highlight {
                 a: t,
                 b: t,
@@ -1295,6 +1303,7 @@ impl StarcityApp {
             placed.extend(props::trains(&self.models, &self.world, &self.trains));
             placed.extend(props::road_vehicles(&self.models, &self.world, &self.vehicles));
             placed.extend(props::boats(&self.models, &self.world, &self.boats));
+            placed.extend(props::buses(&self.models, &self.world, &self.buses));
             placed.extend(props::planes(&self.models, &self.world, &self.planes));
             placed.extend(props::rockets(&self.models, &self.world, &self.rockets));
             placed.extend(props::skycars(&self.models, &self.skycars));
@@ -2176,7 +2185,7 @@ impl StarcityApp {
         } else if let Some(hint) = self
             .site_hint
             .as_ref()
-            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane))
+            .filter(|_| matches!(self.ui.tool, Tool::Port | Tool::Airport | Tool::Boat | Tool::Plane | Tool::BusStop | Tool::Bus))
         {
             hint.clone()
         } else if let (Tool::Train, Some(_)) = (self.ui.tool, self.hover_tile) {

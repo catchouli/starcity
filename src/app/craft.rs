@@ -2,7 +2,7 @@
 //! windows, the props that draw them, passenger loading, and the demo.
 
 use super::*;
-use crate::catalog::{BOATS, PLANES};
+use crate::catalog::{BOATS, BUSES, PLANES};
 use crate::sea::Sea;
 use crate::terminals::{Blockers, Kind, OrderEdit, Orders, SitePlan, TerminalId, plan_airport, plan_port};
 use crate::terrain::{BLOCK_HEIGHT, edit};
@@ -13,6 +13,7 @@ use glam::Vec3Swizzles as _;
 pub(super) enum Craft {
     Boat(u32),
     Plane(u32),
+    Bus(u32),
 }
 
 enum CraftAction {
@@ -128,6 +129,42 @@ impl StarcityApp {
                     },
                 })
             }
+            Tool::BusStop => {
+                let road = self.roads.get(tile.0, tile.1) != 0 && self.terminals.at(tile).is_none();
+                if road {
+                    self.show_cost(self.company.build_price(company::BUS_STOP), 0);
+                }
+                self.site_hint = Some(if road {
+                    format!("Build a bus stop: £{}", thousands(company::BUS_STOP))
+                } else {
+                    "Bus stops go on a road".to_string()
+                });
+                Some(Highlight {
+                    a: tile,
+                    b: tile,
+                    kind: if road { HighlightKind::Cursor } else { HighlightKind::Bulldoze },
+                })
+            }
+            Tool::Bus => {
+                let stop = self
+                    .terminals
+                    .at(tile)
+                    .and_then(|id| self.terminals.get(id))
+                    .is_some_and(|t| t.kind() == Kind::BusStop);
+                if stop {
+                    self.show_cost(BUSES[self.buy_bus].price, 0);
+                }
+                self.site_hint = Some(if stop {
+                    "Click to put a bus here".to_string()
+                } else {
+                    "Click a bus stop to put a bus there".to_string()
+                });
+                Some(Highlight {
+                    a: tile,
+                    b: tile,
+                    kind: if stop { HighlightKind::Cursor } else { HighlightKind::Bulldoze },
+                })
+            }
             Tool::Plane => {
                 let airport = self
                     .terminals
@@ -204,6 +241,41 @@ impl StarcityApp {
                 }
                 Vec::new()
             }
+            Tool::BusStop => {
+                if self.roads.get(tile.0, tile.1) == 0 || self.terminals.at(tile).is_some() {
+                    self.show_message("Bus stops go on a road", now);
+                    return Vec::new();
+                }
+                if !self.pay(Item::Construction, company::BUS_STOP) {
+                    return Vec::new();
+                }
+                let id = self.terminals.build(crate::terminals::Site::BusStop { tile }, String::new());
+                self.name_terminal(id);
+                self.static_changed = true;
+                let name = self.terminals.get(id).map(|t| t.name.clone()).unwrap_or_default();
+                self.show_message(&format!("Built {name}"), now);
+                Vec::new()
+            }
+            Tool::Bus => {
+                match self.terminals.at(tile) {
+                    Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::BusStop) => {
+                        let model = BUSES[self.buy_bus];
+                        if !self.can_add_vehicle(model.price) {
+                            return Vec::new();
+                        }
+                        if let Some(id) = self.buses.spawn(&self.roads, tile) {
+                            self.company.spend(Item::Vehicles, model.price);
+                            if let Some(b) = self.buses.get_mut(id) {
+                                (b.speed, b.capacity, b.price, b.running) = (model.speed, model.capacity, model.price, model.running);
+                            }
+                            self.selected_craft = Some(Craft::Bus(id));
+                            self.props_changed = true;
+                        }
+                    }
+                    _ => self.show_message("Buses start at a bus stop", now),
+                }
+                Vec::new()
+            }
             Tool::Plane => {
                 match self.terminals.at(tile) {
                     Some(at) if self.terminals.get(at).is_some_and(|t| t.kind() == Kind::Airport) => {
@@ -234,7 +306,11 @@ impl StarcityApp {
     pub(super) fn name_terminal(&mut self, id: TerminalId) {
         let Some(t) = self.terminals.get(id) else { return };
         let (kind, centre) = (t.kind(), t.centre());
-        let word = if kind == Kind::Port { "Harbour" } else { "Airport" };
+        let word = match kind {
+            Kind::Port => "Harbour",
+            Kind::Airport => "Airport",
+            Kind::BusStop => "Stop",
+        };
         let near = self.towns.nearest((centre.x as i32, centre.y as i32), 40);
         let name = match near {
             None => format!("{word} {}", id + 1),
@@ -274,6 +350,7 @@ impl StarcityApp {
                 self.towns.occupied.set(tile.0, tile.1, 0);
             }
             self.boats.forget_terminal(t.id);
+            self.buses.forget_terminal(t.id);
             self.planes.forget_terminal(t.id, &self.world, &self.terminals);
             if self.selected_terminal == Some(t.id) {
                 self.selected_terminal = None;
@@ -290,6 +367,7 @@ impl StarcityApp {
             busy |= self.boats.update(step, sea, &self.terminals);
         }
         busy |= self.planes.update(step, &self.world, &self.terminals);
+        busy |= self.buses.update(step, &self.roads, &self.terminals);
         busy
     }
 
@@ -305,11 +383,13 @@ impl StarcityApp {
     /// (crediting the nearest town) and load from the waiting passengers.
     pub(super) fn handle_craft_arrivals(&mut self) {
         let boat_calls = std::mem::take(&mut self.boats.arrivals);
+        let bus_calls = std::mem::take(&mut self.buses.arrivals);
         let plane_calls = std::mem::take(&mut self.planes.arrivals);
         let calls = boat_calls
             .into_iter()
             .map(|(id, t)| (Craft::Boat(id), t))
-            .chain(plane_calls.into_iter().map(|(id, t)| (Craft::Plane(id), t)));
+            .chain(plane_calls.into_iter().map(|(id, t)| (Craft::Plane(id), t)))
+            .chain(bus_calls.into_iter().map(|(id, t)| (Craft::Bus(id), t)));
         for (craft, at) in calls {
             let Some(terminal) = self.terminals.list.get_mut(&at) else {
                 continue;
@@ -321,6 +401,10 @@ impl StarcityApp {
                 },
                 Craft::Plane(id) => match self.planes.get_mut(id) {
                     Some(p) => (&mut p.passengers, &mut p.boarded, p.capacity),
+                    None => continue,
+                },
+                Craft::Bus(id) => match self.buses.get_mut(id) {
+                    Some(b) => (&mut b.passengers, &mut b.boarded, b.capacity),
                     None => continue,
                 },
             };
@@ -351,8 +435,13 @@ impl StarcityApp {
             .iter()
             .map(|b| (Craft::Boat(b.id), Vec3::new(b.pos.x, sea_y + 0.2, b.pos.y)));
         let planes = self.planes.list.iter().map(|p| (Craft::Plane(p.id), p.pos));
+        let buses = self.buses.list.iter().map(|b| {
+            let (p, _) = b.placement();
+            (Craft::Bus(b.id), Vec3::new(p.x, self.world.height_at(p.x, p.y) + 0.2, p.y))
+        });
         boats
             .chain(planes)
+            .chain(buses)
             .filter_map(|(c, p)| Some((c, project(view_proj, rect, p)?.distance(pos))))
             .filter(|&(_, d)| d < 28.0)
             .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -400,16 +489,17 @@ impl StarcityApp {
         } else {
             orders.current % orders.list.len()
         };
-        let (noun, plural) = if kind == Kind::Port {
-            ("port", "ports")
-        } else {
-            ("airport", "airports")
+        let (noun, plural) = match kind {
+            Kind::Port => ("port", "ports"),
+            Kind::Airport => ("airport", "airports"),
+            Kind::BusStop => ("bus stop", "bus stops"),
         };
         let mut action = None;
         let mut open = true;
         let salt = match craft {
             Craft::Boat(id) => ("boat", id),
             Craft::Plane(id) => ("plane", id),
+            Craft::Bus(id) => ("bus", id),
         };
         ui::win95::window(ctx, &title, &mut open, egui::pos2(420.0, 110.0), |ui| {
             ui.set_width(240.0);
@@ -458,7 +548,14 @@ impl StarcityApp {
                     action = Some(CraftAction::Find);
                 }
                 if ui
-                    .button(format!("Remove {}", if kind == Kind::Port { "boat" } else { "plane" }))
+                    .button(format!(
+                        "Remove {}",
+                        match kind {
+                            Kind::Port => "boat",
+                            Kind::Airport => "plane",
+                            Kind::BusStop => "bus",
+                        }
+                    ))
                     .clicked()
                 {
                     action = Some(CraftAction::Remove);
@@ -473,6 +570,7 @@ impl StarcityApp {
         let focus = match craft {
             Craft::Boat(id) => self.boats.get(id).map(|b| b.pos),
             Craft::Plane(id) => self.planes.get(id).map(|p| p.pos.xz()),
+            Craft::Bus(id) => self.buses.get(id).map(|b| b.placement().0),
         };
         match action {
             CraftAction::Edit(edit) => {
@@ -481,6 +579,7 @@ impl StarcityApp {
                 match craft {
                     Craft::Boat(id) => self.boats.set_orders(id, o),
                     Craft::Plane(id) => self.planes.set_orders(id, o),
+                    Craft::Bus(id) => self.buses.set_orders(id, o),
                 }
             }
             CraftAction::ToggleStop => match craft {
@@ -494,11 +593,17 @@ impl StarcityApp {
                         p.stopped = !p.stopped;
                     }
                 }
+                Craft::Bus(id) => {
+                    if let Some(b) = self.buses.get_mut(id) {
+                        b.stopped = !b.stopped;
+                    }
+                }
             },
             CraftAction::Remove => {
                 match craft {
                     Craft::Boat(id) => self.boats.remove(id),
                     Craft::Plane(id) => self.planes.remove(id),
+                    Craft::Bus(id) => self.buses.remove(id),
                 }
                 self.selected_craft = None;
                 self.props_changed = true;
@@ -561,6 +666,19 @@ impl StarcityApp {
                     Kind::Airport,
                 );
             }
+            Craft::Bus(id) => {
+                let Some(b) = self.buses.get(id) else {
+                    self.selected_craft = None;
+                    return;
+                };
+                let (status, load, stopped, orders) = (
+                    b.status(&self.terminals),
+                    (b.passengers, b.capacity),
+                    b.stopped,
+                    b.orders.clone(),
+                );
+                self.craft_window(ctx, craft, format!("Bus {}", id + 1), status, load, stopped, orders, Kind::BusStop);
+            }
         }
     }
 
@@ -568,6 +686,7 @@ impl StarcityApp {
     pub(super) fn terminal_window(&mut self, ctx: &egui::Context) {
         let Some(id) = self.selected_terminal else { return };
         let calling = self.boats.list.iter().filter(|b| b.orders.list.contains(&id)).count()
+            + self.buses.list.iter().filter(|b| b.orders.list.contains(&id)).count()
             + self.planes.list.iter().filter(|p| p.orders.list.contains(&id)).count();
         let Some(people) = self.terminals.get(id).map(|t| self.towns.population_near(&t.tiles())) else {
             self.selected_terminal = None;
@@ -576,7 +695,11 @@ impl StarcityApp {
         let Some(t) = self.terminals.list.get_mut(&id) else {
             return;
         };
-        let title = if t.kind() == Kind::Port { "Port" } else { "Airport" };
+        let title = match t.kind() {
+            Kind::Port => "Port",
+            Kind::Airport => "Airport",
+            Kind::BusStop => "Bus stop",
+        };
         let mut open = true;
         ui::win95::window(ctx, title, &mut open, egui::pos2(420.0, 110.0), |ui| {
             ui.set_width(230.0);
@@ -588,10 +711,10 @@ impl StarcityApp {
                 "{} passengers waiting, {people} people nearby",
                 t.waiting as u32
             ));
-            let (single, many) = if t.kind() == Kind::Port {
-                ("boat", "boats")
-            } else {
-                ("plane", "planes")
+            let (single, many) = match t.kind() {
+                Kind::Port => ("boat", "boats"),
+                Kind::Airport => ("plane", "planes"),
+                Kind::BusStop => ("bus", "buses"),
             };
             ui.label(match calling {
                 0 => format!("No {many} call here yet"),
@@ -606,6 +729,51 @@ impl StarcityApp {
 
     /// Demo mode: ferry lines between coastal towns and flights between the
     /// biggest cities. Returns (ports, boats, airports, planes).
+    /// Demo: a bus line across each of the three biggest towns, between two stops on its roads.
+    pub(super) fn demo_buses(&mut self) -> usize {
+        let mut towns: Vec<(u32, (i32, i32))> = self.towns.list.iter().map(|t| (self.towns.population(t.id), t.centre)).collect();
+        towns.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut lines = 0;
+        for &(_, (cx, cz)) in towns.iter().take(3) {
+            let roads: Vec<(i32, i32)> = (cz - 12..=cz + 12)
+                .flat_map(|z| (cx - 12..=cx + 12).map(move |x| (x, z)))
+                .filter(|&(x, z)| {
+                    self.roads.get(x, z) != 0 && self.terminals.at((x, z)).is_none() && self.rails.get(x, z) == 0
+                })
+                .collect();
+            let Some(&a) = roads.iter().min_by_key(|&&(x, z)| (x - cx).abs() + (z - cz).abs()) else {
+                continue;
+            };
+            // The far stop: as far from the first as the roads allow, and reachable.
+            let mut far: Vec<(i32, i32)> = roads.clone();
+            far.sort_by_key(|&(x, z)| -((x - a.0).abs() + (z - a.1).abs()));
+            let Some(b) = far.into_iter().take(12).find(|&b| {
+                let bits = self.roads.get(a.0, a.1);
+                (0..8).map(|i| 1u8 << i).filter(|p| bits & p != 0).any(|piece| {
+                    let seg = crate::vehicles::RoadSeg { tile: a, piece, forward: true };
+                    crate::buses::route(&self.roads, seg, b).is_some()
+                })
+            }) else {
+                continue;
+            };
+            let stops: Vec<TerminalId> = [a, b]
+                .into_iter()
+                .map(|tile| {
+                    let id = self.terminals.build(crate::terminals::Site::BusStop { tile }, String::new());
+                    self.name_terminal(id);
+                    id
+                })
+                .collect();
+            if let Some(id) = self.buses.spawn(&self.roads, a) {
+                self.buses.set_orders(id, Orders::new(vec![stops[1], stops[0]]));
+                lines += 1;
+            }
+        }
+        self.static_changed = true;
+        self.props_changed = true;
+        lines
+    }
+
     pub(super) fn demo_sea_and_air(&mut self) -> (usize, usize, usize, usize) {
         let mut towns: Vec<_> = self
             .towns

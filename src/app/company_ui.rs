@@ -302,8 +302,10 @@ impl StarcityApp {
             ferries: self.boats.list.len() as u32,
             planes: self.planes.list.len() as u32,
             craft_value: self.boats.list.iter().map(|b| b.price).sum::<u32>()
+                + self.buses.list.iter().map(|b| b.price).sum::<u32>()
                 + self.planes.list.iter().map(|p| p.price).sum::<u32>(),
             craft_running: self.boats.list.iter().map(|b| b.running).sum::<u32>()
+                + self.buses.list.iter().map(|b| b.running).sum::<u32>()
                 + self.planes.list.iter().map(|p| p.running).sum::<u32>(),
             road_pieces: self.player_roads,
             rail_pieces: if self.assets_version == self.track_version {
@@ -334,7 +336,7 @@ impl StarcityApp {
             stations: self.stations.list.len() as u32,
             trains: self.assets.trains,
             town_served,
-            vehicles: self.assets.trains + self.assets.ferries + self.assets.planes,
+            vehicles: self.assets.trains + self.assets.ferries + self.assets.planes + self.buses.list.len() as u32,
             compute_sites: self
                 .industries
                 .list

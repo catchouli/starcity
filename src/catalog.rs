@@ -86,6 +86,13 @@ pub const BOATS: [Craft; 3] = [
     Craft { name: "Wavepiercer", price: 40_000, speed: 5.0, capacity: 240, running: 2_600, from: 2032, to: 2200 },
 ];
 
+pub const BUSES: [Craft; 4] = [
+    Craft { name: "Minibus", price: 3_000, speed: 1.4, capacity: 20, running: 300, from: 1950, to: 2015 },
+    Craft { name: "Bus", price: 5_500, speed: 1.5, capacity: 40, running: 500, from: 1980, to: 2200 },
+    Craft { name: "Electric bus", price: 8_000, speed: 1.7, capacity: 50, running: 350, from: 2018, to: 2200 },
+    Craft { name: "Autonomous pod bus", price: 12_000, speed: 2.2, capacity: 60, running: 200, from: 2032, to: 2200 },
+];
+
 pub const PLANES: [Craft; 4] = [
     Craft { name: "Sparrow", price: 9_000, speed: 7.0, capacity: 16, running: 900, from: 1950, to: 2030 },
     Craft { name: "Kite", price: 24_000, speed: 9.0, capacity: 40, running: 2_200, from: 1990, to: 2200 },

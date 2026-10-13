@@ -13,6 +13,8 @@ pub const MONTH_SECONDS: f32 = 30.0;
 pub const ROAD_PIECE: u32 = 25;
 pub const RAIL_PIECE: u32 = 50;
 pub const STATION_TILE: u32 = 200;
+/// A bus stop on a road tile.
+pub const BUS_STOP: u32 = 300;
 pub const SIGNAL: u32 = 30;
 /// A locomotive and two coaches.
 pub const TRAIN: u32 = 5_000;

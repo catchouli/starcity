@@ -14,6 +14,7 @@ impl StarcityApp {
         let (list, mut chosen, title): (&[crate::catalog::Craft], usize, &str) = match self.ui.tool {
             crate::ui::Tool::Boat => (&crate::catalog::BOATS, self.buy_boat, "Buy a boat"),
             crate::ui::Tool::Plane => (&crate::catalog::PLANES, self.buy_plane, "Buy a plane"),
+            crate::ui::Tool::Bus => (&crate::catalog::BUSES, self.buy_bus, "Buy a bus"),
             _ => return,
         };
         let year = self.tech_year();
@@ -44,10 +45,13 @@ impl StarcityApp {
                     chosen = i;
                 }
             }
-            ui.label(egui::RichText::new("Then click water (boats) or an airport (planes) to place it.").small());
+            ui.label(
+                egui::RichText::new("Then click water (boats), an airport (planes) or a bus stop (buses) to place it.").small(),
+            );
         });
         match self.ui.tool {
             crate::ui::Tool::Boat => self.buy_boat = chosen,
+            crate::ui::Tool::Bus => self.buy_bus = chosen,
             _ => self.buy_plane = chosen,
         }
         if !open {

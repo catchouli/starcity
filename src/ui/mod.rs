@@ -21,6 +21,8 @@ pub enum Tool {
     Boat,
     Airport,
     Plane,
+    BusStop,
+    Bus,
 }
 
 impl Tool {
@@ -39,6 +41,8 @@ impl Tool {
             Tool::Boat => "Place ferry",
             Tool::Airport => "Build airport",
             Tool::Plane => "Place plane",
+            Tool::BusStop => "Build bus stop",
+            Tool::Bus => "Place bus",
         }
     }
 
@@ -63,6 +67,8 @@ impl Tool {
             Tool::Boat => "Click water to place a ferry, then click it to give it ports to visit.",
             Tool::Airport => "Click to build an airport (O turns the runway). It levels the ground for a price.",
             Tool::Plane => "Click an airport to park a plane there, then click the plane to give it airports to visit.",
+            Tool::BusStop => "Click a road to put a bus stop on it. People within four tiles wait there.",
+            Tool::Bus => "Click a bus stop to put a bus there, then click the bus to give it stops to visit.",
         }
     }
 
@@ -87,6 +93,8 @@ impl Tool {
             Tool::Boat => icon_boat(p, r),
             Tool::Airport => icon_airport(p, r),
             Tool::Plane => icon_plane(p, r),
+            Tool::BusStop => icon_bus_stop(p, r),
+            Tool::Bus => icon_bus(p, r),
         }
     }
 }
@@ -242,7 +250,7 @@ pub fn toolbar(ui: &mut Ui, s: &mut UiState, info: &ToolbarInfo) {
     let groups: [(&str, &[Tool]); 5] = [
         ("", &[Tool::Pointer]),
         ("Land", &[Tool::Bulldoze]),
-        ("Roads", &[Tool::Road, Tool::RemoveRoad]),
+        ("Roads", &[Tool::Road, Tool::RemoveRoad, Tool::BusStop, Tool::Bus]),
         (
             "Rail",
             &[Tool::Rail, Tool::Signal, Tool::Station, Tool::Train, Tool::RemoveRail],
@@ -445,6 +453,28 @@ fn icon_plane(p: &Painter, r: Rect) {
         Color32::from_rgb(0xbe, 0x34, 0x2a),
         Stroke::NONE,
     ));
+}
+
+fn icon_bus(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    let body = Color32::from_rgb(0x28, 0x6e, 0xc8);
+    p.rect_filled(Rect::from_min_max(at(0.08, 0.22), at(0.92, 0.78)), 2.0, body);
+    for x in [0.16, 0.36, 0.56] {
+        p.rect_filled(Rect::from_min_max(at(x, 0.3), at(x + 0.14, 0.5)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+    }
+    p.rect_filled(Rect::from_min_max(at(0.76, 0.3), at(0.88, 0.7)), 0.0, Color32::from_rgb(0xcf, 0xe6, 0xf7));
+    for x in [0.26, 0.72] {
+        p.circle_filled(at(x, 0.8), r.width() * 0.09, Color32::from_gray(0x20));
+    }
+}
+
+fn icon_bus_stop(p: &Painter, r: Rect) {
+    let at = |x: f32, y: f32| pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
+    p.rect_filled(Rect::from_min_max(at(0.0, 0.78), at(1.0, 1.0)), 0.0, Color32::from_gray(0x50));
+    p.rect_filled(Rect::from_min_max(at(0.45, 0.25), at(0.53, 0.8)), 0.0, Color32::from_gray(0x60));
+    p.circle_filled(at(0.49, 0.24), r.width() * 0.2, Color32::from_rgb(0xf2, 0xc2, 0x30));
+    p.circle_stroke(at(0.49, 0.24), r.width() * 0.2, Stroke::new(1.0, Color32::from_gray(0x30)));
+    p.text(at(0.49, 0.25), egui::Align2::CENTER_CENTER, "B", egui::FontId::proportional(r.height() * 0.3), Color32::from_gray(0x20));
 }
 
 fn icon_speed(p: &Painter, r: Rect, speed: Speed) {

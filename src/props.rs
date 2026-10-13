@@ -212,9 +212,32 @@ pub fn terminals(models: &Models, world: &World, terminals: &Terminals, year: i3
                     ));
                 }
             }
+            Site::BusStop { tile } => {
+                // A shelter at the corner of the tile, out of the way of the road.
+                let (x, z) = (tile.0 as f32 + 0.85, tile.1 as f32 + 0.85);
+                if let Some(m) = models.pick(Role::Prop, "bus_stop", year, t.id) {
+                    out.push((m, ModelInstance::at([x, world.height_at(x, z), z], 0.0)));
+                }
+            }
         }
     }
     out
+}
+
+/// The company's buses, in the company's colours.
+pub fn buses(models: &Models, world: &World, buses: &crate::buses::Buses) -> Placed {
+    buses
+        .list
+        .iter()
+        .filter_map(|b| {
+            let model = models.pick(Role::RoadVehicle, "bus", b.born, 0)?;
+            let (p, dir) = b.placement();
+            Some((
+                model,
+                ModelInstance::at([p.x, world.height_at(p.x, p.y), p.y], yaw_of(dir)).tinted([40, 110, 200]),
+            ))
+        })
+        .collect()
 }
 
 pub fn boats(models: &Models, world: &World, boats: &Boats) -> Placed {

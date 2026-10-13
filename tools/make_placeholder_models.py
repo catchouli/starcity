@@ -803,6 +803,14 @@ industry("nano_fab", "nano_fab", 4, [pad(4, CONCRETE),
     box("Band", mat("NanoGlow", "#c27aff", emissive=0.9), (-0.2, 0.75, 0.92), (2.6, 0.1, 0.03)), cyl("Vent", STEEL, (1.3, 1.3, -1.1), 0.18, 0.6, seg=10)])
 
 
+model("props/bus_stop", "prop", "bus_stop", [
+    box("Roof", mat("ShelterRoof", "#2a4f9e"), (0.0, 0.32, 0.0), (0.26, 0.03, 0.14)),
+    box("Back", GLASS, (0.0, 0.17, -0.06), (0.24, 0.28, 0.01)),
+    box("Post", STEEL, (0.11, 0.17, 0.05), (0.02, 0.32, 0.02)),
+    box("Sign", mat("StopSign", "#f2c230", emissive=0.3), (-0.13, 0.36, 0.06), (0.06, 0.06, 0.01))],
+    **{"from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1})
+
+
 def main():
     for path, parts, extras in MODELS:
         write_glb(os.path.join(OUT, path + ".glb"), os.path.basename(path), parts, extras)

@@ -29,6 +29,7 @@ const MIN_SEA: u32 = 200;
 pub enum Kind {
     Port,
     Airport,
+    BusStop,
 }
 
 /// An airport's footprint: a rectangle of tiles, which way the runway runs,
@@ -109,6 +110,10 @@ pub enum Site {
         berth: (i32, i32),
     },
     Airport(AirportLayout),
+    /// A stop on a road tile.
+    BusStop {
+        tile: (i32, i32),
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -125,6 +130,7 @@ impl Terminal {
         match self.site {
             Site::Port { .. } => Kind::Port,
             Site::Airport(_) => Kind::Airport,
+            Site::BusStop { .. } => Kind::BusStop,
         }
     }
 
@@ -132,6 +138,7 @@ impl Terminal {
         match self.site {
             Site::Port { tile, .. } => vec![tile],
             Site::Airport(a) => a.tiles(),
+            Site::BusStop { tile } => vec![tile],
         }
     }
 
@@ -140,20 +147,21 @@ impl Terminal {
         match self.site {
             Site::Port { tile, .. } => Vec2::new(tile.0 as f32 + 0.5, tile.1 as f32 + 0.5),
             Site::Airport(a) => a.centre(),
+            Site::BusStop { tile } => Vec2::new(tile.0 as f32 + 0.5, tile.1 as f32 + 0.5),
         }
     }
 
     pub fn berth(&self) -> Option<(i32, i32)> {
         match self.site {
             Site::Port { berth, .. } => Some(berth),
-            Site::Airport(_) => None,
+            Site::Airport(_) | Site::BusStop { .. } => None,
         }
     }
 
     pub fn airport(&self) -> Option<&AirportLayout> {
         match &self.site {
             Site::Airport(a) => Some(a),
-            Site::Port { .. } => None,
+            Site::Port { .. } | Site::BusStop { .. } => None,
         }
     }
 }

@@ -50,6 +50,7 @@
   "planes/plane_2010": {"role": "plane", "kind": "airliner", "from": 2010, "to": 2027, "weight": 1},
   "planes/plane_2028": {"role": "plane", "kind": "airliner", "from": 2028, "to": 2041, "weight": 1},
   "planes/plane_2042": {"role": "plane", "kind": "airliner", "from": 2042, "to": 2100, "weight": 1},
+  "props/bus_stop": {"role": "prop", "kind": "bus_stop", "from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1},
   "props/flying_car": {"role": "prop", "kind": "flying_car", "from": 2028, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1},
   "props/launch_rocket": {"role": "prop", "kind": "rocket", "from": 1900, "to": 2200, "tiles_x": 1, "tiles_z": 1, "weight": 1},
   "props/pier_1995": {"role": "prop", "kind": "pier", "from": 1900, "to": 2029, "weight": 1},

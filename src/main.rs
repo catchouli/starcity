@@ -1,5 +1,6 @@
 mod app;
 mod boats;
+mod buses;
 mod camera;
 mod cargo;
 mod catalog;
